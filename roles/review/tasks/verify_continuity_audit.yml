@@ -1,0 +1,63 @@
+---
+# Independent continuity audit (single-shot, fresh conversation).
+# Runs only when continuity claim matched real prior-round finding.
+# Separate from per-finding verification conversation; adversarial posture matched to severity assessment.
+# Prompt-injection defense: wrap prior-round content in tags, truncate
+# free-text fields consistently. The PRIMARY <finding_data> block (the
+# finding actually under review) stays unbounded, matching established
+# precedent elsewhere in this pipeline.
+
+- name: Render the continuity audit prompt
+  ansible.builtin.set_fact:
+    _continuity_audit_prompt: "{{ lookup('template', role_path + '/templates/verify_continuity_audit_prompt.j2') }}"
+  vars:
+    new_finding: "{{ verify_target_finding }}"
+    claimed_prior: "{{ _continuity_claim_result.claimed_prior_finding }}"
+    claiming_rationale: "{{ verify_result_continues_finding_id_rationale }}"
+
+- name: Call Claude to independently audit the continuity claim
+  aknochow.claude.message:
+    provider: "{{ claude_provider }}"
+    region: "{{ claude_vertex_region if claude_provider == 'vertex' else omit }}"
+    project_id: "{{ claude_vertex_project if claude_provider == 'vertex' else omit }}"
+    api_key: "{{ claude_api_key if claude_provider == 'anthropic' else omit }}"
+    model: "{{ review_verify_model }}"
+    max_tokens: 1024
+    messages:
+      - role: user
+        content: >-
+          Assess the continuity claim described in your system prompt,
+          then call report_continuity_audit exactly once.
+    system: "{{ _continuity_audit_prompt }}"
+    tools:
+      - name: report_continuity_audit
+        description: Report whether a continuity claim between two findings is plausible.
+        input_schema: "{{ continuity_audit_schema }}"
+    tool_choice: { type: "tool", name: "report_continuity_audit" }
+  register: _continuity_audit_call_result
+
+- name: Record this audit call's usage for the pipeline-wide stats summary
+  ansible.builtin.set_fact:
+    pipeline_agent_calls: >-
+      {{ pipeline_agent_calls + [{
+           'target': review_org_repo + '#' + review_number, 'lens': 'verify-continuity-audit',
+           'model': _continuity_audit_call_result.message.model, 'usage': _continuity_audit_call_result.usage
+         }] }}
+
+- name: Extract the audit verdict
+  ansible.builtin.set_fact:
+    _continuity_audit_calls: "{{ _continuity_audit_call_result.tool_calls | selectattr('name', 'equalto', 'report_continuity_audit') | list }}"
+
+# Same "schema required isn't a compliance guarantee" defensive
+# posture as every other report_* tool call in this pass -- neither
+# field here is ever legitimately null (verdict is a required enum,
+# rationale a required string), so ordinary `| default(...)` extraction
+# is safe -- no risk of the continues_finding_id-style stringified-None
+# bug, since nothing here is nullable by design.
+- name: Build this finding's audit_result dict for merge_verify_result (empty if the model never called the tool)
+  ansible.builtin.set_fact:
+    verify_result_audit_result: >-
+      {{ {
+        'verdict': _continuity_audit_calls[0].input.verdict | default('implausible'),
+        'rationale': _continuity_audit_calls[0].input.rationale | default('Continuity audit agent did not populate a rationale.')
+      } if _continuity_audit_calls | length > 0 else {} }}

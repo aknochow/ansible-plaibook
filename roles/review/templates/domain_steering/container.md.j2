@@ -1,0 +1,9 @@
+(target: both agents)
+This diff contains Dockerfile or Containerfile changes. Verify
+base images are pinned to specific tags (not `latest`). Check
+layer ordering — frequently changing layers should be last to
+maximize cache. Verify `COPY` is used instead of `ADD` unless
+tar extraction or URL fetching is needed. Check that `USER` is
+set to non-root for the final stage. Verify multi-stage builds
+don't leak build-time secrets into the final image. Check that
+`RUN` commands are combined where appropriate to reduce layers.

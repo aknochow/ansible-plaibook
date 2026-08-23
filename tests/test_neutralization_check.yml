@@ -1,0 +1,129 @@
+---
+# Deterministic regression test for briefing.yml's neutralization-reference check,
+# using a self-contained git fixture (not a live external target) to reliably test
+# the specific diff shape. Confirms briefing.yml wires diff facts into the plugin correctly.
+#
+# Usage:
+#   ansible-playbook tests/test_neutralization_check.yml
+
+- name: Test briefing.yml's neutralization-reference check standalone
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_delegate_host: ""
+    review_repo_path: "{{ fixture_dir.path }}"
+    review_target_ref: "target_ref"
+    review_source_ref: "source_ref"
+    review_short_sha: "source_ref"
+    review_branch: "test-neutralization-standalone"
+    review_org_repo: "test/neutralization-fixture"
+    review_number: "test-neutralization-standalone"
+    # No shipped default; test supplies placeholder patterns.
+    review_neutralization_org_patterns: ["git.internal.example"]
+
+  tasks:
+    - name: Create a throwaway fixture repo directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: "neutralization-fixture-"
+      register: fixture_dir
+
+    - name: Initialize the fixture repo and configure a commit identity
+      ansible.builtin.command:
+        argv: "{{ item }}"
+        chdir: "{{ fixture_dir.path }}"
+      loop:
+        - [git, init, -q]
+        - [git, config, user.email, "test@test.com"]
+        - [git, config, user.name, "Test"]
+      loop_control:
+        label: "{{ item | join(' ') }}"
+      changed_when: false
+      timeout: 30
+
+    - name: Create the fixture repo's config subdirectory
+      ansible.builtin.file:
+        path: "{{ fixture_dir.path }}/config"
+        state: directory
+        mode: "0755"
+
+    - name: Write the base (target_ref) fixture files
+      ansible.builtin.copy:
+        dest: "{{ fixture_dir.path }}/{{ item.path }}"
+        content: "{{ item.content }}"
+        mode: "0644"
+      loop:
+        - path: config/settings.py
+          content: |
+            GATEWAY_URL = "https://internal.example.com/api"
+        - path: README.md
+          content: |
+            # Project
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Commit and tag the base fixture state as target_ref
+      ansible.builtin.command:
+        argv: "{{ item }}"
+        chdir: "{{ fixture_dir.path }}"
+      loop:
+        - [git, add, -A]
+        - [git, commit, -q, -m, base]
+        - [git, tag, target_ref]
+      loop_control:
+        label: "{{ item | join(' ') }}"
+      changed_when: false
+      timeout: 30
+
+    - name: Write the neutralized-but-incomplete (source_ref) fixture files
+      ansible.builtin.copy:
+        dest: "{{ fixture_dir.path }}/{{ item.path }}"
+        content: "{{ item.content }}"
+        mode: "0644"
+      loop:
+        - path: config/settings.py
+          content: |
+            # config-driven settings, org-neutral by default
+            GATEWAY_URL = "https://internal.example.com/api"
+            # TODO: this still points at git.internal.example internally
+            FALLBACK_URL = "https://git.internal.example/some/repo"
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Commit and tag the incomplete-neutralization state as source_ref
+      ansible.builtin.command:
+        argv: "{{ item }}"
+        chdir: "{{ fixture_dir.path }}"
+      loop:
+        - [git, add, -A]
+        - [git, commit, -q, -m, "neutralize hardcoded org references"]
+        - [git, tag, source_ref]
+      loop_control:
+        label: "{{ item | join(' ') }}"
+      changed_when: false
+      timeout: 30
+
+    - name: Run briefing.yml
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: briefing
+
+    - name: Assert the neutralization check triggered and found the remaining reference
+      ansible.builtin.assert:
+        that:
+          - review_neutralization_check.triggered == true
+          - review_neutralization_check.remaining_refs | length == 1
+          - "'config/settings.py' in review_neutralization_check.remaining_refs[0]"
+          - "'git.internal.example' in review_neutralization_check.remaining_refs[0]"
+
+    - name: Assert the TODO-commented reference was correctly excluded as a comment line
+      ansible.builtin.assert:
+        that:
+          - review_neutralization_check.remaining_refs | select('search', '^config/settings.py:3:') | list | length == 0
+
+    - name: Clean up the fixture repo directory
+      ansible.builtin.file:
+        path: "{{ fixture_dir.path }}"
+        state: absent

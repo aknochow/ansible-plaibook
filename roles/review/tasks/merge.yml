@@ -1,0 +1,199 @@
+---
+# Combines both agents' findings, dedups same file:line hits (keeping
+# the higher severity), and computes the overall score/verdict. Dedup
+# and score/verdict computation are real Python action plugins
+# (action_plugins/dedupe_findings.py,
+# action_plugins/compute_review_scores.py). Two dedup passes are
+# needed because two lenses can independently flag the same
+# underlying code at slightly different line numbers, or quote it
+# with different internal whitespace, despite it being the same real
+# issue.
+
+# A lens model's tool-call generation can serialize `findings` as a
+# JSON-encoded string instead of a native array. A naive `{{ a + b }}`
+# then either raises immediately (one side string, one side list), or
+# silently succeeds as plain string concatenation when both sides are
+# strings, producing invalid-JSON garbage that crashes one step later
+# with a confusing, unrelated-looking error. Coercing each side
+# independently, before any concatenation, prevents both. Deliberately
+# model-agnostic: this checks the runtime type, never the model name,
+# since the underlying quirk isn't guaranteed to be limited to one
+# model.
+- name: Coerce the Security agent's findings to a real list, tolerating a JSON-encoded string
+  coerce_findings_encoding:
+    value: "{{ security_result.structured.findings | default([]) }}"
+    label: "Security lens"
+  register: security_findings_coerce_result
+
+- name: Coerce the Review agent's findings to a real list, tolerating a JSON-encoded string
+  coerce_findings_encoding:
+    value: "{{ review_result.structured.findings | default([]) }}"
+    label: "Review lens"
+  register: review_findings_coerce_result
+
+- name: Combine findings from both agents
+  ansible.builtin.set_fact:
+    combined_findings: "{{ security_findings_coerce_result.findings + review_findings_coerce_result.findings }}"
+
+# A lens agent's finding can echo evidence text verbatim out of the
+# injected "## Prior review" section instead of re-deriving it from
+# the current diff. Runs here, on the raw combined lens findings,
+# before dedup/self-refuted filtering: lens findings are the only ones
+# ever exposed to prior_review_md, so this is the one place in the
+# pipeline where this failure mode can be caught. Sets
+# evidence_status: refuted on any finding whose evidence matches
+# injected prior-round content but doesn't independently appear in the
+# current diff. This is keep-and-annotate, not a silent drop, matching
+# verify.yml's own refutation precedent. Deterministic text-matching,
+# not another prompt admonition: it can't be talked out of firing,
+# because it isn't asking the model anything.
+- name: Flag findings whose evidence echoes injected prior-round content instead of the current diff
+  check_evidence_provenance:
+    findings: "{{ combined_findings }}"
+    prior_review_md: "{{ review_prior_review_md }}"
+    full_diff: "{{ review_full_diff }}"
+  register: evidence_provenance_result
+
+- name: Store the provenance-checked findings
+  ansible.builtin.set_fact:
+    combined_findings: "{{ evidence_provenance_result.findings }}"
+
+# The prompt's validation-chain step tells the model to self-verify
+# each finding and, if refuted, omit it from the findings array
+# entirely. The model does not reliably follow this. See
+# filter_self_refuted_findings.py's module docstring and test fixtures
+# for the documented wordings this catches. The same regexes run in
+# real Python instead of a Jinja rejectattr chain, so the logic is
+# pytest-testable without a full ansible-playbook fixture run.
+- name: Drop self-refuted findings that leaked through despite the prompt instruction
+  filter_self_refuted_findings:
+    findings: "{{ combined_findings }}"
+  register: self_refuted_filter_result
+
+- name: Store the filtered findings
+  ansible.builtin.set_fact:
+    combined_findings: "{{ self_refuted_filter_result.findings }}"
+
+# Guards the filter above against its own regression (e.g. a future
+# edit narrows the pattern and stops catching what it used to).
+- name: Verify no self-refuted findings survived the filter
+  ansible.builtin.assert:
+    that:
+      - combined_findings | selectattr('evidence', 'search', '(?i)refut') | list | length == 0
+      - combined_findings | selectattr('fix', 'search', '(?i)refut|dropping\b|drop(?:ped|ping)? (this|the) finding|'
+             ~ '^\s*(n/?a\b|not applicable)|no\s+(?:\w+\s+){0,2}(?:fix|change|action)\w*\s*(?:is\s+|are\s+|was\s+)?(?:needed|required)|\b(?:is|are)\s+(?:actually\s+|already\s+)?correct\b') | list | length == 0
+      - combined_findings | selectattr('description', 'search', '(?i)no actual (bug|issue|vulnerability|problem)\b') | list | length == 0
+    fail_msg: >-
+      A self-refuted finding survived the drop filter above; the
+      pattern no longer matches what the model is producing.
+    success_msg: "No self-refuted findings present."
+
+# Replaces an accumulator loop, sort, groupby, re-sort, and second
+# groupby with one call to action_plugins/dedupe_findings.py. The
+# re-sort dance existed only because Jinja's groupby filter internally
+# re-sorts by its own grouping key, scrambling whatever order the
+# previous severity-sort established; a single dict tracking
+# best-severity-so-far per key needs none of that. Jinja's groupby is
+# case-insensitive by default, so dedup_key/evidence_dedup_key
+# matching lowercases before comparing, replicated here for identical
+# behavior.
+- name: Deduplicate findings (exact file:line, then file + collapsed evidence text)
+  dedupe_findings:
+    findings: "{{ combined_findings }}"
+    severity_points: "{{ severity_points }}"
+  register: dedupe_result
+
+- name: Store the deduplicated findings
+  ansible.builtin.set_fact:
+    deduped_findings: "{{ dedupe_result.findings }}"
+
+# Deliberately not trusting the self-reported scores.{functionality,
+# security,quality}: a lens can desync from its own findings array,
+# scoring as if a finding still counts while its own validation chain
+# talks it out of that same finding and drops it from the array,
+# without recomputing its score line to match. Deriving the score from
+# deduped_findings makes this self-consistent by construction: it
+# can't desync from what's actually being reported, because it's
+# computed from that.
+#
+# This unifies the computation with verify.yml's refuted-exclusion
+# recompute and explore.yml's post-fold-in verdict recompute into one
+# action plugin (action_plugins/compute_review_scores.py) rather than
+# three hand-duplicated Jinja copies. Scores are on a 0-100 scale.
+#
+# rejectattr('evidence_status', 'equalto', 'refuted') here for the
+# same reason verify.yml's own later recompute excludes refuted
+# findings: check_evidence_provenance above can set evidence_status:
+# refuted on a Critical/Major finding before verify.yml ever runs.
+# verify.yml's own recompute only fires when review_verify_enabled is
+# true, so without this filter here too, a provenance-refuted finding
+# would still count toward the initial score/verdict if that flag is
+# ever disabled.
+- name: Compute scores and verdict from the deduplicated findings
+  compute_review_scores:
+    findings: "{{ deduped_findings | rejectattr('evidence_status', 'equalto', 'refuted') | list }}"
+    severity_points: "{{ severity_points }}"
+  register: score_result
+
+- name: Store the computed scores and verdict
+  ansible.builtin.set_fact:
+    score_functionality: "{{ score_result.score_functionality }}"
+    score_security: "{{ score_result.score_security }}"
+    score_quality: "{{ score_result.score_quality }}"
+    score_overall: "{{ score_result.score_overall }}"
+    review_verdict: "{{ score_result.verdict }}"
+
+# The plugin enforces max(10, 100 - sum(points)), so scores should
+# never fall outside [10, 100]. A value outside that range means the
+# plugin itself regressed, worth failing loudly on rather than
+# silently persisting a nonsensical score to findings.md.
+- name: Verify all scores are within the expected [10, 100] range
+  ansible.builtin.assert:
+    that:
+      - score_functionality | float >= 10 and score_functionality | float <= 100
+      - score_security | float >= 10 and score_security | float <= 100
+      - score_quality | float >= 10 and score_quality | float <= 100
+    fail_msg: >-
+      A lens score is outside [10, 100]: functionality={{ score_functionality }}
+      security={{ score_security }} quality={{ score_quality }}. The
+      compute_review_scores plugin regressed its own max(10, 100 -
+      sum(points)) invariant.
+    success_msg: "All lens scores within [10, 100]."
+
+# Guards the verdict logic against a future regression (e.g. a
+# reintroduced confidence filter, or a severity typo): any surviving
+# Critical or Major means NEEDS_CHANGES, full stop, no confidence
+# carve-out. `confidence` is just another self-reported model field,
+# and letting it silently downgrade the verdict would be the same
+# "trust a self-reported field" failure mode this codebase deliberately
+# avoids elsewhere.
+#
+# rejectattr('evidence_status', 'equalto', 'refuted') here too,
+# matching the exclusion the score computation above already applies:
+# a Critical/Major finding check_evidence_provenance refuted is
+# correctly excluded from review_verdict by score_result above, but
+# stays present in deduped_findings (severity untouched,
+# keep-and-annotate) for rendering. Without this filter, this
+# invariant would see the still-Critical/Major severity, expect
+# NEEDS_CHANGES, and fail on any refuted Critical/Major finding.
+- name: Verify the verdict matches the severity invariant
+  ansible.builtin.assert:
+    that:
+      - >-
+        (deduped_findings | rejectattr('evidence_status', 'equalto', 'refuted')
+         | selectattr('severity', 'in', ['Critical', 'Major']) | list | length > 0)
+        == (review_verdict == 'NEEDS_CHANGES')
+    fail_msg: >-
+      review_verdict ({{ review_verdict }}) doesn't match the severity
+      invariant: {{ deduped_findings | rejectattr('evidence_status', 'equalto', 'refuted')
+      | selectattr('severity', 'in', ['Critical', 'Major']) | list | length }}
+      surviving (non-refuted) Critical/Major finding(s) present. Any
+      surviving Critical or Major must force NEEDS_CHANGES, no exceptions.
+    success_msg: "Verdict matches the severity invariant."
+
+- name: Group deduplicated findings by severity for rendering
+  ansible.builtin.set_fact:
+    findings_critical: "{{ deduped_findings | selectattr('severity', 'equalto', 'Critical') | list }}"
+    findings_major: "{{ deduped_findings | selectattr('severity', 'equalto', 'Major') | list }}"
+    findings_minor: "{{ deduped_findings | selectattr('severity', 'equalto', 'Minor') | list }}"
+    findings_nit: "{{ deduped_findings | selectattr('severity', 'equalto', 'Nit') | list }}"

@@ -1,0 +1,96 @@
+---
+# One gateway target's worth of live verification, included in a loop by
+# live_verification.yml. Split out because `loop` isn't a valid attribute
+# on a `block`.
+
+- name: "Skip -- no bearer token supplied ({{ target_name }})"
+  ansible.builtin.debug:
+    msg: "Skipping {{ target_name }}: set OPENSHELL_BEARER_TOKEN_{{ target_name | upper }} to include it"
+  when: target_name != 'local' and (sandbox_bearer_token | trim | length == 0)
+
+# "local" has no token requirement (plaintext dev gateway) but also isn't
+# always running -- probe it first rather than let sandbox creation fail
+# loudly (and confirm the port itself, not just DNS -- 127.0.0.1 always
+# "resolves").
+- name: "Probe local gateway reachability ({{ target_name }})"
+  when: target_name == 'local'
+  ansible.builtin.wait_for:
+    host: "{{ sandbox_gateway | urlsplit('hostname') }}"
+    port: "{{ sandbox_gateway | urlsplit('port') | default(80, true) }}"
+    timeout: 2
+  register: local_probe
+  ignore_errors: true
+
+- name: "Skip -- gateway not reachable ({{ target_name }})"
+  ansible.builtin.debug:
+    msg: "Skipping local: no gateway listening at {{ sandbox_gateway }}"
+  when: target_name == 'local' and local_probe is failed
+
+- name: "Run the full check ({{ target_name }})"
+  when: >-
+    (target_name == 'local' and local_probe is succeeded)
+    or (target_name != 'local' and sandbox_bearer_token | trim | length > 0)
+  block:
+    - name: "Set up sandbox ({{ target_name }})"
+      ansible.builtin.include_tasks: ../roles/review/tasks/setup_sandbox.yml
+
+    # The block's own `always:` below does NOT fire on its own if this
+    # task goes UNREACHABLE (a broken SSH ProxyCommand, e.g.) -- only on
+    # an ordinary task FAILED. ignore_unreachable here, plus the explicit
+    # fail task right after, converts an UNREACHABLE into an ordinary
+    # FAILED so the existing `always:` teardown actually runs instead of
+    # leaking the sandbox. See docs/sandbox-and-agent-safety.md.
+    - name: "Run an isolated command inside the sandbox ({{ target_name }})"
+      delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+      ignore_unreachable: true
+      ansible.builtin.command: uname -a
+      register: sandbox_uname
+      changed_when: false
+
+    - name: Fail loudly if the sandbox connection was unreachable
+      ansible.builtin.include_tasks: ../roles/review/tasks/fail_if_sandbox_unreachable.yml
+      vars:
+        fail_if_unreachable_result_var: sandbox_uname
+
+    - name: "Show sandboxed result ({{ target_name }})"
+      ansible.builtin.debug:
+        msg: "sandbox({{ target_name }}) reports: {{ sandbox_uname.stdout }}"
+
+    # The sandboxed result feeds into a controller-side Claude call --
+    # never delegated. This is the boundary docs/sandbox-and-agent-safety.md
+    # describes: the sandbox only ever produces data, never makes the LLM
+    # call or acts on the LLM's response itself.
+    - name: "Ask Claude (controller-side) to summarize the sandboxed result ({{ target_name }})"
+      aknochow.claude.message:
+        provider: "{{ claude_provider }}"
+        region: "{{ claude_vertex_region }}"
+        project_id: "{{ claude_vertex_project }}"
+        model: claude-haiku-4-5
+        max_tokens: 64
+        messages:
+          - role: user
+            content: "In one sentence, what OS/kernel does this describe: {{ sandbox_uname.stdout }}"
+      register: claude_result
+
+    - name: "Show Claude result ({{ target_name }})"
+      ansible.builtin.debug:
+        msg: "claude({{ target_name }}): changed={{ claude_result.changed }} text={{ claude_result.text }}"
+
+    - name: "Ask Gemini (controller-side) the same question ({{ target_name }})"
+      aknochow.gemini.generate:
+        backend: vertex
+        project_id: "{{ gemini_vertex_project }}"
+        location: "{{ gemini_vertex_location }}"
+        model: gemini-3.5-flash
+        max_output_tokens: 64
+        contents: "In one sentence, what OS/kernel does this describe: {{ sandbox_uname.stdout }}"
+      register: gemini_result
+
+    - name: "Show Gemini result ({{ target_name }})"
+      ansible.builtin.debug:
+        msg: "gemini({{ target_name }}): changed={{ gemini_result.changed }} text={{ gemini_result.text }}"
+
+  always:
+    - name: "Tear down sandbox ({{ target_name }})"
+      when: sandbox is defined and sandbox.sandbox is defined
+      ansible.builtin.include_tasks: ../roles/review/tasks/teardown_sandbox.yml

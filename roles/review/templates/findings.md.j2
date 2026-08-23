@@ -1,0 +1,208 @@
+{% macro evidence_fence(evidence) -%}
+{%- set backtick_runs = evidence | regex_findall('`+') -%}
+{%- set max_run = (backtick_runs | map('length') | list | max) if backtick_runs else 0 -%}
+{{- '`' * ([max_run + 1, 3] | max) -}}
+{%- endmacro %}
+{% macro verification_block(f) -%}
+{% if f.evidence_status %}
+{% set fence = evidence_fence(f.verification_evidence) %}
+   - **Verification**: {{ {'verified': '✓ Verified', 'refuted': '✗ Refuted — excluded from score', 'inconclusive': '? Inconclusive'}[f.evidence_status] }}{{ ' (requires runtime verification)' if f.requires_execution else '' }}{{ ' (reachability checked via static analysis only — not execution-verified)' if f.used_static_reachability_trace else '' }} — {{ f.verification_rationale }}
+     >
+     > {{ fence }}
+     > {{ f.verification_evidence | regex_replace('\r?\n', '\n     > ') }}
+     > {{ fence }}
+{% if f.severity_status == 'disputed' %}
+   - **Severity re-assessed**: {{ f.original_severity }} → {{ f.severity }} ({{ f.worst_outcome_category }}, reachability: {{ f.reachability }}, trust boundary: {{ f.trust_boundary }}{{ ', silent failure' if f.silent_failure | bool else '' }})
+{% endif %}
+{% if f.continuity_status == 'confirmed' %}
+   - **Continues prior finding** `{{ f.continues_finding_id }}` — {{ f.continuity_rationale }}
+{% elif f.continuity_status == 'refuted' %}
+   - **Continuity claim not upheld** (claimed to continue `{{ f.continues_finding_id }}`) — {{ f.continuity_rationale }}
+{% endif %}
+{% endif %}
+{%- endmacro %}
+## Code Review: {{ briefing_project }} ({{ briefing_branch }})
+
+### Verdict: {{ review_verdict }}
+{% if guardian_forced_needs_changes | default(false) %}
+**Blocked by ai-guardian**: {{ guardian_blocking_findings | length }} finding(s) in a blocking category ({{ guardian_blocking_findings | map(attribute='rule_id') | unique | join(', ') }}) — see Security Scan below. This applies independently of the lens/verify scores and findings above.
+{% endif %}
+
+### Scores
+| Lens | Score | Findings |
+|---|---|---|
+| Functionality | {{ '%.1f' | format(score_functionality | float) }}% | {{ deduped_findings | selectattr('lens', 'equalto', 'Functionality') | list | length }} |
+| Security | {{ '%.1f' | format(score_security | float) }}% | {{ deduped_findings | selectattr('lens', 'equalto', 'Security') | list | length }} |
+| Quality | {{ '%.1f' | format(score_quality | float) }}% | {{ deduped_findings | selectattr('lens', 'equalto', 'Quality') | list | length }} |
+| **Overall** | **{{ '%.1f' | format(score_overall | float) }}%** | |
+
+### Findings
+
+#### Critical
+{% if findings_critical %}
+{% for f in findings_critical %}
+{{ loop.index }}. **[{{ f.lens }}]** **{{ f.file }}:{{ f.line }}** {{ f.description }}
+   - **Evidence**: `{{ f.evidence }}`
+   - **Confidence**: {{ f.confidence }}
+   - **Fix**: {{ f.fix }}
+   - **Points**: {{ ('0 (refuted, would be ' ~ severity_points[f.severity] ~ ')') if f.evidence_status == 'refuted' else severity_points[f.severity] }}
+{{ verification_block(f) -}}
+{% endfor %}
+{% else %}
+None.
+{% endif %}
+
+#### Major
+{% if findings_major %}
+{% for f in findings_major %}
+{{ loop.index }}. **[{{ f.lens }}]** **{{ f.file }}:{{ f.line }}** {{ f.description }}
+   - **Evidence**: `{{ f.evidence }}`
+   - **Confidence**: {{ f.confidence }}
+   - **Fix**: {{ f.fix }}
+   - **Points**: {{ ('0 (refuted, would be ' ~ severity_points[f.severity] ~ ')') if f.evidence_status == 'refuted' else severity_points[f.severity] }}
+{{ verification_block(f) -}}
+{% endfor %}
+{% else %}
+None.
+{% endif %}
+
+#### Minor
+{% if findings_minor %}
+{% for f in findings_minor %}
+{{ loop.index }}. **[{{ f.lens }}]** **{{ f.file }}:{{ f.line }}** {{ f.description }}
+   - **Evidence**: `{{ f.evidence }}`
+   - **Confidence**: {{ f.confidence }}
+   - **Fix**: {{ f.fix }}
+   - **Points**: {{ ('0 (refuted, would be ' ~ severity_points[f.severity] ~ ')') if f.evidence_status == 'refuted' else severity_points[f.severity] }}
+{{ verification_block(f) -}}
+{% endfor %}
+{% else %}
+None.
+{% endif %}
+
+#### Nit
+{% if findings_nit %}
+{% for f in findings_nit %}
+{{ loop.index }}. **[{{ f.lens }}]** **{{ f.file }}:{{ f.line }}** {{ f.description }}
+   - **Evidence**: `{{ f.evidence }}`
+{% endfor %}
+{% else %}
+None.
+{% endif %}
+
+### Path to 100%
+{% set path_findings = (findings_critical + findings_major + findings_minor) | rejectattr('evidence_status', 'equalto', 'refuted') | list %}
+{% if path_findings %}
+Each item is an agent-ready fix prompt — paste into your coding agent
+to apply:
+
+{% for f in path_findings %}
+{{ loop.index }}. **[{{ f.lens }}] {{ f.file }}:{{ f.line }}** (+{{ severity_points[f.severity] }} points)
+   > In `{{ f.file }}` at line {{ f.line }}, `{{ f.evidence }}` — {{ f.description }}
+   > {{ f.fix }}
+{% endfor %}
+{% else %}
+No point-bearing findings — already at 100% on the findings that were scored.
+{% endif %}
+
+### Needs Human Judgment
+LOW-confidence findings above require human verification. This review
+does not understand business context, domain intent, organizational
+constraints, or deployment environment specifics.
+{% if review_completeness_checks.deleted_files or review_completeness_checks.todo_fixme or review_completeness_checks.trailing_whitespace %}
+
+### Completeness Checks
+{% if review_completeness_checks.deleted_files %}
+- **Deleted files**: {{ review_completeness_checks.deleted_files | join(', ') }}
+{% endif %}
+{% if review_completeness_checks.todo_fixme %}
+- **New TODO/FIXME/HACK/XXX markers** ({{ review_completeness_checks.todo_fixme | length }}):
+{% for line in review_completeness_checks.todo_fixme %}
+{% set fence = evidence_fence(line) %}
+  - {{ fence }}{{ line }}{{ fence }}
+{% endfor %}
+{% endif %}
+{% if review_completeness_checks.trailing_whitespace %}
+- **Lines with trailing whitespace**: {{ review_completeness_checks.trailing_whitespace }}
+{% endif %}
+{% endif %}
+{% if review_neutralization_check.remaining_refs %}
+
+### Neutralization Check
+This diff mentions neutralizing hardcoded org-specific references, but
+the following non-comment lines still reference one:
+{% for line in review_neutralization_check.remaining_refs %}
+{% set fence = evidence_fence(line) %}
+- {{ fence }}{{ line }}{{ fence }}
+{% endfor %}
+{% endif %}
+{% if review_checklist.triggered %}
+
+### Project Checklist
+{% for entry in review_checklist.results %}
+- **{{ entry.check }}** — {{ entry.result }}
+{% set fence = evidence_fence(entry.command) %}
+  - Command: {{ fence }}{{ entry.command }}{{ fence }}
+{% set fence = evidence_fence(entry.output) %}
+  - Output: {{ fence }}{{ entry.output }}{{ fence }}
+{% endfor %}
+{% if not review_checklist.results %}
+A project checklist was found but produced no allowlisted, executable
+checks.
+{% endif %}
+{% endif %}
+{% if review_context %}
+
+### PR/MR Context
+
+{{ review_context }}
+{% endif %}
+{% if review_guardian_scan_enabled | bool %}
+
+### Security Scan (ai-guardian)
+A deterministic, model-independent scan of this review's diff/PR
+description, run in parallel with the lens agents above, not a gate in
+front of them. Most categories are informational only — same non-
+blocking treatment this pipeline already gives other known-imperfect
+signals (the self-refuted-finding filter, citation accuracy) — but a
+finding in a 🔒 **BLOCKING** category below (currently:
+{{ review_guardian_blocking_rule_ids | join(', ') }}) forces
+`NEEDS_CHANGES`{{ ' (blocking is currently disabled via review_guardian_scan_blocking_enabled — shown for visibility only, not enforced this run)' if not (review_guardian_scan_blocking_enabled | bool) else '' }}.
+{% if not (guardian_scan_available | bool) %}
+
+Scan unavailable this run ({{ guardian_scan_skip_reason }}) — not run,
+not a clean result. Treat as "not scanned," not "nothing found."
+{% elif guardian_findings %}
+
+**PROMPT-INJECTION-001/SSRF-001 caveat**: both have a confirmed
+false-positive class on ordinary content this pipeline scans
+(PROMPT-INJECTION-001 on Python dunder methods like `__init__`,
+SSRF-001 on private-range IPs in test/example code) — a hit in either
+category is worth a skeptical read, not automatic action. Neither
+blocks the verdict.
+{% if guardian_scan_truncated | default(false) %}
+
+Scan input was truncated to {{ review_guardian_max_scan_chars }} characters before scanning.
+{% endif %}
+{% for f in guardian_findings %}
+{{ loop.index }}. **[{{ f.level | default('unknown') }}] {{ f.rule_id | default('unknown') }}**{{ ' 🔒 BLOCKING' if f.rule_id | default(None) in review_guardian_blocking_rule_ids else '' }}{{ ' — ' ~ f.file_path if f.file_path | default(None) else '' }}{{ ':' ~ f.line_number if f.line_number | default(None) else '' }}
+   {{ f.message | default('(no message provided)') }}
+{% if f.snippet | default(None) %}
+{% set fence = evidence_fence(f.snippet) %}
+   > {{ fence }}
+   > {{ f.snippet | regex_replace('\r?\n', '\n   > ') }}
+   > {{ fence }}
+{% endif %}
+{% endfor %}
+{% else %}
+
+No findings — clean scan.
+{% endif %}
+{% endif %}
+
+### Limitations
+This review was performed by an AI agent via a deterministic Ansible
+pipeline (aknochow.claude + aknochow.openshell) — a port of the
+harness `code-review` skill's methodology, not the interactive Claude
+Code skill itself. It is a first pass, not a final approval. Final
+approval belongs to human maintainers.

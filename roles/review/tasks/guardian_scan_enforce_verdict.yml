@@ -1,0 +1,30 @@
+---
+# A SECRET-001 finding forces review_verdict to NEEDS_CHANGES, the
+# same outcome a surviving Critical/Major lens finding already forces,
+# achieved the same way (overriding review_verdict directly) rather
+# than a second, parallel notion of "blocked." Scores are never
+# touched here: guardian findings stay out of
+# compute_review_scores.py entirely.
+#
+# review_guardian_blocking_rule_ids currently contains only
+# SECRET-001. See that default's own comment in
+# roles/review/defaults/main.yml for why PROMPT-INJECTION-001/
+# SSRF-001 are deliberately excluded (confirmed, reproducible
+# false-positive classes on ordinary content).
+#
+# Idempotent regardless of review_verdict's prior value: if verify.yml
+# (or merge.yml before it) already forced NEEDS_CHANGES for an
+# independent reason, setting it again here is a no-op.
+# guardian_forced_needs_changes is tracked separately so
+# findings.md.j2 can tell a human WHY the verdict is NEEDS_CHANGES (a
+# real lens/verify finding, an ai-guardian secret finding, or both).
+- name: Determine whether ai-guardian's findings should force the verdict
+  ansible.builtin.set_fact:
+    guardian_forced_needs_changes: >-
+      {{ (review_guardian_scan_blocking_enabled | bool)
+         and (guardian_blocking_findings | default([]) | length > 0) }}
+
+- name: Override review_verdict when a blocking ai-guardian finding survives
+  when: guardian_forced_needs_changes | bool
+  ansible.builtin.set_fact:
+    review_verdict: "NEEDS_CHANGES"

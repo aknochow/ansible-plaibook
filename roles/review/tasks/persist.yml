@@ -1,0 +1,222 @@
+---
+# Findings persistence (path resolution + frontmatter) always runs on
+# the controller, never delegated: it writes to the reviewer's own
+# history directory (review_output_base), which wouldn't survive a
+# sandbox teardown.
+
+- name: Render the findings report
+  ansible.builtin.set_fact:
+    review_final_report: "{{ lookup('template', role_path + '/templates/findings.md.j2') }}"
+
+# A second copy of the same report, written into the checked-out repo
+# itself rather than the reviewer's home directory, for a future
+# CI-native run mode (this pipeline invoked as a step inside the
+# target repo's own CI job): a CI system needs the artifact inside its
+# own workspace to upload it. Named artifacts/, not reviews/, to avoid
+# confusion with review_output_base (a different thing: cross-run
+# history, not a CI artifact). Left ungitignored by design: this
+# pipeline shouldn't mutate a repo it's reviewing beyond a plain file
+# write; wire artifacts/ into your own repo's .gitignore if needed.
+- name: Write the findings report as a CI-consumable artifact in the checkout
+  when: review_write_artifact | bool
+  block:
+    - name: Ensure the artifacts directory exists in the checkout
+      ansible.builtin.file:
+        path: "{{ review_repo_path }}/artifacts"
+        state: directory
+        mode: "0755"
+      delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+      ignore_unreachable: true
+      register: _persist_artifacts_dir_result
+
+    - name: Fail loudly if the sandbox connection was unreachable
+      ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+      vars:
+        fail_if_unreachable_result_var: _persist_artifacts_dir_result
+
+    - name: Write the findings report artifact
+      ansible.builtin.copy:
+        content: "{{ review_final_report }}"
+        dest: "{{ review_repo_path }}/artifacts/{{ review_artifact_filename }}"
+        mode: "0644"
+      delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+      ignore_unreachable: true
+      register: _persist_artifact_write_result
+
+    - name: Fail loudly if the sandbox connection was unreachable
+      ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+      vars:
+        fail_if_unreachable_result_var: _persist_artifact_write_result
+
+# review_short_sha is always a genuine git short SHA from
+# resolve_target_*.yml's own git rev-parse calls, so this isn't
+# reachable in practice, but it's cheap to guard: a malformed value
+# here would otherwise silently produce a wrong findings.md path
+# rather than a clear error.
+- name: Validate review_short_sha looks like a real git SHA
+  ansible.builtin.assert:
+    that:
+      - review_short_sha is regex('^[0-9a-f]{7,40}$')
+    fail_msg: "review_short_sha '{{ review_short_sha }}' doesn't look like a valid 7-40 char hex git SHA"
+
+# Computed once and reused below for the findings directory name and
+# both persisted artifacts' own date fields, to avoid a run crossing
+# midnight between separate calls producing a path/content mismatch.
+- name: Compute today's date once
+  ansible.builtin.set_fact:
+    review_today_date: "{{ now(fmt='%Y-%m-%d') }}"
+
+# A random per-target-write ID, generated once and reused for both the
+# findings.md and summary.json run-scoped copies below, so they always
+# agree with each other.
+- name: Generate a unique ID for this target's persisted-record write
+  ansible.builtin.set_fact:
+    review_persist_run_id: "{{ lookup('password', '/dev/null length=16 chars=ascii_letters,digits') }}"
+
+# review_org_repo/review_branch are already validated against '..'
+# path-traversal segments in briefing.yml, before this path is ever
+# constructed.
+- name: Set the findings path fact
+  ansible.builtin.set_fact:
+    review_findings_path: "{{ review_output_base }}/{{ review_org_repo }}/{{ review_branch }}/{{ review_today_date }}-{{ review_short_sha }}/findings.md"
+
+- name: Ensure the findings directory exists
+  ansible.builtin.file:
+    path: "{{ review_findings_path | dirname }}"
+    state: directory
+    mode: "0755"
+
+- name: Build the findings.md frontmatter from real facts
+  build_review_frontmatter:
+    today_date: "{{ review_today_date }}"
+    commit: "{{ review_short_sha }}"
+    project: "{{ review_org_repo }}"
+    branch: "{{ review_branch }}"
+    verdict: "{{ review_verdict }}"
+    score_overall: "{{ score_overall | float }}"
+    score_functionality: "{{ score_functionality | float }}"
+    score_security: "{{ score_security | float }}"
+    score_quality: "{{ score_quality | float }}"
+  register: _frontmatter_result
+
+- name: Write the rendered findings, with frontmatter prepended, to the resolved path
+  ansible.builtin.copy:
+    content: "{{ _frontmatter_result.frontmatter + review_final_report }}"
+    dest: "{{ review_findings_path }}"
+    mode: "0644"
+
+# review_findings_path is a shared path: two runs reviewing the same
+# target/branch/commit (a genuine intentional re-review, or an
+# accidental concurrent collision) resolve to the identical directory,
+# and this plain copy overwrites unconditionally with no warning. This
+# path can't just gain a run_id, since finding a prior review for a
+# given commit depends on it staying predictable ({date}-{sha}, no
+# run_id). So the canonical path stays last-write-wins, and a
+# run-scoped sibling is written alongside it, immune to the collision.
+- name: Write a run-scoped, collision-immune copy of the findings
+  ansible.builtin.copy:
+    content: "{{ _frontmatter_result.frontmatter + review_final_report }}"
+    dest: "{{ review_findings_path | dirname }}/findings.{{ review_persist_run_id }}.md"
+    mode: "0644"
+
+# A small, stable, structured artifact alongside findings.md, for an
+# agent (or any tooling) that wants verdict/scores/findings without
+# grepping the markdown prose or Ansible's own stdout. Everything here
+# is pure serialization of facts merge.yml already computed. Lives in
+# the same directory as findings.md, so anything that already knows
+# review_findings_path can derive this path without a separate lookup.
+#
+# diff_stats/diff_categories/completeness_checks are structured
+# metrics for future evals/benchmark use, not today's human report:
+# only completeness_checks' deleted_files/todo_fixme/trailing_whitespace
+# are also rendered into findings.md itself; diff_stats and
+# diff_categories are summary.json-only. neutralization_check and
+# checklist are also rendered into findings.md, but only when they
+# actually found or ran something.
+- name: Set the summary.json path fact
+  ansible.builtin.set_fact:
+    review_summary_path: "{{ review_findings_path | dirname }}/summary.json"
+    review_summary_run_scoped_path: "{{ review_findings_path | dirname }}/summary.{{ review_persist_run_id }}.json"
+    review_findings_run_scoped_path: "{{ review_findings_path | dirname }}/findings.{{ review_persist_run_id }}.md"
+
+- name: Render the structured summary content
+  ansible.builtin.set_fact:
+    _review_summary_content: >-
+      {{ {
+        'target': review_org_repo + '#' + review_number,
+        'commit': review_short_sha,
+        'branch': review_branch,
+        'date': review_today_date,
+        'verdict': review_verdict,
+        'score_overall': score_overall | float,
+        'scores': {
+          'functionality': score_functionality | float,
+          'security': score_security | float,
+          'quality': score_quality | float
+        },
+        'findings_count': {
+          'critical': findings_critical | length,
+          'major': findings_major | length,
+          'minor': findings_minor | length,
+          'nit': findings_nit | length
+        },
+        'findings': deduped_findings,
+        'findings_path': review_findings_path,
+        'diff_stats': review_diff_stats,
+        'diff_categories': review_diff_categories,
+        'completeness_checks': review_completeness_checks,
+        'neutralization_check': review_neutralization_check,
+        'checklist': review_checklist
+      } | to_nice_json }}
+
+- name: Write the structured summary artifact
+  ansible.builtin.copy:
+    content: "{{ _review_summary_content }}"
+    dest: "{{ review_summary_path }}"
+    # Not 0644: full findings objects (code evidence, file paths,
+    # vulnerability descriptions) from potentially private repos.
+    mode: "0600"
+
+# Same collision as findings.md above, and the same reason the
+# canonical path can't just gain a run_id: a run-scoped, always-intact
+# sibling copy, immune to a concurrent run's last-write-wins overwrite
+# of the canonical summary.json.
+- name: Write a run-scoped, collision-immune copy of the summary
+  ansible.builtin.copy:
+    content: "{{ _review_summary_content }}"
+    dest: "{{ review_summary_run_scoped_path }}"
+    mode: "0600"
+
+# The merged/deduped report only otherwise lives in a file on the
+# controller; this accumulator is what actually shows the full
+# write-up (evidence, fixes, confidence) in the Ansible job output
+# itself, not just a path. Accumulated here rather than printed
+# immediately so review.yml can show every target's report in one
+# place right before the final pipeline stats summary. Carries
+# verdict/score/summary_path too (not just the rendered report text)
+# so review.yml's final last_run.json write can build a per-target
+# index without re-deriving any of this.
+- name: Accumulate this target's rendered report for the final summary
+  ansible.builtin.set_fact:
+    pipeline_findings_reports: >-
+      {{ pipeline_findings_reports + [{
+        'target': review_org_repo + '#' + review_number,
+        'report': review_final_report,
+        'verdict': review_verdict,
+        'score': score_overall | float,
+        'summary_path': review_summary_path,
+        'findings_path': review_findings_path,
+        'summary_run_scoped_path': review_summary_run_scoped_path,
+        'findings_run_scoped_path': review_findings_run_scoped_path
+      }] }}
+
+- name: Show where the review was persisted
+  ansible.builtin.debug:
+    msg: >-
+      Review persisted to {{ review_findings_path }} (summary:
+      {{ review_summary_path }}), verdict {{ review_verdict }}, overall
+      {{ score_overall }}/100. Both paths are shared with any other run
+      against this same target/branch/commit (last-write-wins, same as
+      last_run.json); for a copy guaranteed to be this run's own,
+      unaffected by a concurrent run: {{ review_findings_run_scoped_path }}
+      / {{ review_summary_run_scoped_path }}

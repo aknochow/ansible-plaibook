@@ -1,0 +1,109 @@
+---
+# End-to-end regression test for merge findings string vs list encoding issues,
+# exercised through the real review role context. Two scenarios:
+#   1. One side string, one side list — explicit type mismatch error.
+#   2. Both sides string — silent invalid-JSON garbage passed to later tasks.
+#
+# Usage:
+#   ansible-playbook tests/test_merge_findings_string_encoding.yml
+
+- name: "Scenario 1: one side string-encoded, one side a native list"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    severity_points:
+      Critical: 20
+      Major: 10
+      Minor: 5
+      Nit: 0
+    # Findings array double-encoded as string (reproduces the mismatch error).
+    security_result:
+      structured:
+        findings: >-
+          [{"lens":"Security","file":"app/users.py","line":7,"severity":"Critical",
+          "description":"SQL injection vulnerability.",
+          "evidence":"query = \"SELECT id, email FROM users WHERE email = '%s'\" % email",
+          "confidence":"HIGH","fix":"Use a parameterized query."}]
+        scores:
+          security: 10
+    review_result:
+      structured:
+        findings:
+          - lens: "Functionality"
+            file: "app/users.py"
+            line: 6
+            severity: "Critical"
+            description: "SQL injection / correctness regression."
+            evidence: "query = \"SELECT id, email FROM users WHERE email = '%s'\" % email\n    cursor.execute(query)"
+            confidence: "HIGH"
+            fix: "Use a parameterized query."
+        scores:
+          functionality: 10
+          quality: 100
+
+  tasks:
+    - name: Run merge.yml through the review role context
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: merge
+
+    - name: Assert both findings survived the string/list mismatch without crashing
+      ansible.builtin.assert:
+        that:
+          - deduped_findings | length == 2
+          - "'Security' in (deduped_findings | map(attribute='lens') | list)"
+          - "'Functionality' in (deduped_findings | map(attribute='lens') | list)"
+        fail_msg: >-
+          merge.yml crashed or lost a finding on the confirmed one-string/
+          one-list repro shape. Got: {{ deduped_findings | map(attribute='lens') | list }}
+        success_msg: "Scenario 1 (one string, one list) survived merge.yml intact."
+
+- name: "Scenario 2: BOTH sides string-encoded"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    severity_points:
+      Critical: 20
+      Major: 10
+      Minor: 5
+      Nit: 0
+    # Both lenses return string-encoded findings (reproduces silent garbage production).
+    security_result:
+      structured:
+        findings: >-
+          [{"lens":"Security","file":"app/users.py","line":7,"severity":"Critical",
+          "description":"SQL injection vulnerability.",
+          "evidence":"query = \"SELECT id, email FROM users WHERE email = '%s'\" % email",
+          "confidence":"HIGH","fix":"Use a parameterized query."}]
+        scores:
+          security: 10
+    review_result:
+      structured:
+        findings: >-
+          [{"lens":"Functionality","file":"app/users.py","line":6,"severity":"Critical",
+          "description":"SQL injection / correctness regression.",
+          "evidence":"query = \"SELECT id, email FROM users WHERE email = '%s'\" % email\n    cursor.execute(query)",
+          "confidence":"HIGH","fix":"Use a parameterized query."}]
+        scores:
+          functionality: 10
+          quality: 100
+
+  tasks:
+    - name: Run merge.yml through the review role context
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: merge
+
+    - name: Assert both findings survived the both-sides-string shape without crashing
+      ansible.builtin.assert:
+        that:
+          - deduped_findings | length == 2
+          - deduped_findings | selectattr('file', 'defined') | list | length == 2
+        fail_msg: >-
+          merge.yml crashed, or produced a garbage non-dict finding, on the
+          confirmed both-sides-string repro shape. Got: {{ deduped_findings }}
+        success_msg: "Scenario 2 (both sides string) survived merge.yml intact."

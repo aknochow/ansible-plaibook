@@ -1,0 +1,9 @@
+(target: Review Agent, Quality lens)
+This diff touches performance-sensitive paths. Check for
+unbounded loops or recursion without depth limits. Verify
+caching has proper invalidation — stale cache is worse than no
+cache. Check for blocking I/O in hot paths — use async or
+connection pooling. Verify timeouts on all external calls
+(HTTP, database, message queues). Check that bulk operations
+use batching, not one-at-a-time. Verify pagination on data
+retrieval — loading all records into memory doesn't scale.

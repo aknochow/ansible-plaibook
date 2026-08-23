@@ -1,0 +1,10 @@
+(target: both agents)
+This diff adds or modifies API endpoints. Verify input validation
+on all request parameters (path params, query params, body fields)
+— reject unexpected types and enforce size limits. Check
+authentication and authorization on every endpoint — missing auth
+on a new endpoint is Critical. Verify error responses use
+consistent format and don't leak internal details (stack traces,
+SQL errors, file paths). Check pagination on list endpoints —
+unbounded responses are a DoS vector. Verify idempotency on
+PUT/PATCH operations.

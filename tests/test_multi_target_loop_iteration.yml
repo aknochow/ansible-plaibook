@@ -1,0 +1,36 @@
+---
+# Helper for test_multi_target_loop.yml: included once per review_targets item
+# to interleave include_role and state-capture debug within the same iteration.
+
+- name: "Run the review engine for {{ rt.review_branch }}"
+  ansible.builtin.include_role:
+    name: review
+    tasks_from: run_review_engine
+  vars:
+    review_repo_path: "{{ rt.review_repo_path }}"
+    review_target_ref: "{{ rt.review_target_ref }}"
+    review_source_ref: "{{ rt.review_source_ref }}"
+    review_short_sha: "{{ rt.review_short_sha }}"
+    review_branch: "{{ rt.review_branch }}"
+    review_org_repo: "{{ rt.review_org_repo }}"
+    # review_number defaults to short SHA (used by lenses.yml's pipeline_agent_calls labeling).
+    review_number: "{{ rt.review_short_sha }}"
+
+- name: "Capture per-iteration state (cross-contamination check) for {{ rt.review_branch }}"
+  ansible.builtin.set_fact:
+    loop_verification_history: >-
+      {{ (loop_verification_history | default([])) + [{
+        'branch': rt.review_branch,
+        'findings_path': review_findings_path,
+        'briefing_project': briefing_project,
+        'briefing_commit': briefing_commit,
+        'matched_steering_domains': matched_steering_domains,
+        'domain_steering_domains_seen': (domain_steering_raw | default([]) | map(attribute='domain') | list),
+        'combined_findings_count': (combined_findings | default([]) | length),
+        'deduped_findings_count': (deduped_findings | default([]) | length),
+        'score_overall': score_overall,
+      }] }}
+
+- name: "Show captured state for {{ rt.review_branch }}"
+  ansible.builtin.debug:
+    var: loop_verification_history[-1]

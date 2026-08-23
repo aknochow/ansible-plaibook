@@ -1,0 +1,95 @@
+---
+# Fast, no-LLM smoke test of merge.yml's dedup step through the real review role context.
+# Fixture matches the pre-port baseline to prove identical dedup behavior through
+# the actual role/plugin-loader integration.
+#
+# Usage:
+#   ansible-playbook tests/test_merge_dedup.yml
+
+- name: Test merge.yml's dedup action plugin standalone
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    severity_points:
+      Critical: 20
+      Major: 10
+      Minor: 5
+      Nit: 0
+    security_result:
+      structured:
+        findings:
+          - file: "sandbox.py"
+            line: 40
+            severity: "Major"
+            lens: "Security"
+            evidence: "client.create(name=name)"
+            fix: "Validate name before use"
+            description: "possible issue A"
+          - file: "sandbox.py"
+            line: 100
+            severity: "Minor"
+            lens: "Security"
+            evidence: "if\tcondition:\n\t\tdo_thing()"
+            fix: "minor note"
+            description: "possible issue B"
+          - file: "SANDBOX.py"
+            line: 200
+            severity: "Critical"
+            lens: "Security"
+            evidence: "unrelated evidence for the case probe"
+            fix: "fix C"
+            description: "case probe upper"
+    review_result:
+      structured:
+        findings:
+          - file: "sandbox.py"
+            line: 42
+            severity: "Minor"
+            lens: "Functionality"
+            evidence: "client.create(name=name)"
+            fix: "different fix text"
+            description: "possible issue A duplicate"
+          - file: "sandbox.py"
+            line: 101
+            severity: "Major"
+            lens: "Functionality"
+            evidence: "if   condition:\n\t\t\tdo_thing()"
+            fix: "a different fix for the same issue"
+            description: "possible issue B duplicate, higher severity"
+          - file: "sandbox.py"
+            line: 200
+            severity: "Major"
+            lens: "Functionality"
+            evidence: "different evidence text so evidence-key doesn't also collide"
+            fix: "fix D"
+            description: "case probe lower"
+          - file: "other_file.py"
+            line: 5
+            severity: "Nit"
+            lens: "Quality"
+            evidence: "totally unrelated"
+            fix: "trivial"
+            description: "unique survivor"
+
+  tasks:
+    - name: Run merge.yml through the review role context
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: merge
+
+    - name: Assert the exact survivor set matches the verified pre-port baseline
+      ansible.builtin.assert:
+        that:
+          - deduped_findings | length == 4
+          - "'unique survivor' in (deduped_findings | map(attribute='description') | list)"
+          - "'possible issue A' in (deduped_findings | map(attribute='description') | list)"
+          - "'possible issue A duplicate' not in (deduped_findings | map(attribute='description') | list)"
+          - "'possible issue B duplicate, higher severity' in (deduped_findings | map(attribute='description') | list)"
+          - "'case probe upper' in (deduped_findings | map(attribute='description') | list)"
+          - "'case probe lower' not in (deduped_findings | map(attribute='description') | list)"
+        fail_msg: >-
+          dedupe_findings.py's survivor set doesn't match the verified
+          pre-port baseline. Got: {{ deduped_findings | map(attribute='description') | list }}
+        success_msg: "dedupe_findings.py's survivor set matches the verified pre-port baseline."

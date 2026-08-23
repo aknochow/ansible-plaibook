@@ -1,0 +1,54 @@
+---
+# Validate lens structured output once per attempt (first or retry).
+# Uses caller-named facts (lens_result_var/lens_valid_var) for both Security and Review.
+# block/rescue catches malformed output as "invalid attempt" (not fatal).
+- name: "Validate structured output for lens: {{ lens_label }}"
+  block:
+    - name: "Assert report_findings was actually called by lens: {{ lens_label }}"
+      ansible.builtin.assert:
+        that:
+          - lens_raw_result.tool_calls | length > 0
+        fail_msg: >-
+          {{ lens_label }} lens produced no tool call at all despite
+          forced tool_choice (stop_reason={{ lens_raw_result.stop_reason }})
+
+    - name: "Coerce the findings field (tolerating a JSON-encoded string) for lens: {{ lens_label }}"
+      coerce_findings_encoding:
+        value: "{{ lens_raw_result.tool_calls[0].input.findings | default([]) }}"
+        label: "{{ lens_label }} lens"
+      register: _lens_coerce_result
+
+    # Dogfooding finding (this repo's own review of this exact MR):
+    # findings gets the full coerce_findings_encoding treatment, but
+    # scores was passed through with only a presence default, no type
+    # check -- a model that malforms scores the same way it can malform
+    # findings (the same underlying quirk, a different field) would flow
+    # through unvalidated. Currently only cosmetic (nothing downstream
+    # reads .structured.scores -- merge.yml deliberately derives scores
+    # itself from deduped_findings rather than trusting self-reported
+    # ones, confirmed via repo-wide grep), but asserting here means a
+    # malformed scores field is ALSO treated as "invalid, worth
+    # retrying," not silently accepted -- consistent with treating the
+    # whole structured payload's validity as the criterion, not just the
+    # one field with a downstream consumer today.
+    - name: "Assert the scores field is a mapping for lens: {{ lens_label }}"
+      ansible.builtin.assert:
+        that:
+          - (lens_raw_result.tool_calls[0].input.scores | default({})) is mapping
+        fail_msg: >-
+          {{ lens_label }} lens's scores field is a
+          {{ (lens_raw_result.tool_calls[0].input.scores | default({})) | type_debug }},
+          not a mapping
+
+    - name: "Store the validated, normalized structured output for lens: {{ lens_label }}"
+      ansible.builtin.set_fact:
+        "{{ lens_result_var }}": >-
+          {{ lens_raw_result | combine({'structured': {
+                'findings': _lens_coerce_result.findings,
+                'scores': lens_raw_result.tool_calls[0].input.scores | default({})
+              }}) }}
+        "{{ lens_valid_var }}": true
+  rescue:
+    - name: "Mark this attempt's output invalid for lens: {{ lens_label }}"
+      ansible.builtin.set_fact:
+        "{{ lens_valid_var }}": false

@@ -1,0 +1,150 @@
+---
+# Investigation fixture for handoff.ansible-plaibook-verify-yml-scope-
+# expansion.yaml's axis 2 (expand-verify-yml-citation-accuracy-check):
+# does verify.yml's existing quoted-evidence requirement actually catch
+# a HALLUCINATED CITATION (real quote, wrong file/line attribution) —
+# or does it only check whether the finding's general underlying claim
+# is true somewhere, regardless of whether the cited location actually
+# contains that evidence? Real API calls, no mocking -- this is
+# fundamentally a judgment-call question that only a live model run can
+# answer, same as every other verify.yml fixture in this test suite.
+#
+# The cross-file-hallucination fixture below cites roles/review/tasks/
+# verify.yml:47 with a quote that is 100% REAL text -- but it actually
+# lives in roles/review/templates/verify_agent_prompt.j2:17-18, not at
+# the cited location. verify.yml:47's real content is the `findings:`
+# parameter of the immediately-preceding prepare_findings_for_verification
+# task (line 46), nothing about write access. This is deliberately NOT
+# a fabricated-out-of-whole-cloth
+# quote (a lazier hallucination shape) -- a verifier that does a broad
+# `search` for the quoted text WILL find a real match, just at a
+# different file/line than cited. Only a verifier that actually reads
+# the CITED file at the CITED line, and checks that the quote is really
+# there, catches this -- exactly the axis 2 open question ("checks the
+# underlying CLAIM, not the citation's own accuracy").
+#
+# Includes one control case (a genuinely accurate citation, real quote
+# at the real cited file/line, true claim) -- without it, a verifier
+# that reflexively refutes on any location mismatch it stumbles upon,
+# or any other unrelated technicality, would still pass the fixture
+# above for the wrong reason.
+#
+# RESULT: the cross-file-hallucination fixture is reliably refuted,
+# every rationale explicitly built on reading the cited file/line and
+# confirming the quote isn't there -- verify.yml's existing mechanism
+# does already check citation accuracy, not just the underlying claim.
+# The control case separately surfaces an unrelated reliability gap;
+# see its own task comment below.
+#
+# Usage:
+#   ansible-playbook tests/test_verify_citation_accuracy.yml
+
+- name: "Investigate: does verify.yml catch a cross-file-hallucinated citation?"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_delegate_host: ""
+    review_repo_path: "{{ playbook_dir }}/.."
+    review_org_repo: "aknochow/ansible-plaibook"
+    review_number: "test-verify-citation-accuracy"
+
+    # NOTE: seeded via an explicit set_fact task below, not left as a
+    # play var -- deduped_findings is a FACT (verify.yml itself calls
+    # set_fact on it), and facts outrank play vars in Ansible's
+    # precedence order. See test_verify_pass.yml's identical comment.
+    citation_fixture_findings:
+      # Fixture: cross-file-hallucinated citation. The quoted evidence
+      # is real, verbatim text -- but from verify_agent_prompt.j2:17-18,
+      # not from the cited roles/review/tasks/verify.yml:47 (whose real
+      # content is the `findings:` parameter of the immediately-preceding
+      # prepare_findings_for_verification task, on line 46).
+      - lens: Quality
+        file: "roles/review/tasks/verify.yml"
+        line: 47
+        severity: Major
+        description: >-
+          verify.yml itself documents, in a comment at this exact
+          location, that the verification stage has no write access to
+          the repository and cannot change anything in it -- yet
+          nothing in this pipeline actually enforces that as a real
+          technical restriction (no sandboxing, no filesystem
+          permission lockdown, no read-only mount); it is purely a
+          documentation-only claim with no backing enforcement
+          mechanism.
+        evidence: "You have no write access — you cannot and must not change anything in the repo."
+        confidence: MEDIUM
+        fix: >-
+          Add an actual enforcement mechanism (e.g. a read-only bind
+          mount or restricted execution context) instead of relying on
+          a comment.
+      # Control case: an accurate citation. Real quote, correct file
+      # and line, true claim -- same real text as the fixture above,
+      # but honestly attributed to where it actually lives.
+      - lens: Quality
+        file: "roles/review/templates/verify_agent_prompt.j2"
+        line: 17
+        severity: Major
+        description: >-
+          verify_agent_prompt.j2 tells the verification agent, at this
+          exact location, that it has no write access and must not
+          change anything in the repo -- this is an accurate
+          description of the verify agent's own available tool set
+          (read_file, search, trace_reachability -- no write-capable
+          tool is ever offered to it).
+        evidence: "You have no write access — you cannot and must not change anything in the repo."
+        confidence: MEDIUM
+        fix: "No fix needed -- this claim is true and accurately cited, included as a control case."
+
+  tasks:
+    - name: Initialize pipeline-wide agent usage accounting
+      ansible.builtin.set_fact:
+        pipeline_agent_calls: []
+
+    - name: "Seed deduped_findings as a fact (see the vars block's comment on why)"
+      ansible.builtin.set_fact:
+        deduped_findings: "{{ citation_fixture_findings }}"
+
+    - name: Run the verify stage in isolation
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: verify.yml
+
+    - name: Show full rationale and evidence for each verdict
+      ansible.builtin.debug:
+        msg: "{{ item.file }}:{{ item.line }} -> {{ item.evidence_status }} | rationale: {{ item.verification_rationale }} | evidence: {{ item.verification_evidence }}"
+      loop: "{{ deduped_findings }}"
+      loop_control:
+        label: "{{ item.file }}:{{ item.line }}"
+
+    - name: "INVESTIGATION RESULT: did verify.yml catch the cross-file-hallucinated citation?"
+      ansible.builtin.debug:
+        msg: >-
+          Cross-file-hallucination fixture landed on:
+          {{ deduped_findings[0].evidence_status }}. If 'refuted' and the
+          rationale mentions the citation/location mismatch (not just
+          re-litigating the abstract claim), verify.yml's existing
+          mechanism ALREADY covers citation accuracy -- no new check
+          needed. If 'verified' or 'inconclusive', the mechanism only
+          checks the underlying claim, not the citation itself -- a real
+          gap, matching axis 2's open question.
+
+    # NOT a hard assertion: this accurately-cited, true control case can
+    # be falsely refuted. The verifier reads the actual file, correctly
+    # notices it's a Jinja2 template containing variable placeholders
+    # elsewhere (e.g. `{{ finding.lens }}`), then over-generalizes that
+    # into "this file cannot contain literal static prose at all"
+    # without re-checking whether the specific cited line is one of the
+    # static-text lines rather than a templated one. A hasty-
+    # generalization reasoning error, not a citation-accuracy detection
+    # failure -- a false-refutation risk specific to templated/.j2
+    # files, not fixed here.
+    - name: Show the control case's outcome (informational -- known false-refutation risk on templated files, see comment)
+      ansible.builtin.debug:
+        msg: >-
+          Control case (accurate citation) landed on:
+          {{ deduped_findings[1].evidence_status }} (expected 'verified'
+          or 'inconclusive'; observed flaky specifically on this
+          templated-file shape during this investigation, not gated here
+          -- see the comment above).

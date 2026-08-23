@@ -1,0 +1,30 @@
+---
+# EE-build-specific: references local tarballs (built via
+# `ansible-galaxy collection build`) instead of the git sources in the
+# repo-root collections-requirements.yml. ansible-builder's isolated
+# build stage has no git credentials for these private repos, so the
+# portable git-based collections-requirements.yml (correct for anyone
+# else installing these collections) doesn't work inside the build
+# container. Rebuild these tarballs whenever the collections change:
+#   ansible-galaxy collection build ~/code/ansible-openshell --output-path build/collections -f
+#   ansible-galaxy collection build ~/code/ansible-claude --output-path build/collections -f
+# aknochow.openshell (needed for Phase 2 sandboxing) required moving
+# the base image from minee:ubi9 to minee:ubi10 — the openshell PyPI
+# package only ships manylinux_2_39 wheels (glibc >=2.39), and ubi9's
+# glibc 2.34 could never satisfy that (confirmed: only a stray 0.0.0a0
+# alpha ever resolved on ubi9, no real release). See
+# execution-environment.yml's own header comment for the full story.
+collections:
+  - name: collections/aknochow-claude-0.1.0.tar.gz
+    type: file
+  - name: collections/aknochow-openshell-0.1.0.tar.gz
+    type: file
+  # Public Galaxy collection, but the isolated build stage's SSL trust
+  # store can't verify galaxy.ansible.com's cert either (same class of
+  # problem as the two above, different cause: CERTIFICATE_VERIFY_FAILED
+  # rather than missing git creds) — so this is a local tarball too,
+  # downloaded from the host via `ansible-galaxy collection download
+  # kubernetes.core`. Needed for roles/review/tasks/fetch_k8s_secret_tls.yml's
+  # sandbox_tls_source: k8s_secret path.
+  - name: collections/kubernetes-core-6.5.0.tar.gz
+    type: file

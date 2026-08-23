@@ -1,0 +1,151 @@
+---
+# Regression test for validate_lens_dispatch.yml: validates the shared validation logic
+# both first attempt and retries go through. Tests the deterministic piece: given a raw
+# dispatch result, does it correctly decide valid vs invalid and normalize .structured shape.
+#
+# Usage:
+#   ansible-playbook tests/test_validate_lens_dispatch.yml
+
+- name: "Scenario 1: well-formed native-list findings -- must validate true"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    _valid_lens_result:
+      stop_reason: "tool_use"
+      tool_calls:
+        - name: "report_findings"
+          input:
+            findings:
+              - file: "app.py"
+                line: 1
+                severity: "Minor"
+                lens: "Security"
+                description: "a finding"
+                evidence: "some code"
+                confidence: "HIGH"
+                fix: "do the fix"
+            scores:
+              security: 95.0
+
+  tasks:
+    - name: Validate a well-formed lens result
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: validate_lens_dispatch
+      vars:
+        lens_label: "Security"
+        lens_raw_result: "{{ _valid_lens_result }}"
+        lens_result_var: "my_lens_result"
+        lens_valid_var: "my_lens_valid"
+
+    - name: Assert the well-formed result validated true and normalized correctly
+      ansible.builtin.assert:
+        that:
+          - my_lens_valid
+          - my_lens_result.structured.findings | length == 1
+          - my_lens_result.structured.findings[0].file == "app.py"
+          - my_lens_result.structured.scores.security == 95.0
+        fail_msg: "Well-formed lens result should validate true and normalize its .structured shape"
+        success_msg: "Well-formed lens result correctly validated and normalized."
+
+- name: "Scenario 2: string-encoded findings -- must validate false, not crash the play"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    # Real shape, structurally identical to the confirmed Sonnet-5 repro
+    # (handoff.ansible-plaibook-merge-findings-string-vs-list-crash.yaml):
+    # findings double-encoded as a malformed JSON string.
+    _malformed_lens_result:
+      stop_reason: "tool_use"
+      tool_calls:
+        - name: "report_findings"
+          input:
+            findings: '[{"lens":"Security","file":"app.py","line":1,"severity":"Minor","description":"x","evidence":"y","confidence":"HIGH","fix":"z"}] TRAILING GARBAGE'
+            scores:
+              security: 95.0
+
+  tasks:
+    - name: Validate a malformed lens result
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: validate_lens_dispatch
+      vars:
+        lens_label: "Security"
+        lens_raw_result: "{{ _malformed_lens_result }}"
+        lens_result_var: "my_lens_result"
+        lens_valid_var: "my_lens_valid"
+
+    - name: Assert the malformed result validated false and did NOT crash the play
+      ansible.builtin.assert:
+        that:
+          - not my_lens_valid
+        fail_msg: "Malformed (string-encoded, unparseable) findings should validate false via block/rescue, not raise uncaught"
+        success_msg: "Malformed lens result correctly caught and marked invalid, play continued."
+
+- name: "Scenario 3: zero tool calls at all -- must validate false, not crash the play"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    _no_tool_call_result:
+      stop_reason: "max_tokens"
+      tool_calls: []
+
+  tasks:
+    - name: Validate a result with no tool call at all
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: validate_lens_dispatch
+      vars:
+        lens_label: "Review"
+        lens_raw_result: "{{ _no_tool_call_result }}"
+        lens_result_var: "my_lens_result"
+        lens_valid_var: "my_lens_valid"
+
+    - name: Assert the no-tool-call result validated false and did NOT crash the play
+      ansible.builtin.assert:
+        that:
+          - not my_lens_valid
+        fail_msg: "Zero tool_calls despite forced tool_choice should validate false, not raise an index-out-of-range"
+        success_msg: "No-tool-call result correctly caught and marked invalid, play continued."
+
+- name: "Scenario 4: well-formed findings but scores is not a mapping -- must validate false"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    # Dogfooding finding (this repo's own review of MR !40): findings got
+    # the full coerce_findings_encoding treatment, scores only a presence
+    # default with no type check -- the same class of malformation could
+    # hit either field.
+    _bad_scores_result:
+      stop_reason: "tool_use"
+      tool_calls:
+        - name: "report_findings"
+          input:
+            findings: []
+            scores: "not a mapping at all"
+
+  tasks:
+    - name: Validate a result whose scores field is a string, not a mapping
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: validate_lens_dispatch
+      vars:
+        lens_label: "Security"
+        lens_raw_result: "{{ _bad_scores_result }}"
+        lens_result_var: "my_lens_result"
+        lens_valid_var: "my_lens_valid"
+
+    - name: Assert the bad-scores result validated false and did NOT crash the play
+      ansible.builtin.assert:
+        that:
+          - not my_lens_valid
+        fail_msg: "A non-mapping scores field should validate false via block/rescue, not raise uncaught"
+        success_msg: "Non-mapping scores field correctly caught and marked invalid, play continued."

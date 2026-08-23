@@ -1,0 +1,15 @@
+(target: both agents)
+This diff contains shell scripts. Trace quoting boundaries
+through adjacent tokens — `"prefix"$var"suffix"` concatenates
+safely, but `$var"text"` leaves var unquoted. Verify `set -euo
+pipefail` is present at the top of scripts. Check `||` vs `&&`
+chains — `cmd1 && cmd2 || cmd3` does NOT mean "if cmd1 and cmd2
+succeed, else cmd3" because cmd3 runs if cmd2 fails even when
+cmd1 succeeded. Verify variables used in arithmetic or array
+indexing are validated. Check for unquoted `$@` in function
+arguments. When a loop removes `break`, check if the new
+behavior silently overwrites files from earlier iterations.
+Verify `set -f` / `set +f` glob protection is consistent across
+similar loops in the same file. When `export` is removed from
+variable assignments, verify child processes (subprocess calls,
+sourced scripts) can still see the variable.

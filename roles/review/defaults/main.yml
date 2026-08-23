@@ -1,0 +1,270 @@
+---
+# pr | branch | commit. Selects which resolve_target_*.yml task file
+# tasks/main.yml dispatches to. Matches review.yml's own play-level
+# default, set here too so including this role directly, without
+# review.yml, fails with review.yml's own documented default instead
+# of a confusing empty-string assert error.
+review_type: pr
+
+# Gate: reviewing is safe to automate, posting to a real PR/MR is a
+# write to shared state and requires explicit opt-in. Only meaningful
+# for review_type: pr.
+post_results: false
+
+review_delegate_host: ""
+
+# resolve_target_pr.yml's clone fetches via GitHub/GitLab's ref mirror
+# (refs/pull/N/head, refs/merge-requests/N/head), which is populated
+# asynchronously after a push and can lag the real HEAD by a couple of
+# minutes. verify_target_freshness.yml polls the platform API for that
+# long, worst case, before failing loudly. Overridable so tests can
+# shrink the window instead of waiting it out for real.
+review_freshness_check_retries: 6
+review_freshness_check_delay: 30
+
+# Only meaningful for review_type: branch, and only for local targets:
+# explicit branch to check out in the isolated clone. Remote targets
+# (GitHub/GitLab) get their branch from the target string itself
+# (org/repo@branch or a /tree/ URL); a local target with no branch
+# given here just reviews whatever HEAD the source repo currently has
+# checked out.
+branch_review_branch: ""
+
+review_agent_model: "claude-opus-4-6"
+
+# aknochow.claude auth: no working default project on purpose (a real
+# GCP project ID doesn't belong here); set claude_vertex_project via an
+# extra_vars override, or switch claude_provider to a mode that doesn't
+# need one.
+claude_provider: "vertex"
+claude_vertex_region: "global"
+claude_vertex_project: ""
+claude_api_key: ""
+
+review_output_base: "{{ lookup('env', 'HOME') }}/reviews"
+
+# Kill switch for briefing.yml's same-commit fast path: set false to
+# force every run through the full lens/merge/explore/verify dispatch
+# regardless of whether a prior review is found matching the current
+# commit, e.g. to recover from a bad cached review without deleting
+# review_output_base by hand.
+review_same_commit_fast_path_enabled: true
+
+review_context: ""
+
+# Both normally always set for real by briefing.yml (review_full_diff
+# from the actual diff, review_prior_review_md from
+# find_latest_prior_review.py when a prior round exists). These
+# role-default empty strings only matter for a caller that runs
+# merge.yml standalone, skipping briefing.yml entirely.
+review_full_diff: ""
+review_prior_review_md: ""
+
+# Off by default: an on-demand debugging aid, not a production
+# artifact. When true, every rendered lens/explore/verify system prompt
+# is written to ~/.cache/ansible-plaibook/debug_prompts/<review_branch>/
+# so you can directly inspect what an agent actually saw, including
+# exactly where review_extra_notes landed, without reading Jinja
+# templates and inferring. Overwritten every run for the same target.
+review_debug_dump_prompts: false
+
+# Writes a second copy of the findings report into the checkout itself
+# for CI consumption, see persist.yml's header comment. Defaults on
+# since it's a plain additive file write with no effect on the
+# reviewer-history path.
+review_write_artifact: true
+
+# Pattern: code-review_<repo-branch>_job<N>.md. review_branch already
+# uniquely identifies platform+org/repo+PR number (e.g.
+# "github-aknochow-ogo-35"), so it covers "repo and branch" without
+# re-embedding review_org_repo a second time. tower_job_id/awx_job_id
+# are auto-injected by the AAP Controller into every job; the _jobN
+# suffix is appended automatically when present so multiple CI job
+# runs against the same target don't overwrite each other's artifact
+# in a reused/shared checkout, omitted entirely when run outside AAP.
+# "job" + the number, not a literal '#', avoids shell-quoting
+# headaches in a filename. review_branch is slash-free for
+# resolve_target_pr.yml callers, but review_type: commit sets it to
+# the raw git branch name (e.g. "feat/foo"), so regex_replace here
+# keeps a literal "/" from turning into a path segment.
+review_artifact_filename: >-
+  {{ 'code-review_' ~ (review_branch | regex_replace('/', '-')) ~
+     (('_job' ~ (tower_job_id | default(awx_job_id))) if (tower_job_id is defined or awx_job_id is defined) else '')
+     ~ '.md' }}
+
+# tasks/explore.yml: a bounded, sequential agent pass after the lenses
+# merge, that can look beyond the diff (stale docs, other call sites of
+# a changed identifier) before the report is finalized. Opt-out knob,
+# same pattern as use_sandbox: set false to skip it entirely and keep
+# the cheaper, lens-only behavior.
+review_explore_enabled: true
+# 3, not 4: a model that has already found what it needs by turn 2
+# tends to keep exploring until forced to conclude on the last allowed
+# turn, so turn 4 tends to be pure unused cost.
+review_explore_max_turns: 3
+# Separate from review_agent_model: explore's job (decide whether
+# something needs checking, do a simple read/grep, report) is a much
+# lighter task than the lenses' full diff review, and a cheaper model
+# may do it just as well.
+review_explore_model: "{{ review_agent_model }}"
+
+# tasks/verify.yml: an independent, adversarial re-check of Critical/
+# Major findings' checkable factual claims (SDK signatures, stdlib
+# defaults, stated invariants, other call sites), runs after
+# explore.yml so it audits the fully-final findings set. Opt-out knob,
+# same pattern as review_explore_enabled.
+review_verify_enabled: true
+review_verify_severities: ["Critical", "Major"]
+# review_verify_severities alone would miss a truly-Critical finding
+# misclassified down to Minor, which would never reach verification at
+# all, the more dangerous direction. A Minor finding also gets pulled
+# into scope when it was raised by the Security lens, or when its
+# file/description/evidence matches this pattern.
+#
+# Deliberately flat alternation, no nested/repeated quantifiers: if
+# you override this, keep it that way. Python's re module has no
+# built-in match timeout, so a pattern with catastrophic-backtracking
+# potential run against attacker-influenced content (finding
+# file/description/evidence ultimately trace back to diff content) has
+# no runtime backstop here.
+review_verify_security_sensitive_pattern: "(?i)(password|secret|token|credential|api[_-]?key|auth|inject|traversal|sanitiz|escape|deserial|pickle|eval\\(|exec\\(|subprocess|shell=True|os\\.system|sudo|ssh|tls|ssl|cert|encrypt|decrypt|permission|privilege|sandbox|rce|ssrf|xss|csrf|symlink|race condition|prompt injection)"  # noqa: yaml[line-length]
+# 3, not lower: a single finding can still need more than one
+# read/search round-trip (e.g. finding every call site of a shared
+# helper before concluding a suggested fix is safe).
+review_verify_max_turns: 3
+# Deliberately cheap by default, unlike review_explore_model: this
+# task is narrower and more mechanical than deciding whether a whole
+# diff needs checking, and an N-findings x M-turns cost multiplier
+# makes an expensive default too costly to run on every review.
+review_verify_model: "claude-haiku-4-5"
+
+# Under this pipeline's forced tool_choice + structured-output
+# schemas, a lens model can produce genuinely invalid structured
+# output at a non-trivial, probabilistic rate: a different malformed
+# shape each attempt, not a deterministic bug tied to one input.
+# Without a retry here, a malformed response fails the entire review
+# immediately.
+#
+# 3 (1 initial attempt + 2 retries): retries cost real tokens (a fresh
+# dispatch of the exact same call, not a free HTTP poll), and the
+# failure is genuinely probabilistic and independent per attempt, so
+# each additional attempt multiplies the residual failure probability
+# down. A small, bounded number captures most of the benefit without
+# unbounded cost on the rare pathological case.
+review_structured_output_max_attempts: 3
+
+# tasks/guardian_scan.yml: a deterministic, model-independent scan of
+# the shared untrusted diff/PR-description content before it reaches
+# either lens, prompt-side only, not response-side. Informational
+# only, same non-blocking treatment as this pipeline's other known-
+# imperfect signals (the self-refuted-finding filter, citation
+# accuracy): ai-guardian's own reproduced false-positive class
+# (PROMPT-INJECTION-001 on ordinary Python dunder methods like
+# __init__) means this must never feed compute_review_scores.py or
+# force a verdict on its own. Opt-out knob, same pattern as
+# review_explore_enabled/review_verify_enabled: set false on a host
+# without ai-guardian installed rather than let every review fail-open
+# silently on a missing binary with no visible signal either way.
+review_guardian_scan_enabled: true
+# Fixed per-invocation overhead dominates cost regardless of content
+# size up to a real-world diff. This cap exists only to keep a
+# pathological diff from approaching OS argv-length limits
+# (ai-guardian scan --text receives this as a single argv element, not
+# stdin/a file), not for scan-cost reasons. Diffs have no other size
+# cap before reaching the lenses either.
+review_guardian_max_scan_chars: 200000
+# Generous relative to the measured scan time; protects against
+# ai-guardian hanging on pathological input. A tunable default so
+# tests/test_guardian_scan.yml can override it to a tiny value to
+# deterministically exercise guardian_scan.yml's rescue path without
+# actually needing a real hang.
+review_guardian_scan_timeout_seconds: 30
+
+# Version + hash pinning for guardian_scan.yml's own self-install-when-
+# missing step (sandboxed reviews only) lives in
+# roles/review/files/guardian-ai-guardian-requirements.txt and
+# guardian-requests-requirements.txt, not as separate default vars
+# here: a version-only var and a hash recorded elsewhere can drift out
+# of sync with each other, so a single requirements-with-hashes file
+# per package group is the one source of truth for both. See those
+# files' own header comments for the regeneration command when
+# bumping a version.
+#
+# Floor for the self-install's pip dependency resolution (which
+# package versions are considered), not the sandbox's actual runtime
+# Python. See guardian_scan.yml's own comment on the --python-version
+# flag for why this must be a realistic modern floor, not left
+# unset/bare.
+review_guardian_pip_target_python_version: "3.11"
+# Generous relative to a real ai-guardian wheel download plus its
+# minimal deps; protects the self-install's pip download/install
+# commands against a hang (a genuine network partition, not just a
+# failure) blocking the whole review indefinitely.
+review_guardian_pip_timeout_seconds: 60
+
+# A SECRET-001 finding (a real secret detection, engine-agnostic, not
+# gitleaks-specific) forces review_verdict to NEEDS_CHANGES, matching
+# how a Critical/Major lens finding already does. Unlike a lens
+# finding, this never touches severity_points/compute_review_scores.py's
+# score math, only the verdict itself. PROMPT-INJECTION-001 and
+# SSRF-001 deliberately stay informational-only, not because they're
+# unimportant, but because both have a confirmed, reproducible
+# false-positive class on ordinary content this pipeline actually
+# scans: PROMPT-INJECTION-001 on Python dunder methods (e.g.
+# __init__), SSRF-001 on private-range IPs in test/example code (it
+# flags any RFC 1918 range unconditionally, with no test-fixture
+# exemption). Blocking on either right now would fail real reviews for
+# no real security gain.
+#
+# A list, not a single hardcoded value, so adding another confirmed-
+# reliable blocking category later is a config change, not a code
+# change, and so the actual rule_id string lives in exactly one place.
+review_guardian_blocking_rule_ids: ["SECRET-001"]
+# Separate from review_guardian_scan_enabled (which controls whether
+# the scan runs at all): set false to keep scanning and surfacing
+# findings without letting any of them force a verdict, independent of
+# whether review_guardian_scan_enabled itself is on. Three real
+# configurations this pair of toggles produces: scan off entirely,
+# scan on but fully informational, and scan on with secrets blocking
+# (the default).
+review_guardian_scan_blocking_enabled: true
+
+# No shipped default patterns on purpose (see
+# check_neutralization_references.py's own docstring): this check
+# only makes sense once you supply your own org's real internal
+# strings (hostnames, project paths, tool names) to watch for. Example:
+# ["gitlab.example.internal", "internal-tool-name"].
+review_neutralization_org_patterns: []
+
+# Per-million-token USD rates, keyed by model, for the pipeline-wide
+# cost estimate in review.yml's final stats summary. Vertex AI global
+# endpoint pricing (avoids the regional-endpoint premium, matches
+# region: global above), which mirrors Anthropic's direct API rates.
+# cache_write assumes the default 5-minute TTL (1.25x base input);
+# cache_read is 0.1x base input. Verify against the current Vertex
+# AI/Model Garden pricing page before relying on this for real budget
+# decisions: rates change over time and this is not an authoritative
+# source. Add an entry here for any other model this role is pointed
+# at; a model missing from this table is excluded from the cost total
+# and flagged in the final summary rather than silently costed as $0.
+#   https://cloud.google.com/blog/products/ai-machine-learning/expanding-vertex-ai-with-claude-opus-4-6
+#   https://platform.claude.com/docs/en/about-claude/pricing
+claude_pricing:
+  claude-opus-4-6:
+    input_per_million: 5.00
+    output_per_million: 25.00
+    cache_write_per_million: 6.25
+    cache_read_per_million: 0.50
+  claude-haiku-4-5:
+    input_per_million: 1.00
+    output_per_million: 5.00
+    cache_write_per_million: 1.25
+    cache_read_per_million: 0.10
+
+# git's real empty-tree object hash (verify with `git hash-object -t
+# tree /dev/null`), used as review_target_ref to diff an entire
+# checkout against nothing (a whole-branch audit, or a root commit
+# with no parent). A single named default so resolve_target_branch.yml
+# and resolve_target_commit.yml can't drift out of sync with each
+# other.
+git_empty_tree_sha: "4b825dc642cb6eb9a060e54bf8d69288fbee4904"

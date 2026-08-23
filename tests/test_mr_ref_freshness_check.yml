@@ -1,0 +1,213 @@
+---
+# Regression test for verify_target_freshness.yml: exercises the real task file
+# with fake glab/gh binaries (PATH-shadowed, output controlled by env vars).
+# Tests that persistent ref mismatches and unreachable APIs fail loudly instead of
+# allowing silent review of stale commits.
+#
+# Usage:
+#   ansible-playbook tests/test_mr_ref_freshness_check.yml
+
+- name: Test verify_target_freshness.yml against fake glab/gh binaries
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    verify_target_freshness_path: "{{ playbook_dir }}/../roles/review/tasks/verify_target_freshness.yml"
+    review_freshness_check_retries: 2
+    review_freshness_check_delay: 1
+    cloned_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    other_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+  tasks:
+    - name: Create a throwaway bin directory for fake glab/gh
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: "mr-freshness-fakebin-"
+      register: fake_bin_dir
+
+    - name: Write the fake glab/gh executable (output controlled entirely by env vars, so one script covers both)
+      ansible.builtin.copy:
+        dest: "{{ fake_bin_dir.path }}/{{ item }}"
+        mode: "0755"
+        content: |
+          #!/bin/bash
+          echo "${FAKE_API_JSON}"
+          if [ -n "${FAKE_API_STDERR:-}" ]; then
+            echo "${FAKE_API_STDERR}" >&2
+          fi
+          exit "${FAKE_API_RC:-0}"
+      loop:
+        - glab
+        - gh
+
+    # block/always: ensure cleanup even if scenarios fail outside their own rescue blocks.
+    - name: Run all freshness-check scenarios, always cleaning up the fake bin dir
+      block:
+        - name: "Scenario: GitLab API confirms the cloned commit is still current HEAD"
+          environment:
+            PATH: "{{ fake_bin_dir.path }}:{{ lookup('env', 'PATH') }}"
+            FAKE_API_RC: "0"
+            # Use to_json + string, not bare literal: Ansible's native-Jinja templating
+            # silently converts bare dict-shaped strings to real dicts, which stringify with
+            # single quotes when used as env vars, breaking JSON parsing.
+            FAKE_API_JSON: "{{ {'sha': cloned_sha} | to_json | string }}"
+          block:
+            - name: Run the real freshness check
+              ansible.builtin.include_tasks: "{{ verify_target_freshness_path }}"
+              vars:
+                review_platform: gitlab
+                review_org_repo: "test/fixture"
+                review_number: "42"
+                review_hostname: ""
+                review_clone_result: { after: "{{ cloned_sha }}" }
+          rescue:
+            - name: Fail the test -- a matching SHA must not fail loudly
+              ansible.builtin.fail:
+                msg: >-
+                  Expected no failure when the GitLab API confirms a match, but got:
+                  {{ ansible_failed_result.msg | default('unknown') }}
+
+        - name: "Scenario: GitHub API confirms the cloned commit is still current HEAD"
+          environment:
+            PATH: "{{ fake_bin_dir.path }}:{{ lookup('env', 'PATH') }}"
+            FAKE_API_RC: "0"
+            FAKE_API_JSON: "{{ {'head': {'sha': cloned_sha}} | to_json | string }}"
+          block:
+            - name: Run the real freshness check
+              ansible.builtin.include_tasks: "{{ verify_target_freshness_path }}"
+              vars:
+                review_platform: github
+                review_org_repo: "test/fixture"
+                review_number: "42"
+                review_hostname: ""
+                review_clone_result: { after: "{{ cloned_sha }}" }
+          rescue:
+            - name: Fail the test -- a matching SHA must not fail loudly
+              ansible.builtin.fail:
+                msg: >-
+                  Expected no failure when the GitHub API confirms a match, but got:
+                  {{ ansible_failed_result.msg | default('unknown') }}
+
+        - name: "Scenario: GitLab API persistently reports a different HEAD (stale clone)"
+          environment:
+            PATH: "{{ fake_bin_dir.path }}:{{ lookup('env', 'PATH') }}"
+            FAKE_API_RC: "0"
+            FAKE_API_JSON: "{{ {'sha': other_sha} | to_json | string }}"
+          block:
+            - name: Run the real freshness check
+              ansible.builtin.include_tasks: "{{ verify_target_freshness_path }}"
+              vars:
+                review_platform: gitlab
+                review_org_repo: "test/fixture"
+                review_number: "42"
+                review_hostname: ""
+                review_clone_result: { after: "{{ cloned_sha }}" }
+
+            - name: Fail the test -- a persistent mismatch must not proceed silently
+              ansible.builtin.fail:
+                msg: "Expected verify_target_freshness.yml to fail loudly on a stale clone, but it proceeded."
+          rescue:
+            - name: Assert the failure message names both SHAs and says they don't match
+              ansible.builtin.assert:
+                that:
+                  - "cloned_sha in ansible_failed_result.msg"
+                  - "other_sha in ansible_failed_result.msg"
+                  - "'does not match' in ansible_failed_result.msg"
+                fail_msg: >-
+                  Failure fired (correct), but its message wasn't the expected
+                  one: {{ ansible_failed_result.msg | default('unknown') }}
+
+        - name: "Scenario: GitHub API persistently reports a different HEAD (stale clone)"
+          environment:
+            PATH: "{{ fake_bin_dir.path }}:{{ lookup('env', 'PATH') }}"
+            FAKE_API_RC: "0"
+            FAKE_API_JSON: "{{ {'head': {'sha': other_sha}} | to_json | string }}"
+          block:
+            - name: Run the real freshness check
+              ansible.builtin.include_tasks: "{{ verify_target_freshness_path }}"
+              vars:
+                review_platform: github
+                review_org_repo: "test/fixture"
+                review_number: "42"
+                review_hostname: ""
+                review_clone_result: { after: "{{ cloned_sha }}" }
+
+            - name: Fail the test -- a persistent mismatch must not proceed silently
+              ansible.builtin.fail:
+                msg: "Expected verify_target_freshness.yml to fail loudly on a stale clone, but it proceeded."
+          rescue:
+            - name: Assert the failure message names both SHAs and says they don't match
+              ansible.builtin.assert:
+                that:
+                  - "cloned_sha in ansible_failed_result.msg"
+                  - "other_sha in ansible_failed_result.msg"
+                  - "'does not match' in ansible_failed_result.msg"
+                fail_msg: >-
+                  Failure fired (correct), but its message wasn't the expected
+                  one: {{ ansible_failed_result.msg | default('unknown') }}
+
+        - name: "Scenario: the platform API is unreachable (GitLab)"
+          environment:
+            PATH: "{{ fake_bin_dir.path }}:{{ lookup('env', 'PATH') }}"
+            FAKE_API_RC: "1"
+            FAKE_API_JSON: ""
+            FAKE_API_STDERR: "simulated network failure"
+          block:
+            - name: Run the real freshness check
+              ansible.builtin.include_tasks: "{{ verify_target_freshness_path }}"
+              vars:
+                review_platform: gitlab
+                review_org_repo: "test/fixture"
+                review_number: "42"
+                review_hostname: ""
+                review_clone_result: { after: "{{ cloned_sha }}" }
+
+            - name: Fail the test -- an unreachable API must not proceed silently
+              ansible.builtin.fail:
+                msg: "Expected verify_target_freshness.yml to fail loudly when the API is unreachable, but it proceeded."
+          rescue:
+            - name: Assert the failure message says the API could not be verified
+              ansible.builtin.assert:
+                that:
+                  - "'Could not verify' in ansible_failed_result.msg"
+                fail_msg: >-
+                  Failure fired (correct), but its message wasn't the expected
+                  one: {{ ansible_failed_result.msg | default('unknown') }}
+
+        - name: "Scenario: the platform API is unreachable (GitHub)"
+          environment:
+            PATH: "{{ fake_bin_dir.path }}:{{ lookup('env', 'PATH') }}"
+            FAKE_API_RC: "1"
+            FAKE_API_JSON: ""
+            FAKE_API_STDERR: "simulated network failure"
+          block:
+            - name: Run the real freshness check
+              ansible.builtin.include_tasks: "{{ verify_target_freshness_path }}"
+              vars:
+                review_platform: github
+                review_org_repo: "test/fixture"
+                review_number: "42"
+                review_hostname: ""
+                review_clone_result: { after: "{{ cloned_sha }}" }
+
+            - name: Fail the test -- an unreachable API must not proceed silently
+              ansible.builtin.fail:
+                msg: "Expected verify_target_freshness.yml to fail loudly when the API is unreachable, but it proceeded."
+          rescue:
+            - name: Assert the failure message says the API could not be verified
+              ansible.builtin.assert:
+                that:
+                  - "'Could not verify' in ansible_failed_result.msg"
+                fail_msg: >-
+                  Failure fired (correct), but its message wasn't the expected
+                  one: {{ ansible_failed_result.msg | default('unknown') }}
+
+        - name: All scenarios passed
+          ansible.builtin.debug:
+            msg: "verify_target_freshness.yml: match (x2), mismatch (x2), and unreachable-API (x2) scenarios all behaved as expected."
+      always:
+        - name: Clean up the fake bin directory
+          ansible.builtin.file:
+            path: "{{ fake_bin_dir.path }}"
+            state: absent

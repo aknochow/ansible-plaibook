@@ -1,0 +1,96 @@
+---
+# Verify cloned PR/MR HEAD matches platform's current HEAD (async ref mirrors can lag).
+# Polls API (not checked once) to catch actual sync gaps before silent stale reviews.
+
+- name: Poll the GitLab API for the MR's current HEAD sha
+  when: review_platform == 'gitlab'
+  ansible.builtin.command:
+    argv: >-
+      {{ ['glab', 'api',
+          'projects/' + (review_org_repo | replace('/', '%2F')) + '/merge_requests/' + (review_number | string)]
+         + (['--hostname', review_hostname] if review_hostname else []) }}
+  register: review_head_check_gitlab
+  changed_when: false
+  failed_when: false
+  # The .sha path is re-derived here rather than reusing
+  # review_api_head_sha (below): until: re-evaluates during polling,
+  # before that fact is ever computed -- it only exists once a poll
+  # task's retry loop has already finished.
+  until: >-
+    review_head_check_gitlab.rc == 0
+    and ((review_head_check_gitlab.stdout | from_json).sha | default('')) == review_clone_result.after
+  retries: "{{ review_freshness_check_retries }}"
+  delay: "{{ review_freshness_check_delay }}"
+
+- name: Poll the GitHub API for the PR's current HEAD sha
+  when: review_platform == 'github'
+  ansible.builtin.command:
+    # review_hostname is only ever populated from a GitLab URL match
+    # today (see resolve_target_pr.yml) -- always empty for GitHub, so
+    # this --hostname branch doesn't fire yet. Mirrored from the GitLab
+    # task anyway so this file doesn't have to change again the day
+    # GitHub Enterprise host parsing lands (handoff.ansible-plaibook-vcs-
+    # domain-env-vars.yaml).
+    argv: >-
+      {{ ['gh', 'api', 'repos/' + review_org_repo + '/pulls/' + (review_number | string)]
+         + (['--hostname', review_hostname] if review_hostname else []) }}
+  register: review_head_check_github
+  changed_when: false
+  failed_when: false
+  # Same reasoning as the GitLab task's until: above -- .head.sha is
+  # re-derived here, not reused from review_api_head_sha, because that
+  # fact doesn't exist yet during this task's own retry loop.
+  until: >-
+    review_head_check_github.rc == 0
+    and ((review_head_check_github.stdout | from_json).head.sha | default('')) == review_clone_result.after
+  retries: "{{ review_freshness_check_retries }}"
+  delay: "{{ review_freshness_check_delay }}"
+
+# Each poll task above registers to its own platform-specific variable
+# (not a shared one): when a task is skipped by its `when:`, Ansible
+# still sets the registered variable to a skip-status dict with no `rc`
+# key, which would silently clobber the other platform's real result if
+# both tasks shared one register name.
+#
+# review_platform can only ever be 'github' or 'gitlab' -- it's a
+# ternary with exactly those two literal branches (resolve_target_pr.yml's
+# "Resolve platform, org/repo, number, hostname" task), not an
+# open-ended value -- so the else-branch below is exhaustive, not a
+# silent default for an unhandled case.
+- name: Normalize the platform-specific poll result to a single fact
+  ansible.builtin.set_fact:
+    review_head_check: "{{ review_head_check_gitlab if review_platform == 'gitlab' else review_head_check_github }}"
+
+- name: Fail loudly if the platform API could not be reached to verify freshness
+  ansible.builtin.fail:
+    msg: >-
+      Could not verify {{ review_org_repo }} #{{ review_number }}'s current HEAD via
+      the {{ review_platform }} API after {{ review_head_check.attempts | default(1) }}
+      attempt(s): {{ review_head_check.stderr | default('no output', true) }}.
+      Refusing to review a commit that could not be confirmed fresh -- re-run
+      once the API is reachable.
+  when: review_head_check.rc != 0
+
+# Extracted once here rather than re-derived at each use: the platform
+# branch (gitlab: .sha, github: .head.sha) previously appeared in both
+# the fail message and its own `when:` condition below. The `>-` folded
+# block is deliberate, matching the argv:/until: style already used
+# throughout this file -- verified empirically that YAML folding here
+# can't leak whitespace into the result (the folded newlines land
+# between Jinja tokens, never inside a quoted string literal).
+- name: Extract the platform-reported current HEAD sha
+  ansible.builtin.set_fact:
+    review_api_head_sha: >-
+      {{ (review_head_check.stdout | from_json).sha
+         if review_platform == 'gitlab'
+         else (review_head_check.stdout | from_json).head.sha }}
+
+- name: Fail loudly if the target has moved since cloning
+  ansible.builtin.fail:
+    msg: >-
+      {{ review_org_repo }} {{ 'MR' if review_platform == 'gitlab' else 'PR' }}
+      #{{ review_number }}: cloned SHA {{ review_clone_result.after }} does not
+      match the {{ review_platform }} API's reported HEAD {{ review_api_head_sha }}
+      after {{ review_head_check.attempts | default(1) }} attempt(s).
+      Re-run the review to pick up the latest commit.
+  when: review_api_head_sha != review_clone_result.after

@@ -1,0 +1,75 @@
+---
+# One dispatch attempt for current explore turn (first try or retry).
+# Retries don't consume review_explore_max_turns budget (separate resource).
+# Sets explore_turn_result and explore_dispatch_valid (usable iff valid output or graceful no-tool on non-final).
+- name: "Call Claude with the current conversation, explore turn {{ explore_turn_count ~ ', attempt ' ~ (explore_attempt_number | default(1)) }}"
+  aknochow.claude.message:
+    provider: "{{ claude_provider }}"
+    region: "{{ claude_vertex_region if claude_provider == 'vertex' else omit }}"
+    project_id: "{{ claude_vertex_project if claude_provider == 'vertex' else omit }}"
+    api_key: "{{ claude_api_key if claude_provider == 'anthropic' else omit }}"
+    model: "{{ review_explore_model }}"
+    max_tokens: 4096
+    messages: "{{ explore_messages }}"
+    system: "{{ explore_system_prompt }}"
+    tools: >-
+      {{ explore_tools + [{
+           'name': 'report_findings',
+           'description': 'Report any additional findings discovered via exploration (empty list if none).',
+           'input_schema': explore_findings_schema
+         }] }}
+    tool_choice: "{{ {'type': 'tool', 'name': 'report_findings'} if explore_last_turn else omit }}"
+  register: explore_turn_result
+
+# Every attempt is a real billed call, not just the one that ends up
+# used -- must be recorded here so pipeline_stats.yml's cost accounting
+# reflects what actually got spent.
+- name: Record this attempt's usage for the pipeline-wide stats summary
+  ansible.builtin.set_fact:
+    pipeline_agent_calls: >-
+      {{ pipeline_agent_calls + [{
+           'target': review_org_repo + '#' + review_number, 'lens': 'explore',
+           'model': explore_turn_result.message.model, 'usage': explore_turn_result.usage,
+           'attempt': explore_attempt_number | default(1)
+         }] }}
+
+- name: Check whether this attempt called report_findings
+  ansible.builtin.set_fact:
+    _explore_attempt_report_calls: "{{ explore_turn_result.tool_calls | selectattr('name', 'equalto', 'report_findings') | list }}"
+
+# block/rescue for try/except, same pattern as validate_lens_dispatch.yml.
+- name: Validate this attempt's report_findings call, if it made one
+  when: _explore_attempt_report_calls | length > 0
+  block:
+    - name: Coerce this attempt's findings, tolerating a JSON-encoded string
+      coerce_findings_encoding:
+        value: "{{ _explore_attempt_report_calls[0].input.findings }}"
+        label: "Explore agent"
+      register: _explore_attempt_coerce_result
+
+    - name: Mark this attempt valid
+      ansible.builtin.set_fact:
+        explore_dispatch_valid: true
+  rescue:
+    - name: Mark this attempt invalid (malformed report_findings call)
+      ansible.builtin.set_fact:
+        explore_dispatch_valid: false
+
+# Only the FORCED last turn producing zero tool calls at all is treated
+# as invalid -- a non-forced turn stopping without a tool call is
+# explore_turn.yml's own existing, legitimate "nothing more to explore"
+# outcome (its "Force completion" task, unchanged by this file).
+- name: Mark a forced-last-turn attempt invalid if no tool was called at all
+  when: >-
+    _explore_attempt_report_calls | length == 0
+    and explore_last_turn
+    and explore_turn_result.stop_reason != 'tool_use'
+  ansible.builtin.set_fact:
+    explore_dispatch_valid: false
+
+- name: Mark a non-report_findings attempt valid otherwise (normal mid-exploration behavior)
+  when: >-
+    _explore_attempt_report_calls | length == 0
+    and not (explore_last_turn and explore_turn_result.stop_reason != 'tool_use')
+  ansible.builtin.set_fact:
+    explore_dispatch_valid: true

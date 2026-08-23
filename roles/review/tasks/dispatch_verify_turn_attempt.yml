@@ -1,0 +1,43 @@
+---
+# One dispatch attempt for current verify turn (first try or retry).
+# Retries don't consume review_verify_max_turns budget (separate resource).
+# Scalar verdict schema tolerates missing/malformed fields; retries only on forced-last-turn no-tool case.
+# Sets verify_turn_result and verify_dispatch_valid.
+- name: "Call Claude with the current conversation, verify turn {{ verify_turn_count ~ ', attempt ' ~ (verify_attempt_number | default(1)) }}"
+  aknochow.claude.message:
+    provider: "{{ claude_provider }}"
+    region: "{{ claude_vertex_region if claude_provider == 'vertex' else omit }}"
+    project_id: "{{ claude_vertex_project if claude_provider == 'vertex' else omit }}"
+    api_key: "{{ claude_api_key if claude_provider == 'anthropic' else omit }}"
+    model: "{{ review_verify_model }}"
+    max_tokens: 4096
+    messages: "{{ verify_messages }}"
+    system: "{{ verify_system_prompt }}"
+    tools: >-
+      {{ explore_tools + [trace_reachability_tool, {
+           'name': 'report_verdict',
+           'description': 'Report your verdict on the single finding you were given.',
+           'input_schema': verify_verdict_schema
+         }] }}
+    tool_choice: >-
+      {{ {'type': 'tool', 'name': 'report_verdict'} if verify_last_turn
+         else ({'type': 'tool', 'name': 'trace_reachability'} if (verify_first_turn and verify_is_reachability_claim)
+         else omit) }}
+  register: verify_turn_result
+
+- name: Record this attempt's usage for the pipeline-wide stats summary
+  ansible.builtin.set_fact:
+    pipeline_agent_calls: >-
+      {{ pipeline_agent_calls + [{
+           'target': review_org_repo + '#' + review_number, 'lens': 'verify',
+           'model': verify_turn_result.message.model, 'usage': verify_turn_result.usage,
+           'attempt': verify_attempt_number | default(1)
+         }] }}
+
+- name: Check whether this attempt called report_verdict
+  ansible.builtin.set_fact:
+    _verify_attempt_report_calls: "{{ verify_turn_result.tool_calls | selectattr('name', 'equalto', 'report_verdict') | list }}"
+
+- name: Mark this attempt valid unless it's the forced last turn with no tool call at all
+  ansible.builtin.set_fact:
+    verify_dispatch_valid: "{{ (not verify_last_turn) or (_verify_attempt_report_calls | length > 0) }}"

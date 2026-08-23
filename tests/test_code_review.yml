@@ -1,0 +1,35 @@
+---
+# Standalone test of the review engine (run_review_engine): reviews a local diff
+# between two commits, bypassing target resolution and PR/MR API access.
+#
+# Usage:
+#   ansible-playbook tests/test_code_review.yml
+
+- name: Test the review engine standalone
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_delegate_host: ""
+    review_repo_path: "{{ lookup('env', 'HOME') }}/code/ansible-openshell"
+    review_target_ref: "01cbc41"
+    review_source_ref: "7cdbda2"
+    review_short_sha: "7cdbda2"
+    review_branch: "test-standalone"
+    review_org_repo: "aknochow/ansible-openshell"
+    review_number: "7cdbda2"
+    review_context: ""
+    review_extra_notes: ""
+
+  tasks:
+    # lenses.yml's pipeline_agent_calls accumulation requires prior initialization.
+    - name: Initialize pipeline-wide agent usage accounting
+      ansible.builtin.set_fact:
+        pipeline_agent_calls: []
+        pipeline_findings_reports: []
+
+    - name: Run the code review
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: run_review_engine

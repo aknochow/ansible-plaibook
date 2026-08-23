@@ -1,0 +1,160 @@
+---
+# Independent, adversarial re-check of findings' factual claims and assigned severity.
+# Runs after explore.yml to audit final findings set. Scoped to Critical/Major + Minor borderline signals.
+# Unconditionally defaults evidence_status/requires_execution and tags findings with stable verify index.
+- name: Default evidence_status/requires_execution, tag each finding with a stable verify index, and mark scope-eligible findings
+  prepare_findings_for_verification:
+    findings: "{{ deduped_findings }}"
+    verify_severities: "{{ review_verify_severities }}"
+    security_sensitive_pattern: "{{ review_verify_security_sensitive_pattern }}"
+  register: _verify_prepared_result
+
+- name: Replace deduped_findings with the prepared copy
+  ansible.builtin.set_fact:
+    deduped_findings: "{{ _verify_prepared_result.findings }}"
+
+# Regroup findings by severity to reflect defaulted findings (new dicts, not mutations).
+# Rebuilt again post-verification when review_verify_enabled to pick up actual verdicts.
+- name: Regroup findings by severity so groupings reflect the defaulted findings
+  ansible.builtin.set_fact:
+    findings_critical: "{{ deduped_findings | selectattr('severity', 'equalto', 'Critical') | list }}"
+    findings_major: "{{ deduped_findings | selectattr('severity', 'equalto', 'Major') | list }}"
+    findings_minor: "{{ deduped_findings | selectattr('severity', 'equalto', 'Minor') | list }}"
+    findings_nit: "{{ deduped_findings | selectattr('severity', 'equalto', 'Nit') | list }}"
+
+- name: Run the independent verification pass
+  when: review_verify_enabled | bool
+  block:
+    - name: Select the findings in scope for verification
+      ansible.builtin.set_fact:
+        verify_scoped_findings: "{{ deduped_findings | selectattr('_verify_eligible') | list }}"
+
+    - name: Show how many findings are in scope for verification
+      ansible.builtin.debug:
+        msg: >-
+          Verification pass: {{ verify_scoped_findings | length }}
+          finding(s) in scope ({{ verify_scoped_findings | selectattr('severity', 'in', ['Critical', 'Major']) | list | length }}
+          Critical/Major, {{ verify_scoped_findings | selectattr('severity', 'equalto', 'Minor') | list | length }}
+          borderline Minor).
+
+    # Read immediately-preceding round's summary.json for continuity resolution.
+    # selectattr('finding_id', 'defined') guards against pre-finding_id versions.
+    # module docstring already documents for evidence_status. The second
+    # selectattr('finding_id') then drops any finding that key IS
+    # present on but null (out of scope for identity-tracking that
+    # round, e.g. a Nit). Only findings with a real assigned id are ever
+    # worth offering as something a new finding could continue.
+    #
+    # block/rescue rather than trusting slurp to succeed: found=true
+    # only means a findings.md existed in that directory (find_latest_
+    # prior_review.py's own check) -- summary.json living alongside it
+    # is not itself guaranteed (a prior round from before persist.yml
+    # wrote one at all, or before this key existed). Treated the same as
+    # "no prior round" rather than failing the whole review over a
+    # continuity nice-to-have.
+    - name: Read the immediately-preceding round's identity-tracked findings, if any
+      when: _latest_prior_review.found
+      block:
+        - name: Slurp the prior round's structured summary
+          ansible.builtin.slurp:
+            path: "{{ review_output_base }}/{{ review_org_repo }}/{{ review_branch }}/{{ _latest_prior_review.latest_dir }}/summary.json"
+          register: _prior_summary_raw
+
+        - name: Extract the prior round's identity-tracked findings
+          ansible.builtin.set_fact:
+            prior_round_findings: >-
+              {{ (_prior_summary_raw.content | b64decode | from_json).findings
+                 | selectattr('finding_id', 'defined') | selectattr('finding_id') | list }}
+      rescue:
+        - name: Treat an unreadable or pre-finding-id prior summary.json as no prior structured findings
+          ansible.builtin.set_fact:
+            prior_round_findings: []
+
+    - name: Default prior_round_findings to empty when no prior review exists
+      when: not _latest_prior_review.found
+      ansible.builtin.set_fact:
+        prior_round_findings: []
+
+    # No shared "done" flag across iterations here (unlike the turn-loop
+    # inside verify_finding.yml) — every scoped finding is independently
+    # verified regardless of what earlier findings concluded, so there's
+    # nothing for a per-item `when` to short-circuit.
+    - name: Independently verify each scoped finding
+      ansible.builtin.include_tasks: verify_finding.yml
+      loop: "{{ verify_scoped_findings }}"
+      loop_control:
+        loop_var: verify_target_finding
+        label: "{{ verify_target_finding.file }}:{{ verify_target_finding.line }} [{{ verify_target_finding.severity }}]"
+
+    # Two separate views from here: deduped_findings (full, refuted
+    # findings still visible) for rendering, vs. a rejectattr-filtered
+    # copy for score/verdict math only — a refuted finding must
+    # disappear from the points total without disappearing from the
+    # report (per-finding transparency), same asymmetry merge.yml's
+    # self-refuted filter achieves by outright removal; here it's a
+    # field instead, since the verifier's check is more authoritative
+    # than the model's own self-verification, so it's worth keeping
+    # visible rather than silently dropping it the way a self-refuted
+    # lens finding is.
+    #
+    # Side effect worth being explicit about: this also means
+    # explore-added findings start counting toward these scores for the
+    # first time — explore.yml's own header comment defers that as "real
+    # added complexity for a bolt-on pass"; recomputing here (reusing the
+    # same compute_review_scores plugin merge.yml uses) is where that
+    # gap actually closes, now that a full recompute is needed anyway to
+    # exclude refuted findings. Second call site for
+    # action_plugins/compute_review_scores.py (see
+    # merge.yml's own comment for the migration-roadmap context) — this
+    # is exactly why the plugin takes a `findings` list as an argument
+    # rather than reading deduped_findings itself: each caller decides
+    # its own pre-filtering.
+    - name: Recompute scores and verdict excluding refuted findings
+      compute_review_scores:
+        findings: "{{ deduped_findings | rejectattr('evidence_status', 'equalto', 'refuted') | list }}"
+        severity_points: "{{ severity_points }}"
+      register: verify_score_result
+
+    - name: Store the recomputed scores and verdict
+      ansible.builtin.set_fact:
+        score_functionality: "{{ verify_score_result.score_functionality }}"
+        score_security: "{{ verify_score_result.score_security }}"
+        score_quality: "{{ verify_score_result.score_quality }}"
+        score_overall: "{{ verify_score_result.score_overall }}"
+        review_verdict: "{{ verify_score_result.verdict }}"
+
+    - name: Regroup findings by severity for rendering (refuted findings stay visible here)
+      ansible.builtin.set_fact:
+        findings_critical: "{{ deduped_findings | selectattr('severity', 'equalto', 'Critical') | list }}"
+        findings_major: "{{ deduped_findings | selectattr('severity', 'equalto', 'Major') | list }}"
+        findings_minor: "{{ deduped_findings | selectattr('severity', 'equalto', 'Minor') | list }}"
+        findings_nit: "{{ deduped_findings | selectattr('severity', 'equalto', 'Nit') | list }}"
+
+    - name: Show the verification pass outcome
+      ansible.builtin.debug:
+        msg: >-
+          Verification pass: {{ deduped_findings | selectattr('evidence_status', 'equalto', 'verified') | list | length }}
+          verified, {{ deduped_findings | selectattr('evidence_status', 'equalto', 'refuted') | list | length }}
+          refuted (excluded from score), {{ deduped_findings | selectattr('evidence_status', 'equalto', 'inconclusive') | list | length }}
+          inconclusive.
+
+# Unconditional (like the defaulting/indexing pass above) since
+# _verify_index is added unconditionally too. It's a matching key
+# private to this file and verify_finding.yml's merge-back loop --
+# meaningless to persist.yml's summary.json consumers, and left in
+# would leak an implementation detail into that structured artifact.
+- name: Strip the internal _verify_index field before rendering/persisting
+  strip_verify_index:
+    findings: "{{ deduped_findings }}"
+  register: _verify_stripped_result
+
+- name: Replace deduped_findings with the stripped copy
+  ansible.builtin.set_fact:
+    deduped_findings: "{{ _verify_stripped_result.findings }}"
+
+- name: Regroup findings by severity one final time after stripping _verify_index
+  ansible.builtin.set_fact:
+    findings_critical: "{{ deduped_findings | selectattr('severity', 'equalto', 'Critical') | list }}"
+    findings_major: "{{ deduped_findings | selectattr('severity', 'equalto', 'Major') | list }}"
+    findings_minor: "{{ deduped_findings | selectattr('severity', 'equalto', 'Minor') | list }}"
+    findings_nit: "{{ deduped_findings | selectattr('severity', 'equalto', 'Nit') | list }}"

@@ -1,0 +1,26 @@
+---
+# ansible-lint's yaml[*] rules delegate to yamllint. extends: default
+# pulls in yamllint's full stock ruleset, which introduced two rule
+# categories ansible-lint's own built-in yaml linting doesn't enforce
+# by default (braces spacing, document-start) -- confirmed directly by
+# comparing full-repo lint output with and without this file present.
+# Explicitly disabled below to keep this file scoped to its one actual
+# purpose (line-length), not silently expanding lint scope as a side
+# effect of extending a base ruleset.
+#
+# line-length: confirmed via a real pass that the overwhelming majority
+# of this repo's long lines are single unbreakable tokens (regex
+# literals, URLs, multi-variable debug/fail messages) that would only
+# get WORSE if force-wrapped. 220 covers all but one confirmed case (a
+# single, deliberately-flat regex literal at roles/review/defaults/
+# main.yml), suppressed there with an inline
+# `# noqa: yaml[line-length]` instead of raising the limit further
+# just for one line. Deliberately NOT downgraded to level: warning --
+# a future line past 220 should still fail production-profile
+# enforcement, not silently pass as a warning.
+extends: default
+rules:
+  line-length:
+    max: 220
+  braces: disable
+  document-start: disable

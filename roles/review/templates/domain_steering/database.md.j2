@@ -1,0 +1,9 @@
+(target: both agents)
+This diff contains database operations or ORM code. Check for
+SQL injection — parameterized queries only, never string
+interpolation. Verify N+1 query patterns — loading related
+objects in a loop instead of a join/prefetch. Check that
+migrations are reversible. Verify transactions wrap multi-step
+operations that must be atomic. Check for missing indexes on
+columns used in WHERE/ORDER BY. Verify connection pool settings
+— unclosed connections cause resource exhaustion.

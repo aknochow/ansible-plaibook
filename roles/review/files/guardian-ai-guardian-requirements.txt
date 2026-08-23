@@ -1,0 +1,11 @@
+# Pinned version + hash for guardian_scan.yml's self-install-when-missing
+# step (sandboxed reviews only). --no-deps at download/install time,
+# always -- ai-guardian's own heavier extras (tree-sitter grammars,
+# tokenizers, bandit, etc.) are not needed for the toml-patterns-backed
+# secret scanning this task actually relies on; see guardian_scan.yml's
+# own header comment. Hash regenerated with:
+#   pip3 download --no-deps --platform any --python-version 3.11 \
+#     --implementation py --abi none --only-binary=:all: \
+#     -d <dir> ai-guardian==<new-version>
+#   shasum -a 256 <dir>/*.whl
+ai-guardian==1.15.0 --hash=sha256:bed4d5bd5c1532feced9ee6f7d751692a29ae9950d2e6192cebecf6356cb14fb

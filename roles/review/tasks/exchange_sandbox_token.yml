@@ -1,0 +1,56 @@
+---
+# Exchange ServiceAccount token for JWT (gateway requires mTLS + OIDC JWT).
+# Extracted for conditional loading; local dev uses interactive OIDC login instead.
+# sandbox_sa_token injected via AAP credential (not available on disk in Container Groups).
+
+- name: Fail loudly if sandbox_auth_bridge_route isn't HTTPS
+  ansible.builtin.assert:
+    that:
+      - sandbox_auth_bridge_route is match('^https://')
+    fail_msg: >-
+      sandbox_auth_bridge_route must use HTTPS — refusing to send the
+      ServiceAccount token to a plaintext endpoint.
+    quiet: true
+
+- name: Exchange the ServiceAccount token for an OIDC JWT via auth-bridge
+  ansible.builtin.uri:
+    url: "{{ sandbox_auth_bridge_route }}"
+    method: POST
+    # Explicit even though it's already the module default — documents
+    # intent, so a future TLS-validation failure gets fixed by correcting
+    # trust (e.g. ca_path) rather than silently reached-for
+    # validate_certs: false, which would open this to MITM.
+    validate_certs: true
+    headers:
+      Authorization: "Bearer {{ sandbox_sa_token }}"
+    # No body_format: with body_format: json and no body, ansible.builtin.uri
+    # sends json.dumps(None) ("null") plus Content-Type: application/json —
+    # not actually empty (verified in the module's own source). Leaving
+    # body_format unset (default "raw", no body given) sends no body and
+    # no Content-Type at all, matching the original bug report's own curl
+    # repro exactly: a bare POST with only the Authorization header.
+    # auth-bridge identifies the caller purely from that header either way.
+    return_content: true
+    # Fail fast rather than stalling the whole unattended pipeline (an
+    # AAP job-level timeout is often unset/unlimited) on an unreachable
+    # or hung auth-bridge, after a sandbox has already been created.
+    timeout: 30
+  register: sandbox_token_exchange
+  # Both the SA token (request) and the exchanged JWT (response) are
+  # secrets — no_log keeps either from landing in job output/logs.
+  no_log: true
+
+- name: Fail with a clear message if auth-bridge didn't return a token
+  ansible.builtin.assert:
+    that:
+      - sandbox_token_exchange.json.access_token | default('') | length > 0
+    fail_msg: >-
+      auth-bridge's /token/exchange response had no access_token —
+      check the ServiceAccount's openshell-users Group membership and
+      that sandbox_sa_token is actually set to a valid token.
+    quiet: true
+
+- name: Set fact for the exchanged bearer token
+  ansible.builtin.set_fact:
+    sandbox_bearer_token: "{{ sandbox_token_exchange.json.access_token }}"
+  no_log: true

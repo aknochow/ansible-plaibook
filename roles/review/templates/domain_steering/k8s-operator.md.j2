@@ -1,0 +1,8 @@
+(target: both agents)
+This is a Kubernetes operator project (controller-runtime).
+Verify finalizer cleanup covers all resources the operator
+creates. Check that resources are updated on spec changes, not
+just created. Verify Secrets/ConfigMaps referenced by Deployments
+are validated before Deployment creation. Check that containers
+have probes and resource limits. Verify status conditions defined
+in types are set by controller code.

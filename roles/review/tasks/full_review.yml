@@ -1,0 +1,58 @@
+---
+# Split out of main.yml so its when: gate (not same_commit_fast_path)
+# lives on the include_tasks call itself rather than a block: -- same
+# reasoning as same_commit_fast_path.yml's own header comment.
+
+# Created once here, not inside dump_debug_prompt.yml itself -- that
+# file is included once per lens, once for explore, and once per
+# verified finding, so a per-include mkdir (even though
+# ansible.builtin.file is idempotent/cheap) is redundant repeated work
+# across every dump in a single run.
+- name: Ensure the debug prompt dump directory exists (debug mode only)
+  when: review_debug_dump_prompts | bool
+  ansible.builtin.file:
+    path: "{{ lookup('env', 'HOME') }}/.cache/ansible-plaibook/debug_prompts/{{ review_branch | regex_replace('[^A-Za-z0-9_.-]', '_') }}"
+    state: directory
+    mode: "0700"
+
+# Runs BEFORE the lenses, scanning the exact same shared content
+# (review_full_diff/review_context) they're about to receive -- an
+# independent, deterministic, model-agnostic check running in parallel
+# with the model-based lens review, not a gate in front of it. See
+# guardian_scan.yml's own header for the full design rationale.
+- name: Scan the shared diff/PR-description content with ai-guardian
+  ansible.builtin.include_tasks: guardian_scan.yml
+
+- name: Dispatch the Security and Review lens agents
+  ansible.builtin.include_tasks: lenses.yml
+
+- name: Merge findings and compute scores
+  ansible.builtin.include_tasks: merge.yml
+
+# when: on the include itself, not a when:+block: inside explore.yml --
+# explore.yml's entire content used to be one such block; hoisted here
+# so a disabled exploration pass skips as a single unit (see
+# doc.ansible-best-practices.yaml's block_rescue_always_unreachable_gotcha
+# entry -- purely a cleaner-output concern here, no delegate_to/remote
+# connection involved).
+- name: Look beyond the diff for additional findings
+  ansible.builtin.include_tasks: explore.yml
+  when: review_explore_enabled | bool
+
+- name: Independently verify checkable claims in Critical/Major findings
+  ansible.builtin.include_tasks: verify.yml
+
+# Runs AFTER verify.yml, not inside guardian_scan.yml itself -- verify.yml
+# is the last stage that sets review_verdict (via merge.yml first, then
+# verify.yml's own recompute when review_verify_enabled), so overriding
+# it any earlier would just get silently overwritten. guardian_scan.yml's
+# own job stays scoped to running the scan and computing
+# guardian_blocking_findings; deciding what that means for review_verdict
+# belongs at the orchestration level, same separation of concerns
+# verify.yml's own scores/verdict recompute already has from merge.yml's
+# initial computation.
+- name: Enforce SECRET-001-class ai-guardian findings as a blocking verdict
+  ansible.builtin.include_tasks: guardian_scan_enforce_verdict.yml
+
+- name: Render and persist the findings
+  ansible.builtin.include_tasks: persist.yml

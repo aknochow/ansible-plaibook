@@ -1,0 +1,384 @@
+---
+# Executes one tool_use block (tool_call) against review_repo_path,
+# appending an Anthropic-shaped tool_result content block to
+# explore_tool_results. Deliberately excludes write_file/run_command:
+# this agent is read-only.
+#
+# Shared by tasks/explore.yml and tasks/verify.yml, both read-only
+# tool-calling agents. trace_reachability is only ever offered to
+# verify_turn.yml (see that file's tools: list); explore.yml never
+# sends this tool_call name, so its block below simply never triggers
+# there.
+#
+# Every tool below validates its path argument stays within
+# review_repo_path before use: an absolute or ../-escaping path is
+# rejected as a tool error rather than reaching the filesystem call,
+# and the resolved (symlink-followed) real path is separately checked
+# for containment too, since a symlink inside the repo pointing
+# outside it would otherwise sail past the lexical check alone.
+
+- name: "Dispatch tool: read_file"
+  when: tool_call.name == 'read_file'
+  block:
+    # Rejects '..' path segments and absolute paths before the join
+    # below, rather than resolving-then-checking: simpler, and doesn't
+    # need filesystem access on review_delegate_host to validate.
+    # verify_turn.yml's read_file calls are driven by an LLM given
+    # finding data (description/evidence/fix) that ultimately
+    # originates from a reviewed diff, content once removed from the
+    # direct prompt-injection defense the lens/explore prompts apply to
+    # the diff itself. An unconstrained path join here would let a
+    # sufficiently-crafted finding steer a read outside
+    # review_repo_path (e.g. `../../.ssh/id_rsa`), with the result
+    # echoed back into the model's response and potentially into the
+    # persisted report.
+    - name: Check the requested path for traversal attempts
+      ansible.builtin.set_fact:
+        _explore_read_path_rejected: >-
+          {{ ('..' in tool_call.input.path.split('/')) or tool_call.input.path.startswith('/') }}
+
+    # The lexical check above can't catch a symlink INSIDE the repo
+    # pointing OUTSIDE it -- resolve both the requested path and
+    # review_repo_path itself to their real (symlink-resolved) form and
+    # assert containment there too. Only runs once the lexical check
+    # already passed; a nonexistent path just makes realpath fail (rc
+    # != 0) and falls through to the existing slurp-based "file not
+    # found" handling below, unaffected by this check.
+    - name: Resolve the requested path's real target
+      ansible.builtin.command:
+        argv: [realpath, "{{ review_repo_path }}/{{ tool_call.input.path }}"]
+      delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+      ignore_unreachable: true
+      register: _explore_read_realpath
+      changed_when: false
+      failed_when: false
+      when: not _explore_read_path_rejected
+
+    # Independent of failed_when: false above -- UNREACHABLE (a broken
+    # sandbox connection) is a different failure class than "the path
+    # doesn't exist" (a normal, expected, already-handled rc != 0).
+    - name: Fail loudly if the sandbox connection was unreachable
+      ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+      vars:
+        fail_if_unreachable_result_var: _explore_read_realpath
+
+    - name: Resolve review_repo_path's own real form for a correct comparison
+      ansible.builtin.command:
+        argv: [realpath, "{{ review_repo_path }}"]
+      delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+      ignore_unreachable: true
+      register: _explore_repo_realpath
+      changed_when: false
+      failed_when: false
+      when: not _explore_read_path_rejected and (_explore_read_realpath.rc | default(1)) == 0
+
+    - name: Fail loudly if the sandbox connection was unreachable
+      ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+      vars:
+        fail_if_unreachable_result_var: _explore_repo_realpath
+
+    - name: Reject the path if its resolved target escapes the repo root
+      ansible.builtin.assert:
+        that:
+          # startswith(repo_path) alone has a prefix-confusion bug: a
+          # sibling directory like /home/repo-evil/secret would pass
+          # containment against a repo root of /home/repo, since the
+          # string genuinely starts with that prefix. Require an exact
+          # match OR the repo path followed by a real separator.
+          - >-
+            (_explore_read_realpath.stdout | trim) == (_explore_repo_realpath.stdout | trim)
+            or (_explore_read_realpath.stdout | trim).startswith((_explore_repo_realpath.stdout | trim) + '/')
+        fail_msg: "resolved path escapes review_repo_path via a symlink or other indirection"
+        quiet: true
+      register: _explore_read_containment
+      ignore_errors: true
+      when: not _explore_read_path_rejected and (_explore_read_realpath.rc | default(1)) == 0
+
+    - name: Update the rejection flag if the symlink escape check failed
+      ansible.builtin.set_fact:
+        _explore_read_path_rejected: true
+      when: not _explore_read_path_rejected and (_explore_read_containment.failed | default(false))
+
+    # Split into two tasks (rejected vs. not) rather than one combined
+    # ternary, to avoid relying on Jinja/Python's short-circuit `or`
+    # semantics being obvious to a future reader.
+    - name: Read the requested file
+      ansible.builtin.slurp:
+        path: "{{ review_repo_path }}/{{ tool_call.input.path }}"
+      delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+      ignore_unreachable: true
+      register: _explore_read_result
+      ignore_errors: true
+      when: not _explore_read_path_rejected
+
+    - name: Fail loudly if the sandbox connection was unreachable
+      ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+      vars:
+        fail_if_unreachable_result_var: _explore_read_result
+
+    - name: Record a rejected read_file tool call as an error
+      ansible.builtin.set_fact:
+        explore_tool_results: >-
+          {{ explore_tool_results + [{
+               'type': 'tool_result',
+               'tool_use_id': tool_call.id,
+               'content': "ERROR: path must stay within the repo root -- no .. segments or leading / allowed",
+               'is_error': true
+             }] }}
+      when: _explore_read_path_rejected
+
+    - name: Record the read_file tool result
+      ansible.builtin.set_fact:
+        explore_tool_results: >-
+          {{ explore_tool_results + [{
+               'type': 'tool_result',
+               'tool_use_id': tool_call.id,
+               'content': (_explore_read_result.content | b64decode) if not (_explore_read_result.failed | default(false))
+                           else ('ERROR: ' + (_explore_read_result.msg | default('file not found'))),
+               'is_error': _explore_read_result.failed | default(false)
+             }] }}
+      when: not _explore_read_path_rejected
+
+- name: "Dispatch tool: search"
+  when: tool_call.name == 'search'
+  block:
+    # grep resolves an absolute path argument on its own, ignoring
+    # chdir entirely, so an unvalidated path could run against the
+    # whole filesystem. Same containment check as read_file's block
+    # above, applied here too. `default('.', true)` (not the two-arg
+    # form) treats any falsy value, including an explicit empty
+    # string, as "not provided": grep given an empty-string path reads
+    # stdin and hangs rather than erroring.
+    - name: Check the requested path for traversal attempts
+      ansible.builtin.set_fact:
+        _explore_search_path_rejected: >-
+          {{ ('..' in _explore_search_input_path.split('/')) or _explore_search_input_path.startswith('/') }}
+      vars:
+        _explore_search_input_path: "{{ tool_call.input.path | default('.', true) }}"
+
+    # Same symlink-escape gap and fix as read_file's block above --
+    # lexical checks can't catch a symlink inside the repo pointing
+    # outside it. See that block's comment for the full rationale.
+    - name: Resolve the requested search path's real target
+      ansible.builtin.command:
+        argv: [realpath, "{{ review_repo_path }}/{{ tool_call.input.path | default('.') }}"]
+      delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+      ignore_unreachable: true
+      register: _explore_search_realpath
+      changed_when: false
+      failed_when: false
+      when: not _explore_search_path_rejected
+
+    - name: Fail loudly if the sandbox connection was unreachable
+      ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+      vars:
+        fail_if_unreachable_result_var: _explore_search_realpath
+
+    - name: Resolve review_repo_path's own real form for a correct comparison
+      ansible.builtin.command:
+        argv: [realpath, "{{ review_repo_path }}"]
+      delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+      ignore_unreachable: true
+      register: _explore_search_repo_realpath
+      changed_when: false
+      failed_when: false
+      when: not _explore_search_path_rejected and (_explore_search_realpath.rc | default(1)) == 0
+
+    - name: Fail loudly if the sandbox connection was unreachable
+      ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+      vars:
+        fail_if_unreachable_result_var: _explore_search_repo_realpath
+
+    - name: Reject the search path if its resolved target escapes the repo root
+      ansible.builtin.assert:
+        that:
+          # Same prefix-confusion fix as read_file's block above.
+          - >-
+            (_explore_search_realpath.stdout | trim) == (_explore_search_repo_realpath.stdout | trim)
+            or (_explore_search_realpath.stdout | trim).startswith((_explore_search_repo_realpath.stdout | trim) + '/')
+        fail_msg: "resolved path escapes review_repo_path via a symlink or other indirection"
+        quiet: true
+      register: _explore_search_containment
+      ignore_errors: true
+      when: not _explore_search_path_rejected and (_explore_search_realpath.rc | default(1)) == 0
+
+    - name: Update the rejection flag if the symlink escape check failed
+      ansible.builtin.set_fact:
+        _explore_search_path_rejected: true
+      when: not _explore_search_path_rejected and (_explore_search_containment.failed | default(false))
+
+    - name: Run the search
+      ansible.builtin.command:
+        # -F (fixed-string) instead of grep's default BRE regex: an
+        # LLM-supplied pattern with unbounded regex complexity (e.g.
+        # catastrophic-backtracking alternation/repetition) could hang
+        # grep on a large file. The `--` end-of-options marker (still
+        # needed even with -F) stops a pattern like `--include=...`
+        # from being parsed as a grep flag instead of a literal search
+        # string.
+        argv: [grep, -Frn, --, "{{ tool_call.input.pattern }}", "{{ tool_call.input.path | default('.') }}"]
+        chdir: "{{ review_repo_path }}"
+      delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+      ignore_unreachable: true
+      register: _explore_search_result
+      changed_when: false
+      failed_when: false
+      when: not _explore_search_path_rejected
+
+    - name: Fail loudly if the sandbox connection was unreachable
+      ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+      vars:
+        fail_if_unreachable_result_var: _explore_search_result
+
+    - name: Record a rejected search tool call as an error
+      ansible.builtin.set_fact:
+        explore_tool_results: >-
+          {{ explore_tool_results + [{
+               'type': 'tool_result',
+               'tool_use_id': tool_call.id,
+               'content': "ERROR: path must stay within the repo root -- no .. segments or leading / allowed",
+               'is_error': true
+             }] }}
+      when: _explore_search_path_rejected
+
+    - name: Record the search tool result
+      ansible.builtin.set_fact:
+        explore_tool_results: >-
+          {{ explore_tool_results + [{
+               'type': 'tool_result',
+               'tool_use_id': tool_call.id,
+               'content': _explore_search_result.stdout if (_explore_search_result.stdout | default('') | length > 0) else '(no matches)'
+             }] }}
+      when: not _explore_search_path_rejected
+
+- name: "Dispatch tool: trace_reachability"
+  when: tool_call.name == 'trace_reachability'
+  block:
+    # Same lexical + realpath containment check as read_file's block
+    # above: trace_reachability reads file content the same way, so it
+    # needs the same defense against a path escaping review_repo_path.
+    - name: Check the requested path for traversal attempts
+      ansible.builtin.set_fact:
+        _explore_trace_path_rejected: >-
+          {{ ('..' in tool_call.input.path.split('/')) or tool_call.input.path.startswith('/') }}
+
+    - name: Resolve the requested path's real target
+      ansible.builtin.command:
+        argv: [realpath, "{{ review_repo_path }}/{{ tool_call.input.path }}"]
+      delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+      ignore_unreachable: true
+      register: _explore_trace_realpath
+      changed_when: false
+      failed_when: false
+      when: not _explore_trace_path_rejected
+
+    - name: Fail loudly if the sandbox connection was unreachable
+      ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+      vars:
+        fail_if_unreachable_result_var: _explore_trace_realpath
+
+    - name: Resolve review_repo_path's own real form for a correct comparison
+      ansible.builtin.command:
+        argv: [realpath, "{{ review_repo_path }}"]
+      delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+      ignore_unreachable: true
+      register: _explore_trace_repo_realpath
+      changed_when: false
+      failed_when: false
+      when: not _explore_trace_path_rejected and (_explore_trace_realpath.rc | default(1)) == 0
+
+    - name: Fail loudly if the sandbox connection was unreachable
+      ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+      vars:
+        fail_if_unreachable_result_var: _explore_trace_repo_realpath
+
+    - name: Reject the path if its resolved target escapes the repo root
+      ansible.builtin.assert:
+        that:
+          - >-
+            (_explore_trace_realpath.stdout | trim) == (_explore_trace_repo_realpath.stdout | trim)
+            or (_explore_trace_realpath.stdout | trim).startswith((_explore_trace_repo_realpath.stdout | trim) + '/')
+        fail_msg: "resolved path escapes review_repo_path via a symlink or other indirection"
+        quiet: true
+      register: _explore_trace_containment
+      ignore_errors: true
+      when: not _explore_trace_path_rejected and (_explore_trace_realpath.rc | default(1)) == 0
+
+    - name: Update the rejection flag if the symlink escape check failed
+      ansible.builtin.set_fact:
+        _explore_trace_path_rejected: true
+      when: not _explore_trace_path_rejected and (_explore_trace_containment.failed | default(false))
+
+    - name: Read the requested file's content for tracing
+      ansible.builtin.slurp:
+        path: "{{ review_repo_path }}/{{ tool_call.input.path }}"
+      delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+      ignore_unreachable: true
+      register: _explore_trace_read_result
+      ignore_errors: true
+      when: not _explore_trace_path_rejected
+
+    - name: Fail loudly if the sandbox connection was unreachable
+      ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+      vars:
+        fail_if_unreachable_result_var: _explore_trace_read_result
+
+    - name: Record a rejected trace_reachability tool call as an error
+      ansible.builtin.set_fact:
+        explore_tool_results: >-
+          {{ explore_tool_results + [{
+               'type': 'tool_result',
+               'tool_use_id': tool_call.id,
+               'content': "ERROR: path must stay within the repo root -- no .. segments or leading / allowed",
+               'is_error': true
+             }] }}
+      when: _explore_trace_path_rejected
+
+    - name: Record a file-not-found trace_reachability tool call as an error
+      ansible.builtin.set_fact:
+        explore_tool_results: >-
+          {{ explore_tool_results + [{
+               'type': 'tool_result',
+               'tool_use_id': tool_call.id,
+               'content': 'ERROR: ' + (_explore_trace_read_result.msg | default('file not found')),
+               'is_error': true
+             }] }}
+      when: not _explore_trace_path_rejected and (_explore_trace_read_result.failed | default(false))
+
+    # The plugin itself never touches the filesystem or delegated host;
+    # Ansible does the I/O, the plugin does pure logic.
+    # NotPythonSourceError (a non-.py file, or a syntax error) surfaces
+    # as result.failed here, reported to the model as an is_error tool
+    # result rather than an Ansible task failure, so a bad
+    # trace_reachability call doesn't abort the whole review.
+    - name: Run the static reachability trace
+      trace_reachability:
+        source: "{{ _explore_trace_read_result.content | b64decode }}"
+        line: "{{ tool_call.input.line }}"
+      register: _explore_trace_result
+      ignore_errors: true
+      when: not _explore_trace_path_rejected and not (_explore_trace_read_result.failed | default(false))
+
+    - name: Record a trace_reachability plugin error (e.g. not valid Python source)
+      ansible.builtin.set_fact:
+        explore_tool_results: >-
+          {{ explore_tool_results + [{
+               'type': 'tool_result',
+               'tool_use_id': tool_call.id,
+               'content': 'ERROR: ' + (_explore_trace_result.msg | default('trace_reachability failed')),
+               'is_error': true
+             }] }}
+      when: >-
+        not _explore_trace_path_rejected and not (_explore_trace_read_result.failed | default(false))
+        and (_explore_trace_result.failed | default(false))
+
+    - name: Record the trace_reachability tool result
+      ansible.builtin.set_fact:
+        explore_tool_results: "{{ explore_tool_results + [{'type': 'tool_result', 'tool_use_id': tool_call.id, 'content': _explore_trace_result.trace | to_nice_json}] }}"
+        # Deterministic anchor for findings.md's static-only caveat
+        # label, set here on an actually-successful trace, never
+        # sourced from the model's own say-so.
+        verify_reachability_tool_used: true
+      when: >-
+        not _explore_trace_path_rejected and not (_explore_trace_read_result.failed | default(false))
+        and not (_explore_trace_result.failed | default(false))

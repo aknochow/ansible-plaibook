@@ -1,0 +1,26 @@
+---
+# Included with `when:` at include site for single skip notice (not per-task).
+# Copy checkout to sandbox for sandboxed review.
+
+- name: Determine the sandbox-side checkout path
+  ansible.builtin.set_fact:
+    # Reuse controller tempfile's random suffix for uniqueness (avoid same-PR collisions).
+    review_checkout_dir: { path: "/sandbox/{{ review_clone_dir_controller.path | basename }}" }
+
+# sandbox_upload uses gRPC exec channel (not SSH/SFTP); mkdir -p built-in.
+- name: Copy the checkout into the sandbox
+  aknochow.openshell.sandbox_upload:
+    gateway: "{{ sandbox_gateway }}"
+    tls_cert: "{{ sandbox_tls_cert | default(omit, true) }}"
+    tls_key: "{{ sandbox_tls_key | default(omit, true) }}"
+    tls_ca: "{{ sandbox_tls_ca | default(omit, true) }}"
+    bearer_token: "{{ sandbox_bearer_token | default(omit, true) }}"
+    workspace: "{{ sandbox.sandbox.workspace }}"
+    name: "{{ sandbox.sandbox.name }}"
+    src: "{{ review_clone_dir_controller.path }}"
+    dest: "{{ review_checkout_dir.path }}"
+
+- name: Clean up the controller-side clone once it's been copied into the sandbox
+  ansible.builtin.file:
+    path: "{{ review_clone_dir_controller.path }}"
+    state: absent
