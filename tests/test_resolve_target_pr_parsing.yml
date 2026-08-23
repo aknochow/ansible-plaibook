@@ -1,0 +1,158 @@
+---
+# Regression test for parse_pr_target.yml: exercises the real target-parsing logic
+# without network calls. Tests all supported review_target shapes including self-hosted hostname
+# support in the bare GitLab form.
+#
+# Usage:
+#   ansible-playbook tests/test_resolve_target_pr_parsing.yml
+
+- name: Test parse_pr_target.yml against every supported review_target shape
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    parse_pr_target_path: "{{ playbook_dir }}/../roles/review/tasks/parse_pr_target.yml"
+
+  tasks:
+    - name: "Scenario: GitHub PR URL"
+      vars:
+        review_target: "https://github.com/aknochow/ansible-plaibook/pull/29"
+      ansible.builtin.include_tasks: "{{ parse_pr_target_path }}"
+
+    - name: Assert GitHub PR URL fields parsed correctly
+      ansible.builtin.assert:
+        that:
+          - review_platform == "github"
+          - review_org_repo == "aknochow/ansible-plaibook"
+          - review_number == "29"
+          - review_hostname == ""
+        fail_msg: "GitHub URL form: got platform={{ review_platform }} org_repo={{ review_org_repo }} number={{ review_number }} hostname='{{ review_hostname }}'"
+
+    - name: "Scenario: GitHub bare form (org/repo#N)"
+      vars:
+        review_target: "aknochow/ansible-plaibook#29"
+      ansible.builtin.include_tasks: "{{ parse_pr_target_path }}"
+
+    - name: Assert GitHub bare form fields parsed correctly
+      ansible.builtin.assert:
+        that:
+          - review_platform == "github"
+          - review_org_repo == "aknochow/ansible-plaibook"
+          - review_number == "29"
+          - review_hostname == ""
+        fail_msg: "GitHub bare form: got platform={{ review_platform }} org_repo={{ review_org_repo }} number={{ review_number }} hostname='{{ review_hostname }}'"
+
+    - name: "Scenario: GitLab MR URL (self-hosted, existing coverage)"
+      vars:
+        review_target: "https://gitlab.example.com/aknochow/ansible-plaibook/-/merge_requests/29"
+      ansible.builtin.include_tasks: "{{ parse_pr_target_path }}"
+
+    - name: Assert GitLab MR URL fields parsed correctly
+      ansible.builtin.assert:
+        that:
+          - review_platform == "gitlab"
+          - review_org_repo == "aknochow/ansible-plaibook"
+          - review_number == "29"
+          - review_hostname == "gitlab.example.com"
+        fail_msg: "GitLab URL form: got platform={{ review_platform }} org_repo={{ review_org_repo }} number={{ review_number }} hostname='{{ review_hostname }}'"
+
+    - name: "Scenario: GitLab bare form, no host prefix (existing behavior -- still no hostname, still falls back to gitlab.com downstream)"
+      vars:
+        review_target: "aknochow/ansible-plaibook!29"
+      ansible.builtin.include_tasks: "{{ parse_pr_target_path }}"
+
+    - name: Assert GitLab bare form (no host prefix) fields parsed correctly
+      ansible.builtin.assert:
+        that:
+          - review_platform == "gitlab"
+          - review_org_repo == "aknochow/ansible-plaibook"
+          - review_number == "29"
+          - review_hostname == ""
+        fail_msg: "GitLab bare form (no host): got platform={{ review_platform }} org_repo={{ review_org_repo }} number={{ review_number }} hostname='{{ review_hostname }}'"
+
+    - name: "Scenario: GitLab bare form WITH self-hosted host prefix -- the actual fix"
+      vars:
+        review_target: "gitlab.example.com:aknochow/ansible-plaibook!29"
+      ansible.builtin.include_tasks: "{{ parse_pr_target_path }}"
+
+    - name: Assert GitLab bare form with host prefix resolves the hostname
+      ansible.builtin.assert:
+        that:
+          - review_platform == "gitlab"
+          - review_org_repo == "aknochow/ansible-plaibook"
+          - review_number == "29"
+          - review_hostname == "gitlab.example.com"
+        fail_msg: >-
+          GitLab bare form with host prefix did not resolve correctly: got
+          platform={{ review_platform }} org_repo={{ review_org_repo }}
+          number={{ review_number }} hostname='{{ review_hostname }}'
+          (expected hostname 'gitlab.example.com') -- this is the exact
+          case handoff.ansible-plaibook-gitlab-bare-form-self-hosted-hostname.yaml
+          reports as broken.
+
+    - name: "Scenario: GitLab bare form with host prefix, org/repo containing a subgroup-free slash only (sanity: host-prefix parsing doesn't eat the org/repo separator)"
+      vars:
+        review_target: "gitlab.example.com:some-org/some-repo!7"
+      ansible.builtin.include_tasks: "{{ parse_pr_target_path }}"
+
+    - name: Assert the org/repo separator survives host-prefix parsing
+      ansible.builtin.assert:
+        that:
+          - review_org_repo == "some-org/some-repo"
+          - review_number == "7"
+          - review_hostname == "gitlab.example.com"
+        fail_msg: "GitLab bare form with host prefix (second fixture): got org_repo={{ review_org_repo }} number={{ review_number }} hostname='{{ review_hostname }}'"
+
+    - name: "Scenario: host-prefix form with an unsafe-charset hostname is rejected, not silently accepted"
+      block:
+        - name: Parse the unsafe-charset-hostname target (expected to fail)
+          ansible.builtin.include_tasks: "{{ parse_pr_target_path }}"
+          vars:
+            review_target: "evil.com;whoami:aknochow/ansible-plaibook!29"
+
+        - name: Fail the test if the unsafe hostname was NOT rejected
+          ansible.builtin.fail:
+            msg: "TEST BUG: parse_pr_target.yml did not reject a review_target with an unsafe-charset hostname."
+      rescue:
+        # Two distinct ways to land in this rescue: parse_pr_target.yml's
+        # own assert correctly fired (msg contains its fail_msg text), or
+        # the synthetic fail right above fired instead because the real
+        # assert let the unsafe hostname through (msg contains "TEST
+        # BUG"). Checking ONLY for a shared word like "hostname" would
+        # pass either way, since the synthetic fail message above also
+        # contains it -- asserting on fail_msg's own distinctive text,
+        # and explicitly excluding the synthetic message, is what
+        # actually distinguishes "rejected" from "silently accepted".
+        - name: Assert the rejection fired for the right reason
+          ansible.builtin.assert:
+            that:
+              - "'unsafe to embed directly in a platform API URL' in ansible_failed_result.msg"
+              - "'TEST BUG' not in ansible_failed_result.msg"
+            fail_msg: >-
+              Expected parse_pr_target.yml's own hostname-charset assert to
+              fire, but got a different failure (or none):
+              {{ ansible_failed_result.msg | default('unknown') }}
+
+    - name: "Scenario: unparseable target still fails loudly, and the message now mentions the host-prefix syntax"
+      block:
+        - name: Parse the unparseable target (expected to fail)
+          ansible.builtin.include_tasks: "{{ parse_pr_target_path }}"
+          vars:
+            review_target: "not a valid target at all"
+
+        - name: Fail the test if the unparseable target did NOT fail loudly
+          ansible.builtin.fail:
+            msg: "Expected parse_pr_target.yml to fail loudly on an unparseable target, but it proceeded."
+      rescue:
+        - name: Assert the failure message mentions the host-prefix syntax
+          ansible.builtin.assert:
+            that:
+              - "'host:org/repo!N' in ansible_failed_result.msg"
+            fail_msg: >-
+              Failure fired (correct), but its message doesn't mention the
+              new host-prefix syntax: {{ ansible_failed_result.msg | default('unknown') }}
+
+    - name: Show the overall pass confirmation message
+      ansible.builtin.debug:
+        msg: "PASSED: GitHub URL/bare, GitLab URL, GitLab bare (with and without a self-hosted host prefix), and the unparseable-target failure message all resolve correctly."

@@ -1,0 +1,22 @@
+---
+# The shared review engine (formerly roles/code_review/tasks/main.yml,
+# absorbed into this role by the roles/review/ + roles/code_review/
+# merge). Called by each resolve_target_*.yml once target resolution has
+# produced the output-variable contract (review_repo_path,
+# review_org_repo, review_branch, review_context, review_short_sha,
+# etc.) -- agnostic to which resolve_target_*.yml called it. Not called
+# from main.yml directly: resolve_target_pr.yml specifically needs to
+# run its own PR-specific post-processing (posting results back to the
+# PR, cleaning up its checkout) AFTER this completes, so each
+# resolve_target_*.yml owns calling this and continuing afterward.
+
+- name: Prepare the review briefing
+  ansible.builtin.include_tasks: briefing.yml
+
+- name: Report the same-commit fast path
+  ansible.builtin.include_tasks: same_commit_fast_path.yml
+  when: same_commit_fast_path
+
+- name: Run the full review
+  ansible.builtin.include_tasks: full_review.yml
+  when: not same_commit_fast_path

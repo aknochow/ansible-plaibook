@@ -1,0 +1,18 @@
+---
+# Git sources rather than local dir paths — this needs to resolve from
+# any machine (an AAP Execution Environment build, a fresh clone),
+# not just this laptop. Both are personal projects, public on GitHub.
+collections:
+  - name: https://github.com/aknochow/ansible-openshell.git
+    type: git
+    version: main
+  - name: https://github.com/aknochow/ansible-claude.git
+    type: git
+    version: main
+  # community.general.jira — the native Jira module bug_context uses
+  # to fetch/comment on tickets, replacing hand-rolled ansible.builtin.uri
+  # calls against the REST API directly.
+  - name: community.general
+  # kubernetes.core.k8s_info — roles/review/tasks/fetch_k8s_secret_tls.yml's
+  # sandbox_tls_source: k8s_secret path (AAP unattended automation).
+  - name: kubernetes.core

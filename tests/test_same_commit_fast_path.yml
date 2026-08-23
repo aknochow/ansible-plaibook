@@ -1,0 +1,179 @@
+---
+# End-to-end proof that the same-commit fast path actually reroutes execution via
+# the real run_review_engine.yml dispatch. Uses review_findings_path (set only in persist.yml)
+# to discriminate which branch ran. Scenario 2 genuinely runs full_review.yml with lens dispatch.
+#
+# Usage:
+#   ansible-playbook tests/test_same_commit_fast_path.yml
+
+- name: Test that the same-commit fast path fires, and that its disable flag genuinely bypasses it
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_delegate_host: ""
+    review_branch: "test-fast-path-standalone"
+    review_org_repo: "test/fast-path-fixture"
+    review_output_base: "{{ fixture_review_output.path }}"
+    review_explore_enabled: false
+    review_extra_notes: ""
+    # Initialize pipeline-wide accounting (seeded here since run_review_engine.yml is called directly).
+    pipeline_agent_calls: []
+    pipeline_findings_reports: []
+
+  tasks:
+    - name: Create a throwaway fixture repo directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: "fast-path-fixture-repo-"
+      register: fixture_dir
+
+    - name: Create a throwaway review_output_base directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: "fast-path-fixture-output-"
+      register: fixture_review_output
+
+    - name: Initialize the fixture repo and configure a commit identity
+      ansible.builtin.command:
+        argv: "{{ item }}"
+        chdir: "{{ fixture_dir.path }}"
+      loop:
+        - [git, init, -q]
+        - [git, config, user.email, "test@test.com"]
+        - [git, config, user.name, "Test"]
+      loop_control:
+        label: "{{ item | join(' ') }}"
+      changed_when: false
+      timeout: 30
+
+    - name: Write the base (target_ref) fixture file
+      ansible.builtin.copy:
+        dest: "{{ fixture_dir.path }}/README.md"
+        mode: "0644"
+        content: |
+          # Fixture
+          Base content.
+
+    - name: Commit and tag the base fixture state as target_ref
+      ansible.builtin.command:
+        argv: "{{ item }}"
+        chdir: "{{ fixture_dir.path }}"
+      loop:
+        - [git, add, -A]
+        - [git, commit, -q, -m, base]
+        - [git, tag, target_ref]
+      loop_control:
+        label: "{{ item | join(' ') }}"
+      changed_when: false
+      timeout: 30
+
+    - name: Write a trivial source_ref change
+      ansible.builtin.copy:
+        dest: "{{ fixture_dir.path }}/README.md"
+        mode: "0644"
+        content: |
+          # Fixture
+          Base content.
+          One more line, changed for source_ref.
+
+    - name: Commit the source_ref state
+      ansible.builtin.command:
+        argv: "{{ item }}"
+        chdir: "{{ fixture_dir.path }}"
+      loop:
+        - [git, add, -A]
+        - [git, commit, -q, -m, "trivial change"]
+      loop_control:
+        label: "{{ item | join(' ') }}"
+      changed_when: false
+      timeout: 30
+
+    - name: Resolve source_ref's real short SHA
+      ansible.builtin.command:
+        argv: [git, rev-parse, --short, HEAD]
+        chdir: "{{ fixture_dir.path }}"
+      changed_when: false
+      register: _source_short_sha
+      timeout: 30
+
+    - name: Set the review target/source facts for this fixture
+      ansible.builtin.set_fact:
+        review_repo_path: "{{ fixture_dir.path }}"
+        review_target_ref: "target_ref"
+        review_source_ref: "HEAD"
+        review_short_sha: "{{ _source_short_sha.stdout | trim }}"
+        review_number: "{{ _source_short_sha.stdout | trim }}"
+
+    - name: Compute today's date once, to avoid a midnight mismatch across the seeding tasks below
+      ansible.builtin.set_fact:
+        _fixture_date: "{{ lookup('pipe', 'date +%Y-%m-%d') }}"
+
+    - name: Seed a prior review directory matching the real naming convention, for this exact commit
+      ansible.builtin.file:
+        path: "{{ review_output_base }}/{{ review_org_repo }}/{{ review_branch }}/{{ _fixture_date }}-{{ review_short_sha }}"
+        state: directory
+        mode: "0755"
+
+    - name: Write the seeded prior review's findings.md, with real frontmatter matching write_review.py's format
+      ansible.builtin.copy:
+        dest: "{{ review_output_base }}/{{ review_org_repo }}/{{ review_branch }}/{{ _fixture_date }}-{{ review_short_sha }}/findings.md"
+        mode: "0644"
+        content: |
+          ---
+          date: {{ _fixture_date }}
+          commit: {{ review_short_sha }}
+          project: "{{ review_org_repo }}"
+          branch: "{{ review_branch }}"
+          verdict: READY_FOR_HUMAN_REVIEW
+          ---
+
+          ## Code Review: {{ review_org_repo }}
+
+          Seeded prior review for test_same_commit_fast_path.yml.
+
+    - name: Run the real review engine dispatch -- fast path enabled (default)
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: run_review_engine
+        public: true
+
+    - name: Assert the fast path fired and full_review.yml did NOT run
+      ansible.builtin.assert:
+        that:
+          - same_commit_fast_path == true
+          - review_findings_path is not defined
+        fail_msg: >-
+          Expected the same-commit fast path to fire for a genuinely
+          matching prior review, with full_review.yml (and its
+          persist.yml tail, which sets review_findings_path) never
+          running. same_commit_fast_path={{ same_commit_fast_path }}
+
+    - name: Run the real review engine dispatch again -- fast path explicitly disabled
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: run_review_engine
+        public: true
+      vars:
+        review_same_commit_fast_path_enabled: false
+
+    - name: Assert the disable flag genuinely bypassed the fast path and full_review.yml ran for real
+      ansible.builtin.assert:
+        that:
+          - same_commit_fast_path == false
+          - review_findings_path is defined
+          - review_verdict is defined
+        fail_msg: >-
+          Expected review_same_commit_fast_path_enabled: false to force
+          full_review.yml to run even though the exact same prior
+          review still matches -- same_commit_fast_path={{ same_commit_fast_path }},
+          review_findings_path defined={{ review_findings_path is defined }}
+
+    - name: Clean up the fixture repo and output directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ fixture_dir.path }}"
+        - "{{ fixture_review_output.path }}"

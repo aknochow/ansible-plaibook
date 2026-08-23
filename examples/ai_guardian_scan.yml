@@ -1,0 +1,372 @@
+---
+# Example: scan a directory for secrets and other security issues
+# using ai-guardian's standalone `scan` CLI subcommand — no daemon, no
+# changes to ai-guardian itself. Background/research:
+# ~/vail/local/handoffs/handoff.ansible-plaibook-guardian-integration.yaml.
+#
+# Demonstrates both:
+#   - unsandboxed: ai-guardian runs directly on the controller
+#   - sandboxed: the same scan, delegated into a generic OpenShell
+#     sandbox with nothing pre-installed — the precheck below installs
+#     ai-guardian + gitleaks on demand (see the "not already present"
+#     block). Point sandbox_image at your own pre-baked image instead
+#     if you have one with both already installed; the install block is
+#     skipped automatically when the precheck finds them.
+#
+# One-time setup on whichever host runs this unsandboxed (the
+# controller, or your own machine):
+#   pip install ai-guardian
+#   ai-guardian scanner install gitleaks
+#   Enable secret scanning in ~/.config/ai-guardian/ai-guardian.json:
+#     {"secret_scanning": {"enabled": true, "engines": ["gitleaks"]}}
+#
+# CI=true is set on every ai-guardian invocation below. Without it, the
+# FIRST scan ever run on a given machine silently installs a desktop
+# tray shortcut and autostart entry (see
+# ai_guardian.daemon.auto_setup._is_ci_environment — it already checks
+# CI/GITHUB_ACTIONS/GITLAB_CI/etc. and skips that setup when any are
+# set). An unattended Ansible run should never trigger that, so this
+# is the correct, already-supported way to suppress it — not a
+# workaround, ai-guardian's own authors built this in for exactly this
+# case.
+#
+# Usage:
+#   ansible-playbook examples/ai_guardian_scan.yml -e scan_target_path=/path/to/repo
+#   ansible-playbook examples/ai_guardian_scan.yml -e use_sandbox=true -e scan_target_path=/path/to/repo
+#
+# /dev/shm note: ai-guardian's gitleaks integration
+# (scanners/secret_scanning.py) hardcodes
+# `tmp_base_dir = "/dev/shm" if os.path.exists("/dev/shm") else None`
+# with no TMPDIR override, and OpenShell sandboxes' /dev/shm is NOT
+# writable by default (Landlock filesystem policy — see
+# aknochow.openshell.sandbox's `policy` option) even though it shows
+# normal-looking POSIX permissions. Without an explicit policy granting
+# /dev/shm read-write, ai-guardian's secret-scanning call catches the
+# resulting PermissionError and fails open (logs it, reports clean)
+# rather than erroring the scan — matching its own documented
+# "fail-open by design" posture, but meaning a false-clean result
+# rather than an obvious crash. Fixed below via `policy: filesystem:
+# read_write: [...]` on sandbox creation — see the handoff doc above
+# for the full investigation, including why specifying ANY policy
+# replaces the gateway's default rather than extending it, so the
+# baseline paths below (plus /opt, where a pre-baked image might
+# install ai-guardian via `uv tool install`) are required, not optional
+# extras.
+
+- name: AI-guardian security scanning — unsandboxed and sandboxed
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    use_sandbox: false
+    scan_target_path: "{{ lookup('env', 'PWD') }}"
+    guardian_json_output: "/tmp/ai-guardian-findings.json"
+
+    # Generic image with nothing pre-installed — the "not already
+    # present" install block below installs ai-guardian + gitleaks on
+    # demand. Point this at your own pre-baked image instead if you
+    # have one with both already installed (the precheck skips the
+    # install block automatically in that case); gitleaks_version/
+    # gitleaks_platform below only matter for the generic-image path.
+    sandbox_image: "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
+    gitleaks_version: "8.30.1"
+    gitleaks_platform: "linux_arm64"
+
+    # Sandbox setup — same pattern as review.yml/bug_pipeline.yml.
+    sandbox_gateway: "https://host.openshell.internal:17670"
+    # See review.yml's comment on this same default — ProxyCommand execs
+    # this as a raw subprocess, bypassing Ansible's own interpreter
+    # resolution entirely.
+    ssh_proxy_python: "{{ ansible_python_interpreter | default('python3') }}"
+    ssh_proxy_script: "{{ lookup('env', 'HOME') }}/code/ansible-openshell/scripts/ssh_proxy.py"
+    # Hardcoded to local_mtls_dir, not review.yml's AAP-automation
+    # k8s_secret/sandbox_sa_token path -- this example is local/interactive-
+    # login only by design (sandbox_bearer_token below is intentionally
+    # never set here; default(omit, true) means the module falls back to
+    # a human's own OPENSHELL_BEARER_TOKEN env var, same as any other
+    # local_mtls_dir usage). Wire up review.yml's exchange_sandbox_token.yml
+    # pattern here too if this example ever needs unattended AAP auth.
+    sandbox_tls_source: "local_mtls_dir"
+    sandbox_gateway_name: "openshell"
+    sandbox_mtls_dir: "{{ lookup('env', 'HOME') }}/.config/openshell/gateways/{{ sandbox_gateway_name }}/mtls"
+
+  tasks:
+    - name: Set up an OpenShell sandbox for scanning
+      when: use_sandbox | bool
+      block:
+        - name: Read mTLS certs from a local directory
+          ansible.builtin.set_fact:
+            sandbox_tls_cert: "{{ sandbox_mtls_dir }}/tls.crt"
+            sandbox_tls_key: "{{ sandbox_mtls_dir }}/tls.key"
+            sandbox_tls_ca: "{{ sandbox_mtls_dir }}/ca.crt"
+
+        # Specifying `policy` at all REPLACES the gateway's default
+        # policy rather than extending it (verified — a policy with
+        # only read_write: [/dev/shm] crashed the container outright,
+        # "ContainerExited" / exit code 1, because it lost the baseline
+        # paths its own init process needs). So this must include the
+        # full baseline (/sandbox, /tmp, /dev read-write, /usr, /lib,
+        # /etc read-only) plus /opt (some pre-baked images install
+        # ai-guardian there via `uv tool install`) plus the one
+        # addition this playbook actually needs (/dev/shm). Passed
+        # through to the shared
+        # roles/review/tasks/setup_sandbox.yml via sandbox_policy/sandbox_wait_timeout
+        # rather than duplicating the whole create+register block inline
+        # (that duplication was flagged by dogfooding this pipeline
+        # against its own changes).
+        - name: Create the sandbox and register it as an Ansible host
+          vars:
+            sandbox_policy:
+              filesystem:
+                read_write: ["/sandbox", "/tmp", "/dev", "/dev/shm"]
+                read_only: ["/usr", "/lib", "/etc", "/opt"]
+            sandbox_wait_timeout: 180
+          ansible.builtin.include_tasks: ../roles/review/tasks/setup_sandbox.yml
+
+        - name: Copy the scan target into the sandbox
+          ansible.builtin.copy:
+            src: "{{ scan_target_path }}/"
+            dest: "/tmp/scan-target/"
+            mode: preserve
+          delegate_to: sandbox_target
+          ignore_unreachable: true
+          register: _guardian_copy_scan_target_result
+
+        - name: Fail loudly if the sandbox connection was unreachable
+          ansible.builtin.include_tasks: ../roles/review/tasks/fail_if_sandbox_unreachable.yml
+          vars:
+            fail_if_unreachable_result_var: _guardian_copy_scan_target_result
+
+        # Everything below this point is setup for a GENERIC sandbox
+        # image that doesn't have ai-guardian/gitleaks baked in — with
+        # your own pre-baked image (if you point sandbox_image at one)
+        # this precheck succeeds and the whole install block is skipped.
+        - name: Check whether ai-guardian and gitleaks are already present
+          ansible.builtin.command:
+            argv: [sh, -c, "command -v ai-guardian && command -v gitleaks"]
+          delegate_to: sandbox_target
+          ignore_unreachable: true
+          register: _guardian_precheck
+          failed_when: false
+          changed_when: false
+
+        - name: Fail loudly if the sandbox connection was unreachable
+          ansible.builtin.include_tasks: ../roles/review/tasks/fail_if_sandbox_unreachable.yml
+          vars:
+            fail_if_unreachable_result_var: _guardian_precheck
+
+        - name: Install ai-guardian and gitleaks (skipped if already baked into the image)
+          when: _guardian_precheck.rc != 0
+          block:
+            # gitleaks is a compiled Go binary with no PyPI package.
+            # `ai-guardian scanner install gitleaks` run FROM INSIDE
+            # the sandbox fails once the custom policy above is set:
+            # specifying ANY policy replaces network_policies too, so
+            # network access is empty/deny-all unless explicitly
+            # granted — and reverse-engineering a correct
+            # NetworkPolicyRule (an 18-field NetworkEndpoint
+            # sub-message with no enum/schema docs found) is out of
+            # scope here. Fetch on the controller (which has normal
+            # network access) and copy the binary in instead — the
+            # same "clone/fetch on the controller, copy into the
+            # sandbox" pattern review.yml already uses for the harness
+            # checkout. ai-guardian discovers gitleaks via a plain PATH
+            # lookup (shutil.which) — no `scanner install` step is
+            # needed once the binary is on PATH and executable.
+            - name: Download gitleaks for the sandbox's platform
+              ansible.builtin.get_url:
+                url: >-
+                  https://github.com/gitleaks/gitleaks/releases/download/v{{ gitleaks_version }}/gitleaks_{{ gitleaks_version }}_{{ gitleaks_platform }}.tar.gz
+                dest: "/tmp/gitleaks_{{ gitleaks_platform }}.tar.gz"
+                mode: "0644"
+
+            # ansible.builtin.unarchive requires GNU tar and rejects
+            # macOS's built-in BSD tar outright, even though BSD tar
+            # extracts this tarball just fine — call tar directly.
+            - name: Extract the gitleaks binary
+              ansible.builtin.command:
+                argv: [tar, -xzf, "/tmp/gitleaks_{{ gitleaks_platform }}.tar.gz", -C, /tmp, gitleaks]
+              changed_when: true
+
+            - name: Ensure ~/.local/bin exists in the sandbox
+              ansible.builtin.file:
+                path: "~/.local/bin"
+                state: directory
+                mode: "0755"
+              delegate_to: sandbox_target
+              ignore_unreachable: true
+              register: _guardian_local_bin_result
+
+            - name: Fail loudly if the sandbox connection was unreachable
+              ansible.builtin.include_tasks: ../roles/review/tasks/fail_if_sandbox_unreachable.yml
+              vars:
+                fail_if_unreachable_result_var: _guardian_local_bin_result
+
+            - name: Copy the gitleaks binary into the sandbox
+              ansible.builtin.copy:
+                src: /tmp/gitleaks
+                dest: "~/.local/bin/gitleaks"
+                mode: "0755"
+              delegate_to: sandbox_target
+              ignore_unreachable: true
+              register: _guardian_copy_gitleaks_result
+
+            - name: Fail loudly if the sandbox connection was unreachable
+              ansible.builtin.include_tasks: ../roles/review/tasks/fail_if_sandbox_unreachable.yml
+              vars:
+                fail_if_unreachable_result_var: _guardian_copy_gitleaks_result
+
+            # ai-guardian itself is a pure-Python package
+            # (py3-none-any wheel), but its full dependency list
+            # includes several platform-specific, ML-oriented packages
+            # (onnxruntime, tokenizers — used for optional prompt-
+            # injection detection) that don't have prebuilt wheels for
+            # every Python-version/arch combination (verified: no
+            # tokenizers wheel exists for cp314/linux_aarch64 on PyPI
+            # at all, independent of which manylinux tag is requested).
+            # `ai-guardian scan`'s gitleaks-based secret detection
+            # doesn't need either of them — confirmed by installing
+            # with --no-deps plus only what secret_validator.py
+            # actually imports (requests, for its transitive chain).
+            # This keeps the wheelhouse pure-Python/universal, so no
+            # --platform/--python-version targeting is needed here
+            # (contrast with gitleaks above, a real compiled binary).
+            - name: Download ai-guardian (no ML extras — not needed for secret scanning)
+              ansible.builtin.command:
+                argv: [pip3, download, --no-deps, -d, /tmp/ai-guardian-wheelhouse, "ai-guardian=={{ ai_guardian_version }}"]
+              changed_when: true
+              vars:
+                ai_guardian_version: "1.15.0"
+
+            - name: Download ai-guardian's minimal runtime deps
+              ansible.builtin.command:
+                argv: [pip3, download, -d, /tmp/ai-guardian-wheelhouse, requests]
+              changed_when: true
+
+            - name: Copy the wheelhouse into the sandbox
+              ansible.builtin.copy:
+                src: /tmp/ai-guardian-wheelhouse/
+                dest: /tmp/ai-guardian-wheelhouse/
+                mode: preserve
+              delegate_to: sandbox_target
+              ignore_unreachable: true
+              register: _guardian_copy_wheelhouse_result
+
+            - name: Fail loudly if the sandbox connection was unreachable
+              ansible.builtin.include_tasks: ../roles/review/tasks/fail_if_sandbox_unreachable.yml
+              vars:
+                fail_if_unreachable_result_var: _guardian_copy_wheelhouse_result
+
+            - name: Install ai-guardian and its minimal deps from the wheelhouse (no network needed)
+              ansible.builtin.command:
+                argv:
+                  - pip3
+                  - install
+                  - --no-index
+                  - --no-deps
+                  - --find-links
+                  - /tmp/ai-guardian-wheelhouse
+                  - "ai-guardian=={{ ai_guardian_version }}"
+                  - requests
+                  - charset-normalizer
+                  - idna
+                  - urllib3
+                  - certifi
+              delegate_to: sandbox_target
+              ignore_unreachable: true
+              register: _guardian_install_result
+              changed_when: true
+              vars:
+                ai_guardian_version: "1.15.0"
+
+            - name: Fail loudly if the sandbox connection was unreachable
+              ansible.builtin.include_tasks: ../roles/review/tasks/fail_if_sandbox_unreachable.yml
+              vars:
+                fail_if_unreachable_result_var: _guardian_install_result
+
+            - name: Ensure ~/.config/ai-guardian exists in the sandbox
+              ansible.builtin.file:
+                path: "~/.config/ai-guardian"
+                state: directory
+                mode: "0755"
+              delegate_to: sandbox_target
+              ignore_unreachable: true
+              register: _guardian_config_dir_result
+
+            - name: Fail loudly if the sandbox connection was unreachable
+              ansible.builtin.include_tasks: ../roles/review/tasks/fail_if_sandbox_unreachable.yml
+              vars:
+                fail_if_unreachable_result_var: _guardian_config_dir_result
+
+            - name: Enable secret scanning in the sandbox's ai-guardian config
+              ansible.builtin.copy:
+                content: |
+                  {"secret_scanning": {"enabled": true, "engines": ["gitleaks"]}}
+                dest: "~/.config/ai-guardian/ai-guardian.json"
+                mode: "0600"
+              delegate_to: sandbox_target
+              ignore_unreachable: true
+              register: _guardian_config_write_result
+
+            - name: Fail loudly if the sandbox connection was unreachable
+              ansible.builtin.include_tasks: ../roles/review/tasks/fail_if_sandbox_unreachable.yml
+              vars:
+                fail_if_unreachable_result_var: _guardian_config_write_result
+
+    - name: Compute the effective scan path and delegate host
+      ansible.builtin.set_fact:
+        guardian_delegate_host: "{{ 'sandbox_target' if (use_sandbox | bool) else '' }}"
+        guardian_scan_path: "{{ '/tmp/scan-target' if (use_sandbox | bool) else scan_target_path }}"
+
+    - name: Run ai-guardian scan
+      ansible.builtin.command:
+        argv:
+          - ai-guardian
+          - scan
+          - "{{ guardian_scan_path }}"
+          - --json-output
+          - "{{ guardian_json_output }}"
+          - --exit-code
+      delegate_to: "{{ guardian_delegate_host | default(omit, true) }}"
+      ignore_unreachable: true
+      environment:
+        CI: "true"
+      register: guardian_scan_result
+      failed_when: false
+      changed_when: false
+
+    - name: Fail loudly if the sandbox connection was unreachable
+      ansible.builtin.include_tasks: ../roles/review/tasks/fail_if_sandbox_unreachable.yml
+      vars:
+        fail_if_unreachable_result_var: guardian_scan_result
+
+    - name: Read the findings
+      ansible.builtin.slurp:
+        path: "{{ guardian_json_output }}"
+      delegate_to: "{{ guardian_delegate_host | default(omit, true) }}"
+      ignore_unreachable: true
+      register: _guardian_findings_raw
+
+    - name: Fail loudly if the sandbox connection was unreachable
+      ansible.builtin.include_tasks: ../roles/review/tasks/fail_if_sandbox_unreachable.yml
+      vars:
+        fail_if_unreachable_result_var: _guardian_findings_raw
+
+    - name: Show the scan result
+      ansible.builtin.debug:
+        msg:
+          - "Scanned: {{ guardian_scan_path }} ({{ 'sandboxed' if (use_sandbox | bool) else 'unsandboxed, controller-local' }})"
+          - "Exit code: {{ guardian_scan_result.rc }} ({{ 'issues found' if guardian_scan_result.rc != 0 else 'clean' }})"
+          - "Findings: {{ _guardian_findings_raw.content | b64decode | from_json }}"
+
+    - name: Tear down the scan sandbox
+      when: use_sandbox | bool
+      aknochow.openshell.sandbox:
+        gateway: "{{ sandbox_gateway }}"
+        tls_cert: "{{ sandbox_tls_cert }}"
+        tls_key: "{{ sandbox_tls_key }}"
+        tls_ca: "{{ sandbox_tls_ca }}"
+        bearer_token: "{{ sandbox_bearer_token | default(omit, true) }}"
+        name: "{{ sandbox.sandbox.name }}"
+        state: absent

@@ -1,0 +1,6 @@
+(target: both agents)
+This diff adds or modifies subprocess calls. Verify every
+`subprocess.run`/`Popen` call has a timeout parameter. Check
+consistency — if most calls in the codebase use timeouts, flag
+the ones that don't. Verify `shell=False` (list-form commands)
+unless `shell=True` is justified. Check return code handling.

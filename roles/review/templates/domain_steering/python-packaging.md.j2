@@ -1,0 +1,7 @@
+(target: Review Agent, Quality lens)
+This diff includes Python packaging files. Verify `__version__`
+is PEP 440 compliant. Check that entry points resolve to existing
+modules. For each import in source, verify the dependency is
+declared or is stdlib. Check that all subpackages have
+`__init__.py`. If pre-commit and CI both lint, verify they use
+consistent tool versions and flags.

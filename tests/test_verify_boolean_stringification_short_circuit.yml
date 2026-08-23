@@ -1,0 +1,187 @@
+---
+# Real, end-to-end regression test for
+# handoff.ansible-plaibook-verify-stage-regression-boolean-stringification.yaml:
+# verify.yml must deterministically refute the recurring "Jinja/Ansible
+# stringifies booleans, breaking downstream truthiness" claim shape
+# WITHOUT dispatching an LLM call at all -- see
+# detect_boolean_stringification_hallucination.py's own module
+# docstring for the full history (9 occurrences, the 9th got past the
+# LLM re-check itself). Runs the real verify.yml (not a
+# reimplementation of its scoping/dispatch logic), matching this repo's
+# own "verify via real entry points" convention (see
+# test_verify_severity_check.yml, test_verify_pass.yml) -- but unlike
+# those, Scenario 1's outcome IS fully deterministic and needs zero live
+# API calls, since the whole point of this fix is to short-circuit
+# before any dispatch for this specific claim shape.
+#
+# Two separate scenarios/plays, not two findings in one play: each
+# needs its own pipeline_agent_calls: [] baseline to unambiguously prove
+# whether a dispatch happened for ITS finding specifically --
+# dispatch_verify_turn_attempt.yml tags every call with the same
+# review_org_repo+review_number regardless of which finding is being
+# verified, so two findings sharing one play's pipeline_agent_calls
+# can't be told apart by that field alone.
+#
+# Usage:
+#   ansible-playbook tests/test_verify_boolean_stringification_short_circuit.yml
+
+- name: "Scenario 1: the real MR !42 finding must be deterministically refuted with zero agent calls"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_delegate_host: ""
+    review_repo_path: "{{ playbook_dir }}/.."
+    review_org_repo: "aknochow/ansible-plaibook"
+    review_number: "test-verify-boolean-stringification"
+
+    # See test_verify_severity_check.yml's own vars-block comment for
+    # why this is a play var feeding an explicit set_fact below, not
+    # seeded directly as a fact here.
+    #
+    # Copied verbatim from a real persisted finding that shipped as
+    # evidence_status: verified before this fix existed.
+    boolean_stringification_fixture_findings:
+      - lens: Functionality
+        file: "examples/provider_interop_comparison.yml"
+        line: 157
+        severity: Critical
+        confidence: HIGH
+        # !unsafe: this literal text quotes real Jinja `{{ }}` syntax as
+        # DATA (a finding's evidence/description), not something Ansible
+        # should template -- without it, Ansible's own lazy templating
+        # would try to evaluate `structured == benchmark_tasks[idx].expected`
+        # as a live expression against this test's vars and fail with
+        # "'structured' is undefined".
+        description: !unsafe >-
+          Jinja2 string comparison instead of boolean: the `correct`
+          field is set via a Jinja2 expression `{{ structured ==
+          benchmark_tasks[idx].expected }}`, which yields the Python
+          string 'True' or 'False', not an actual boolean. Later,
+          `selectattr('correct')` (lines 225, 229) filters on
+          truthiness — but in Ansible/Jinja2, the string 'False' is
+          truthy (it's a non-empty string), so every task will always be
+          counted as correct regardless of actual result. The same bug
+          exists in the Gemini normalize task at line 189.
+        evidence: !unsafe >-
+          correct: "{{ structured == benchmark_tasks[idx].expected }}"
+        fix: >-
+          Use the Ansible bool filter on the selectattr side: change
+          `selectattr('correct')` to `selectattr('correct', 'equalto',
+          'True')` in both aggregate lines, or restructure the entry to
+          use a native boolean by wrapping in a | bool filter.
+
+  tasks:
+    - name: Initialize pipeline-wide agent usage accounting
+      ansible.builtin.set_fact:
+        pipeline_agent_calls: []
+
+    - name: "Seed deduped_findings as a fact (see the vars block's comment on why)"
+      ansible.builtin.set_fact:
+        deduped_findings: "{{ boolean_stringification_fixture_findings }}"
+
+    - name: Run the verify stage in isolation
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: verify.yml
+
+    - name: Show the fixture's outcome (for debugging failures)
+      ansible.builtin.debug:
+        msg: >-
+          {{ deduped_findings[0].file }}:{{ deduped_findings[0].line }} ->
+          evidence_status={{ deduped_findings[0].evidence_status }}
+          rationale={{ deduped_findings[0].verification_rationale | default('n/a') }}
+
+    - name: Assert the boolean-stringification finding was deterministically refuted
+      ansible.builtin.assert:
+        that:
+          - deduped_findings[0].evidence_status == "refuted"
+        fail_msg: >-
+          The real MR !42 boolean-stringification finding should be
+          deterministically refuted by
+          detect_boolean_stringification_hallucination.py, not left to
+          an LLM judgment call. Got evidence_status={{ deduped_findings[0].evidence_status }}
+        success_msg: "Boolean-stringification finding correctly, deterministically refuted."
+
+    - name: Assert the deterministic short-circuit dispatched zero agent calls
+      ansible.builtin.assert:
+        that:
+          - pipeline_agent_calls | length == 0
+        fail_msg: >-
+          The whole point of this fix is to avoid an LLM call for this
+          specific, well-characterized claim shape -- but
+          pipeline_agent_calls recorded {{ pipeline_agent_calls | length }}
+          call(s), meaning the short-circuit didn't actually prevent
+          dispatch.
+        success_msg: >-
+          Confirmed zero agent calls dispatched -- the short-circuit
+          actually skipped the LLM turn loop, not just happened to
+          agree with it.
+
+- name: "Scenario 2: an unrelated Critical finding must NOT be swept up by the same short-circuit"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_delegate_host: ""
+    review_repo_path: "{{ playbook_dir }}/.."
+    review_org_repo: "aknochow/ansible-plaibook"
+    review_number: "test-verify-boolean-stringification-control"
+
+    # A genuinely different Critical finding, pointed at a real file/
+    # line in this repo, with no relation to the boolean-stringification
+    # claim shape -- proves the short-circuit is scoped to the one
+    # claim shape it targets, not a blanket "skip verification"
+    # regression.
+    unrelated_fixture_findings:
+      - lens: Security
+        file: "roles/review/tasks/verify_target_freshness.yml"
+        line: 21
+        severity: Critical
+        confidence: MEDIUM
+        description: >-
+          The GitLab API poll task's argv builds a URL path directly
+          from review_org_repo/review_number without validating their
+          character set first, which this fixture claims (for test
+          purposes only) allows a path-injection style attack.
+        evidence: "'projects/' + (review_org_repo | replace('/', '%2F')) + '/merge_requests/' + (review_number | string)"
+        fix: >-
+          Assert review_org_repo/review_number match a safe character
+          set immediately after parsing review_target.
+
+  tasks:
+    - name: Initialize pipeline-wide agent usage accounting
+      ansible.builtin.set_fact:
+        pipeline_agent_calls: []
+
+    - name: "Seed deduped_findings as a fact (see the vars block's comment on why)"
+      ansible.builtin.set_fact:
+        deduped_findings: "{{ unrelated_fixture_findings }}"
+
+    - name: Run the verify stage in isolation
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: verify.yml
+
+    - name: Show the fixture's outcome (for debugging failures)
+      ansible.builtin.debug:
+        msg: >-
+          {{ deduped_findings[0].file }}:{{ deduped_findings[0].line }} ->
+          evidence_status={{ deduped_findings[0].evidence_status }}
+          rationale={{ deduped_findings[0].verification_rationale | default('n/a') }}
+
+    - name: Assert the unrelated finding went through the normal (real) verify dispatch path
+      ansible.builtin.assert:
+        that:
+          - pipeline_agent_calls | length > 0
+        fail_msg: >-
+          An unrelated Critical finding should always go through the
+          real verify dispatch path -- zero agent calls here would mean
+          the boolean-stringification short-circuit (or something else)
+          is incorrectly swallowing findings it shouldn't.
+        success_msg: >-
+          Confirmed the unrelated finding was NOT short-circuited --
+          it went through {{ pipeline_agent_calls | length }} real
+          agent call(s), same as before this fix.

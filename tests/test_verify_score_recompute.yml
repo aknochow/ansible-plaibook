@@ -1,0 +1,60 @@
+---
+# Fast, no-LLM smoke test of verify.yml's score/verdict recompute step through the real context.
+# Zero API cost: only a Minor finding, so verification loop runs zero iterations, but
+# unconditional defaulting + recompute steps still run for real.
+#
+# Usage:
+#   ansible-playbook tests/test_verify_score_recompute.yml
+
+- name: Test verify.yml's score/verdict recompute standalone
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    severity_points:
+      Critical: 20
+      Major: 10
+      Minor: 5
+      Nit: 0
+    review_verify_enabled: true
+    review_verify_severities: ["Critical", "Major"]
+    deduped_findings:
+      - file: "a.py"
+        line: 1
+        severity: "Minor"
+        lens: "Quality"
+        evidence: "e"
+        fix: "a real fix"
+        description: "a real minor issue"
+
+  tasks:
+    - name: Run verify.yml through the review role context
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: verify
+
+    - name: Assert no findings were scoped for verification (zero API cost confirmed)
+      ansible.builtin.assert:
+        that:
+          - verify_scoped_findings | length == 0
+
+    - name: Assert the recompute still ran for real against the defaulted findings
+      ansible.builtin.assert:
+        that:
+          - deduped_findings | length == 1
+          - deduped_findings[0].evidence_status is defined and deduped_findings[0].evidence_status is none
+          - score_quality | float == 95.0
+          - score_functionality | float == 100.0
+          - score_security | float == 100.0
+          - score_overall | float == 98.3
+          - review_verdict == 'READY_FOR_HUMAN_REVIEW'
+        fail_msg: >-
+          Expected verify.yml's compute_review_scores call to score the
+          one surviving (never-verified, non-refuted) Minor/Quality
+          finding as quality=95.0 (100 - 5), functionality=security=100.0,
+          overall=98.3, verdict READY_FOR_HUMAN_REVIEW. Got:
+          quality={{ score_quality }} functionality={{ score_functionality }}
+          security={{ score_security }} overall={{ score_overall }}
+          verdict={{ review_verdict }}.
+        success_msg: "verify.yml's compute_review_scores call correctly recomputed scores/verdict."

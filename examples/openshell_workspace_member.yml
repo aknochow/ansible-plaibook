@@ -1,0 +1,51 @@
+# Example: grant ansible-plaibook's live-verification identity access to an
+# OpenShell workspace on an OGO-managed gateway (RDU/SNO). Background:
+# ~/vail/local/docs/doc.admin.ogo.yaml,
+# ~/vail/local/docs/doc.openshift-serviceaccount-identity-gotchas.yaml.
+#
+# Creates the Namespace + ServiceAccount ansible-plaibook's OpenShell modules
+# authenticate as, plus the OpenShellWorkspaceMember CR that authorizes
+# that ServiceAccount on the gateway's "default" workspace.
+#
+# Apply with:
+#   KUBECONFIG=~/.kube/rdu oc apply -f examples/openshell_workspace_member.yml
+#
+# This manifest alone is NOT sufficient -- on an OpenShift-SSO gateway
+# (spec.auth.openshift), the ServiceAccount must ALSO be added to the
+# gateway's configured OpenShift Group (e.g. "openshell-users") before
+# the auth-bridge will exchange its token for a gateway JWT at all. That
+# step is a `oc patch`, not a plain manifest apply -- see
+# doc.openshift-serviceaccount-identity-gotchas.yaml for why
+# `oc adm groups add-users` fails outright for ServiceAccount identities
+# (usernames containing ":" must be base64-encoded with a "b64:" prefix):
+#
+#   B64=$(printf '%s' "system:serviceaccount:ansible-plaibook:ansible-plaibook-live-verify" | base64)
+#   oc patch group openshell-users --type=json \
+#     -p="[{\"op\":\"add\",\"path\":\"/users/-\",\"value\":\"b64:$B64\"}]"
+#
+# Once both are done, mint and exchange a token to get this identity's
+# OpenShell bearer token:
+#   SA_TOKEN=$(oc create token ansible-plaibook-live-verify -n ansible-plaibook)
+#   curl -s -X POST https://<auth-bridge-route>/token/exchange \
+#     -H "Authorization: Bearer $SA_TOKEN"
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ansible-plaibook
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ansible-plaibook-live-verify
+  namespace: ansible-plaibook
+---
+apiVersion: gateway.ogo.aknochow.io/v1alpha1
+kind: OpenShellWorkspaceMember
+metadata:
+  name: ansible-plaibook-live-verify
+  namespace: ansible-plaibook
+spec:
+  workspace: default
+  role: user
+  serviceAccountRef:
+    name: ansible-plaibook-live-verify

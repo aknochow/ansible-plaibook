@@ -1,0 +1,143 @@
+---
+# Whole-branch review (local path, GitHub, or GitLab).
+# Produces isolated checkout; same output contract as resolve_target_pr.yml.
+# Always clones to fresh tempdir (non-destructive, doesn't clobber uncommitted work).
+# Branch mode requires explicit -e review_type=branch -e branch_review_target=...
+
+- name: Parse the branch review target
+  ansible.builtin.set_fact:
+    _gh_tree_match: "{{ branch_review_target | regex_search('^https?://github\\.com/([^/]+/[^/]+)/tree/(.+)$', '\\1', '\\2') }}"
+    _gl_tree_match: "{{ branch_review_target | regex_search('^https?://([^/]+)/(.+)/-/tree/(.+)$', '\\1', '\\2', '\\3') }}"
+    _gh_bare_match: "{{ branch_review_target | regex_search('^([\\w.-]+/[\\w.-]+)@([\\w./-]+)$', '\\1', '\\2') }}"
+
+# Anything that isn't a recognized GitHub/GitLab branch reference falls
+# through to 'local' — deliberately permissive rather than an
+# allowlist of path prefixes, since a local target can be given as an
+# absolute path, a relative one, or '.'.
+- name: Resolve platform, org/repo, branch, and hostname
+  ansible.builtin.set_fact:
+    branch_review_platform: >-
+      {{ 'github' if (_gh_tree_match or _gh_bare_match)
+         else 'gitlab' if _gl_tree_match
+         else 'local' }}
+    branch_review_org_repo: >-
+      {{ (_gh_tree_match[0] if _gh_tree_match
+          else _gh_bare_match[0] if _gh_bare_match
+          else _gl_tree_match[1] if _gl_tree_match
+          else '') }}
+    branch_review_branch_name: >-
+      {{ (_gh_tree_match[1] if _gh_tree_match
+          else _gh_bare_match[1] if _gh_bare_match
+          else _gl_tree_match[2] if _gl_tree_match
+          else branch_review_branch) }}
+    branch_review_hostname: "{{ _gl_tree_match[0] if _gl_tree_match else '' }}"
+
+- name: Derive a display org/repo identifier for local targets
+  ansible.builtin.set_fact:
+    branch_review_org_repo: "local/{{ branch_review_target | basename }}"
+  when: branch_review_platform == 'local'
+
+- name: Determine the clone source (a URL for remote targets, a filesystem path for local ones)
+  ansible.builtin.set_fact:
+    branch_review_clone_source: >-
+      {{ 'https://github.com/' + branch_review_org_repo + '.git'
+         if branch_review_platform == 'github'
+         else 'https://' + branch_review_hostname + '/' + branch_review_org_repo + '.git'
+         if branch_review_platform == 'gitlab'
+         else branch_review_target }}
+
+- name: Create a working checkout directory
+  ansible.builtin.tempfile:
+    state: directory
+    prefix: "branch-review-"
+  delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+  ignore_unreachable: true
+  register: branch_review_checkout_dir
+
+- name: Fail loudly if the sandbox connection was unreachable
+  ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+  vars:
+    fail_if_unreachable_result_var: branch_review_checkout_dir
+
+# version: omit (not '') when no branch was resolved — checks out
+# whatever the source's default branch/HEAD is, same as a plain
+# `git clone` with no -b flag.
+- name: Clone the target repo/branch
+  ansible.builtin.git:
+    repo: "{{ branch_review_clone_source }}"
+    dest: "{{ branch_review_checkout_dir.path }}"
+    version: "{{ branch_review_branch_name if branch_review_branch_name else omit }}"
+  delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+  ignore_unreachable: true
+  register: branch_review_clone_result
+  # Same reasoning as resolve_target_pr.yml's identical clone task -- a real network
+  # clone of a potentially large, foreign repo.
+  async: 120
+  poll: 2
+
+- name: Fail loudly if the sandbox connection was unreachable
+  ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+  vars:
+    fail_if_unreachable_result_var: branch_review_clone_result
+
+- name: Resolve the checked-out commit's short SHA
+  ansible.builtin.command:
+    argv: [git, rev-parse, --short=7, HEAD]
+  args:
+    chdir: "{{ branch_review_checkout_dir.path }}"
+  delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+  ignore_unreachable: true
+  changed_when: false
+  register: _branch_review_sha_result
+  timeout: 30
+
+- name: Fail loudly if the sandbox connection was unreachable
+  ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+  vars:
+    fail_if_unreachable_result_var: _branch_review_sha_result
+
+# Only needed when no branch was explicitly resolved above (a local
+# target with no branch_review_branch given, or a remote target cloned
+# at its default branch) — record what actually got checked out so
+# review_branch/review_context reflect reality, not an empty string.
+# One "skipping" notice instead of two when a branch name was already
+# resolved -- see resolve_branch.yml's own header comment.
+- name: Resolve what branch actually got checked out
+  when: not branch_review_branch_name
+  ansible.builtin.include_tasks: resolve_branch.yml
+
+# Same output var contract resolve_target_pr.yml provides to the review
+# engine — review_number stands in for "the identifier that isn't
+# org/repo", used only for labeling pipeline_agent_calls/
+# pipeline_findings_reports entries (org_repo + '#' + number); a branch
+# name serves that purpose fine, there's no actual PR/MR number here.
+- name: Set outputs for the review engine
+  ansible.builtin.set_fact:
+    review_repo_path: "{{ branch_review_checkout_dir.path }}"
+    # A whole-branch audit has no base to diff against -- git's
+    # well-known empty-tree object as the target (same fallback
+    # resolve_target_commit.yml uses for a root commit) makes
+    # prepare_briefing.py diff the ENTIRE checked-out tree against
+    # nothing, giving the engine the full codebase as "the diff" instead
+    # of failing to resolve a nonexistent base ref.
+    review_target_ref: "{{ git_empty_tree_sha }}"
+    review_source_ref: "HEAD"
+    review_org_repo: "{{ branch_review_org_repo }}"
+    review_number: "{{ branch_review_branch_name }}"
+    # branch_review_org_repo already carries a "local/" prefix for local
+    # targets (see "Derive a display org/repo identifier" above), so
+    # only prepend the platform name here for remote targets — avoids
+    # producing "local-local-<repo>-<branch>".
+    review_branch: >-
+      {{ (branch_review_platform + '-' if branch_review_platform != 'local' else '')
+         ~ (branch_review_org_repo | regex_replace('/', '-'))
+         ~ '-' ~ (branch_review_branch_name | regex_replace('/', '-')) }}
+    review_short_sha: "{{ _branch_review_sha_result.stdout | trim }}"
+    review_context: >-
+      Full codebase audit of {{ branch_review_org_repo }}, branch
+      '{{ branch_review_branch_name }}' (commit {{ _branch_review_sha_result.stdout | trim }}).
+      This is a whole-branch audit, not a PR/MR diff review — there is
+      no PR/MR description or changed-files list to show.
+
+- name: Run the review engine
+  ansible.builtin.include_tasks: run_review_engine.yml

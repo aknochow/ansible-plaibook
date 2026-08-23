@@ -1,0 +1,138 @@
+---
+# One turn of one finding's verification loop.
+# Re-checks review_verify_done to handle mid-loop evaluation.
+# Reuses explore_tools and dispatch_explore_tool.yml for tool dispatch.
+
+- name: Run this turn (no-op once this finding's verdict is in)
+  when: not review_verify_done
+  block:
+    - name: Increment the turn counter
+      ansible.builtin.set_fact:
+        verify_turn_count: "{{ (verify_turn_count | default(0) | int) + 1 }}"
+
+    - name: Determine if this is the last allowed turn
+      ansible.builtin.set_fact:
+        verify_last_turn: "{{ (verify_turn_count | int) >= (review_verify_max_turns | int) }}"
+
+    # Force trace_reachability on the first turn for reachability claims.
+    # Tool call is mechanically required, not just suggested.
+    # On single-turn budget (max_turns=1), forced report_verdict takes precedence.
+    - name: Determine if this is the finding's first turn
+      ansible.builtin.set_fact:
+        verify_first_turn: "{{ (verify_turn_count | int) == 1 }}"
+
+    # Dispatch with bounded retry on malformed structured output.
+    # Retries are separate from turn budget; retry logic in dispatch_verify_turn_attempt.yml.
+    - name: Reset this turn's dispatch validity flag
+      ansible.builtin.set_fact:
+        verify_dispatch_valid: false
+
+    - name: "Call Claude with the current conversation, attempt 1, verify turn {{ verify_turn_count }}"
+      ansible.builtin.include_tasks: dispatch_verify_turn_attempt.yml
+      vars:
+        verify_attempt_number: 1
+
+    - name: Retry this turn's dispatch if the forced final verdict call didn't happen
+      ansible.builtin.include_tasks: dispatch_verify_turn_attempt.yml
+      loop: "{{ range(2, review_structured_output_max_attempts | int + 1) | list }}"
+      loop_control:
+        loop_var: verify_attempt_number
+      when: verify_last_turn and not verify_dispatch_valid
+
+    - name: Fail loudly if the forced final verdict call never happened after all attempts
+      ansible.builtin.assert:
+        that:
+          - verify_dispatch_valid
+        fail_msg: >-
+          Verify agent ({{ review_verify_model }}) never produced a
+          report_verdict tool call on the forced final turn after
+          {{ review_structured_output_max_attempts }} attempt(s), despite
+          forced tool_choice. This is a confirmed, probabilistic model-
+          generation quirk (see
+          handoff.ansible-plaibook-merge-findings-string-vs-list-crash.yaml) --
+          consider raising review_structured_output_max_attempts, or
+          checking whether this model has a known elevated rate of this
+          issue, before assuming this is a one-off.
+      when: verify_last_turn
+
+    - name: Append the assistant's turn to the conversation
+      ansible.builtin.set_fact:
+        verify_messages: "{{ verify_messages + [{'role': 'assistant', 'content': verify_turn_result.message.content}] }}"
+
+    - name: Check whether the agent called report_verdict this turn
+      ansible.builtin.set_fact:
+        verify_report_calls: "{{ verify_turn_result.tool_calls | selectattr('name', 'equalto', 'report_verdict') | list }}"
+
+    # Dispatch tool calls before capturing verdict so tracking facts stay current.
+    # Same-turn tool_use must have matching tool_result regardless of verdict arrival.
+    - name: Filter out report_verdict from this turn's tool calls
+      ansible.builtin.set_fact:
+        verify_other_tool_calls: "{{ verify_turn_result.tool_calls | rejectattr('name', 'equalto', 'report_verdict') | list }}"
+
+    - name: Dispatch any other tool calls from this turn
+      when: verify_other_tool_calls | length > 0
+      block:
+        - name: Reset the tool-result accumulator for this turn
+          ansible.builtin.set_fact:
+            explore_tool_results: []
+
+        - name: Execute each requested tool call
+          ansible.builtin.include_tasks: dispatch_explore_tool.yml
+          loop: "{{ verify_other_tool_calls }}"
+          loop_control:
+            loop_var: tool_call
+            label: "{{ tool_call.name }}({{ tool_call.input.path | default('') }})"
+
+        # Always append tool results, even if verdict is captured this turn.
+        # Keeps verify_messages complete with all tool_use/tool_result pairs.
+        - name: Append the tool results as the next user turn
+          ansible.builtin.set_fact:
+            verify_messages: "{{ verify_messages + [{'role': 'user', 'content': explore_tool_results}] }}"
+
+    # Default all verdict fields since schema "required" isn't guaranteed.
+    # verify_result_severity_assessed flags whether real axis-1 assessment occurred.
+    # Placeholder values are inert and least-alarming for fallback paths.
+    - name: Capture the verdict once report_verdict has been called
+      when: verify_report_calls | length > 0
+      ansible.builtin.set_fact:
+        review_verify_done: true
+        verify_result_status: "{{ verify_report_calls[0].input.evidence_status | default('inconclusive') }}"
+        verify_result_evidence: "{{ verify_report_calls[0].input.evidence | default('') }}"
+        verify_result_rationale: "{{ verify_report_calls[0].input.rationale | default('Verification agent did not populate a rationale.') }}"
+        verify_result_requires_execution: "{{ verify_report_calls[0].input.requires_execution | default(false) }}"
+        verify_result_severity_assessed: true
+        verify_result_reachability: "{{ verify_report_calls[0].input.reachability | default('theoretical-only') }}"
+        verify_result_trust_boundary: "{{ verify_report_calls[0].input.trust_boundary | default('unclear') }}"
+        verify_result_worst_outcome_category: "{{ verify_report_calls[0].input.worst_outcome_category | default('cosmetic-style') }}"
+        verify_result_silent_failure: "{{ verify_report_calls[0].input.silent_failure | default(false) | bool }}"
+        # Sourced from deterministic tracking fact, not model self-report.
+        verify_result_used_static_reachability_trace: "{{ verify_reachability_tool_used | default(false) }}"
+        verify_result_continues_finding_id_rationale: >-
+          {{ verify_report_calls[0].input.continues_finding_id_rationale
+             | default('Verification agent did not populate a continuity rationale.') }}
+        # Extract and preserve report_verdict's raw input dict unmodified.
+        # Jinja finalization of bare None to "" is avoided by keeping the dict intact.
+        # MUST be in same set_fact call to set before review_verify_done flips to true.
+        verify_result_claim_input: "{{ verify_report_calls[0].input }}"
+
+    # No sensible default fallback for single finding; stall maps to inconclusive.
+    - name: Force an inconclusive verdict if the agent stopped without calling any tool
+      when: verify_report_calls | length == 0 and verify_turn_result.stop_reason != 'tool_use'
+      ansible.builtin.set_fact:
+        review_verify_done: true
+        verify_result_status: "inconclusive"
+        verify_result_evidence: ""
+        verify_result_rationale: "Verification agent stopped without reaching a verdict."
+        verify_result_requires_execution: false
+        # No real severity assessment; finding's own severity passes through unchanged.
+        verify_result_severity_assessed: false
+        verify_result_reachability: "theoretical-only"
+        verify_result_trust_boundary: "unclear"
+        verify_result_worst_outcome_category: "cosmetic-style"
+        verify_result_silent_failure: false
+        # Not hardcoded false; forced first-turn trace can succeed before later stall.
+        verify_result_used_static_reachability_trace: "{{ verify_reachability_tool_used | default(false) }}"
+        verify_result_continues_finding_id_rationale: "Verification agent stopped without reaching a verdict."
+        # Plain YAML literal (no template) for safe None preservation.
+        verify_result_claim_input:
+          continues_finding_id: null

@@ -1,0 +1,325 @@
+---
+# Parallel dispatch of Security and Review agents, each with shared briefing + lens-specific steering.
+
+- name: Domains this port has steering blocks for
+  ansible.builtin.set_fact:
+    known_steering_domains:
+      - ci-pipeline
+      - python-packaging
+      - cli-entrypoint
+      - subprocess
+      - k8s-operator
+      - openshift
+      - new-repo
+      - python-code
+      - go-project
+      - shell-bash
+      - ansible
+      - container
+      - patternfly-ui
+      - api-endpoints
+      - database
+      - performance
+
+- name: Intersect detected domains with known steering blocks
+  ansible.builtin.set_fact:
+    matched_steering_domains: "{{ briefing_domains | intersect(known_steering_domains) }}"
+
+# Reset domain steering accumulators since facts persist across include_role iterations.
+# Facts accumulate across loops if not reset, causing cross-target pollution.
+- name: Reset domain steering accumulators for this iteration
+  ansible.builtin.set_fact:
+    domain_steering_raw: []
+    domain_steering_parsed: []
+
+- name: Load each matched domain's steering content
+  ansible.builtin.set_fact:
+    domain_steering_raw: >-
+      {{ domain_steering_raw +
+         [{'domain': item, 'content': lookup('file', role_path + '/templates/domain_steering/' + item + '.md.j2')}] }}
+  loop: "{{ matched_steering_domains }}"
+  loop_control:
+    label: "{{ item }}"
+
+# YAML block scalars don't process \n escapes; splitlines() sidesteps this.
+# Use plain double-quoted scalar for real newline where YAML interprets \n correctly.
+- name: Compute a real newline character (YAML block scalars don't interpret \n escapes)
+  ansible.builtin.set_fact:
+    real_nl: "\n"
+
+- name: Split the target annotation from the steering prose
+  ansible.builtin.set_fact:
+    domain_steering_parsed: >-
+      {{ domain_steering_parsed +
+         [{'domain': item.domain,
+           'target': item.content.splitlines()[0],
+           'prose': (item.content.splitlines()[1:] | join(real_nl)) | trim}] }}
+  loop: "{{ domain_steering_raw }}"
+  loop_control:
+    label: "{{ item.domain }}"
+
+# Guard against regression: every matched domain must produce non-empty guidance.
+- name: Verify every matched domain actually produced steering guidance
+  ansible.builtin.assert:
+    that:
+      - domain_steering_parsed | rejectattr('prose', 'equalto', '') | list | length == domain_steering_parsed | length
+    fail_msg: >-
+      Domain steering is broken: {{ matched_steering_domains | length }}
+      domain(s) matched ({{ matched_steering_domains | join(', ') }}) but
+      at least one produced empty prose. The split/join logic extracting
+      each domain_steering/*.md.j2 template's guidance has regressed.
+    success_msg: >-
+      Domain steering verified: {{ domain_steering_parsed | length }}
+      domain(s) matched, all with non-empty guidance text.
+  when: matched_steering_domains | length > 0
+
+- name: Select steering blocks for each agent
+  ansible.builtin.set_fact:
+    security_domain_blocks: >-
+      {{ domain_steering_parsed | default([]) | selectattr('target', 'search', 'both agents|Security')
+         | map(attribute='prose') | list }}
+    review_domain_blocks: >-
+      {{ domain_steering_parsed | default([]) | selectattr('target', 'search', 'both agents|Review Agent')
+         | map(attribute='prose') | list }}
+
+- name: Render the Security agent system prompt
+  ansible.builtin.set_fact:
+    security_system_prompt: "{{ lookup('template', role_path + '/templates/security_agent_prompt.j2') }}"
+  vars:
+    domain_steering_blocks: "{{ security_domain_blocks }}"
+    full_diff: "{{ review_full_diff }}"
+    prior_review_md: "{{ review_prior_review_md }}"
+
+- name: Dump the Security agent's rendered prompt (debug mode only)
+  when: review_debug_dump_prompts | bool
+  ansible.builtin.include_tasks: dump_debug_prompt.yml
+  vars:
+    dump_prompt_name: "security_lens"
+    dump_prompt_content: "{{ security_system_prompt }}"
+
+- name: Render the Review agent system prompt
+  ansible.builtin.set_fact:
+    review_system_prompt: "{{ lookup('template', role_path + '/templates/review_agent_prompt.j2') }}"
+  vars:
+    domain_steering_blocks: "{{ review_domain_blocks }}"
+    full_diff: "{{ review_full_diff }}"
+    prior_review_md: "{{ review_prior_review_md }}"
+
+- name: Dump the Review agent's rendered prompt (debug mode only)
+  when: review_debug_dump_prompts | bool
+  ansible.builtin.include_tasks: dump_debug_prompt.yml
+  vars:
+    dump_prompt_name: "review_lens"
+    dump_prompt_content: "{{ review_system_prompt }}"
+
+# Print request config before async dispatch (async shows only job metadata).
+# Omit api_key (secret); show everything else including rendered system prompt.
+- name: Show the Security agent's request configuration
+  ansible.builtin.debug:
+    msg: "{{ [
+      'provider: ' + claude_provider,
+      'region: ' + (claude_vertex_region if claude_provider == 'vertex' else 'n/a'),
+      'project_id: ' + (claude_vertex_project if claude_provider == 'vertex' else 'n/a'),
+      'model: ' + review_agent_model,
+      'max_tokens: 8192',
+      'cache_system: true',
+      'tools: [report_findings] (forced via tool_choice)',
+      '',
+      '--- system prompt ---',
+      ] + security_system_prompt.split('\n') }}"
+
+- name: Dispatch the Security agent (async)
+  aknochow.claude.message:
+    provider: "{{ claude_provider }}"
+    region: "{{ claude_vertex_region if claude_provider == 'vertex' else omit }}"
+    project_id: "{{ claude_vertex_project if claude_provider == 'vertex' else omit }}"
+    api_key: "{{ claude_api_key if claude_provider == 'anthropic' else omit }}"
+    model: "{{ review_agent_model }}"
+    max_tokens: 8192
+    messages:
+      - role: user
+        content: "Review this diff per your instructions."
+    system: "{{ security_system_prompt }}"
+    cache_system: true
+    # Forced tool_choice avoids Vertex 'structured_outputs' allowlist requirement.
+    tools:
+      - name: report_findings
+        description: Report the review findings and lens scores.
+        input_schema: "{{ security_findings_schema }}"
+    tool_choice: { type: tool, name: report_findings }
+  async: 600
+  poll: 0
+  register: security_job
+
+# (See Security agent task above for why config is printed before dispatch.)
+- name: Show the Review agent's request configuration
+  ansible.builtin.debug:
+    msg: "{{ [
+      'provider: ' + claude_provider,
+      'region: ' + (claude_vertex_region if claude_provider == 'vertex' else 'n/a'),
+      'project_id: ' + (claude_vertex_project if claude_provider == 'vertex' else 'n/a'),
+      'model: ' + review_agent_model,
+      'max_tokens: 8192',
+      'cache_system: true',
+      'tools: [report_findings] (forced via tool_choice)',
+      '',
+      '--- system prompt ---',
+      ] + review_system_prompt.split('\n') }}"
+
+- name: Dispatch the Review agent (async)
+  aknochow.claude.message:
+    provider: "{{ claude_provider }}"
+    region: "{{ claude_vertex_region if claude_provider == 'vertex' else omit }}"
+    project_id: "{{ claude_vertex_project if claude_provider == 'vertex' else omit }}"
+    api_key: "{{ claude_api_key if claude_provider == 'anthropic' else omit }}"
+    model: "{{ review_agent_model }}"
+    max_tokens: 8192
+    messages:
+      - role: user
+        content: "Review this diff per your instructions."
+    system: "{{ review_system_prompt }}"
+    cache_system: true
+    tools:
+      - name: report_findings
+        description: Report the review findings and lens scores.
+        input_schema: "{{ review_findings_schema }}"
+    tool_choice: { type: tool, name: report_findings }
+  async: 600
+  poll: 0
+  register: review_job
+
+- name: Wait for both agents to finish
+  ansible.builtin.async_status:
+    jid: "{{ item.ansible_job_id }}"
+  loop:
+    - "{{ security_job }}"
+    - "{{ review_job }}"
+  register: lens_results
+  until: lens_results.finished
+  retries: 60
+  delay: 5
+
+- name: Extract lens results
+  ansible.builtin.set_fact:
+    security_result: "{{ lens_results.results[0] }}"
+    review_result: "{{ lens_results.results[1] }}"
+
+# Retry-on-malformed structured output (probabilistic model-generation quirk).
+# Reset per-lens validity flags; facts persist across review_targets loop iterations.
+- name: Reset per-lens validity flags for this iteration
+  ansible.builtin.set_fact:
+    security_lens_valid: false
+    review_lens_valid: false
+
+# Preserves concurrent dispatch for common (no-malformation) case.
+# Sequential retries only on malformed first attempt.
+# See validate_lens_dispatch.yml for "valid" criteria; retry_lens_dispatch.yml for retry logic.
+- name: Validate the Security lens's first-attempt structured output
+  ansible.builtin.include_tasks: validate_lens_dispatch.yml
+  vars:
+    lens_label: "Security"
+    lens_raw_result: "{{ security_result }}"
+    lens_result_var: "security_result"
+    lens_valid_var: "security_lens_valid"
+
+- name: Validate the Review lens's first-attempt structured output
+  ansible.builtin.include_tasks: validate_lens_dispatch.yml
+  vars:
+    lens_label: "Review"
+    lens_raw_result: "{{ review_result }}"
+    lens_result_var: "review_result"
+    lens_valid_var: "review_lens_valid"
+
+# Both retry loops run before any fail assert (gives each lens full retry budget).
+# Prevents one lens's failure from aborting the other's retry sequence.
+- name: Retry the Security lens's dispatch if its structured output was invalid
+  ansible.builtin.include_tasks: retry_lens_dispatch.yml
+  loop: "{{ range(2, review_structured_output_max_attempts | int + 1) | list }}"
+  loop_control:
+    loop_var: lens_attempt_number
+  vars:
+    lens_label: "Security"
+    lens_result_var: "security_result"
+    lens_valid_var: "security_lens_valid"
+    lens_system_prompt: "{{ security_system_prompt }}"
+    lens_schema: "{{ security_findings_schema }}"
+  when: not security_lens_valid
+
+- name: Retry the Review lens's dispatch if its structured output was invalid
+  ansible.builtin.include_tasks: retry_lens_dispatch.yml
+  loop: "{{ range(2, review_structured_output_max_attempts | int + 1) | list }}"
+  loop_control:
+    loop_var: lens_attempt_number
+  vars:
+    lens_label: "Review"
+    lens_result_var: "review_result"
+    lens_valid_var: "review_lens_valid"
+    lens_system_prompt: "{{ review_system_prompt }}"
+    lens_schema: "{{ review_findings_schema }}"
+  when: not review_lens_valid
+
+- name: Fail loudly if the Security lens never produced valid structured output
+  ansible.builtin.assert:
+    that:
+      - security_lens_valid
+    fail_msg: >-
+      Security lens ({{ review_agent_model }}) failed to produce valid structured output
+      after {{ review_structured_output_max_attempts }} attempt(s).
+      Consider raising review_structured_output_max_attempts or checking model reliability.
+
+- name: Fail loudly if the Review lens never produced valid structured output
+  ansible.builtin.assert:
+    that:
+      - review_lens_valid
+    fail_msg: >-
+      Review lens ({{ review_agent_model }}) failed to produce valid structured output
+      after {{ review_structured_output_max_attempts }} attempt(s).
+      Consider raising review_structured_output_max_attempts or checking model reliability.
+
+# Surface raw model output (otherwise only in merged findings.md).
+# message.model is API's echo of resolved model; may differ from requested alias.
+- name: Show which provider/model served the Security agent
+  ansible.builtin.debug:
+    msg: >-
+      provider={{ claude_provider }}
+      requested_model={{ review_agent_model }}
+      resolved_model={{ security_result.message.model }}
+
+- name: Show the Security agent's raw findings
+  ansible.builtin.debug:
+    msg: "{{ (security_result.structured | to_nice_json(indent=2)).split('\n') }}"
+
+- name: Show the Security agent's token usage
+  ansible.builtin.debug:
+    var: security_result.usage
+
+- name: Show which provider/model served the Review agent
+  ansible.builtin.debug:
+    msg: >-
+      provider={{ claude_provider }}
+      requested_model={{ review_agent_model }}
+      resolved_model={{ review_result.message.model }}
+
+- name: Show the Review agent's raw findings
+  ansible.builtin.debug:
+    msg: "{{ (review_result.structured | to_nice_json(indent=2)).split('\n') }}"
+
+- name: Show the Review agent's token usage
+  ansible.builtin.debug:
+    var: review_result.usage
+
+# pipeline_agent_calls: NOT reset (accumulates across review_targets loop for pipeline-wide summary).
+- name: Record this iteration's agent calls for the pipeline-wide stats summary
+  ansible.builtin.set_fact:
+    pipeline_agent_calls: >-
+      {{ pipeline_agent_calls + [
+           {'target': review_org_repo + '#' + review_number, 'lens': 'security',
+            'model': security_result.message.model, 'usage': security_result.usage},
+           {'target': review_org_repo + '#' + review_number, 'lens': 'review',
+            'model': review_result.message.model, 'usage': review_result.usage},
+         ] }}
+
+# Make pricing table available for pipeline-wide summary (survives role scope).
+- name: Make the pricing table available to the pipeline-wide summary
+  ansible.builtin.set_fact:
+    pipeline_pricing_table: "{{ claude_pricing }}"

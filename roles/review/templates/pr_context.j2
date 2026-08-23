@@ -1,0 +1,37 @@
+{# Renders fetch_pr_context.py's JSON output into the same plain prose
+   block every other resolve_target_*.yml produces for review_context
+   (see commit_context.j2 for the commit-mode equivalent) -- Python
+   fetches, Jinja presents, same split as the rest of this role. #}
+# {{ _pr_context.identifier }}: {{ _pr_context.title }}
+
+## Metadata
+- **Author**: @{{ _pr_context.author }}
+- **State**: {{ _pr_context.state }}
+- **Source -> Target**: `{{ _pr_context.source_branch }}` -> `{{ _pr_context.target_branch }}`
+- **URL**: {{ _pr_context.url }}
+- **CI**: {{ {'passing': 'passing', 'failing': 'FAILING', 'running': 'running', 'none': 'no checks found'}.get(_pr_context.ci_status, _pr_context.ci_status) }}
+{% for check in _pr_context.failing_checks %}
+  - FAILING: **{{ check.name }}** ({{ check.url }})
+{% endfor %}
+
+{% if _pr_context.description %}
+## Description
+
+{{ _pr_context.description }}
+{% endif %}
+
+{% if _pr_context.files_changed %}
+## Files Changed
+{% for f in _pr_context.files_changed %}
+- `{{ f.path }}` ({{ f.status }}{{ ' +' ~ f.additions ~ ' -' ~ f.deletions if f.additions is not none else '' }})
+{% endfor %}
+{% endif %}
+
+## Unresolved Review Comments
+{% if _pr_context.unresolved_comments %}
+{% for c in _pr_context.unresolved_comments %}
+{{ loop.index }}. {{ '`' ~ c.file ~ ':' ~ c.line ~ '` ' if c.file else '' }}@{{ c.author }}: {{ c.body | truncate(300) }}
+{% endfor %}
+{% else %}
+No unresolved discussions.
+{% endif %}

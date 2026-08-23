@@ -1,0 +1,65 @@
+---
+# One retry attempt for a single lens's dispatch, included in a loop from
+# lenses.yml (range(2, review_structured_output_max_attempts + 1)) -- each
+# iteration is a no-op once the lens is already valid, the same
+# "loop_var + when: not done" pattern already used throughout this role's
+# other turn loops (explore_turn.yml, verify_turn.yml).
+#
+# Re-issues the IDENTICAL request (same system prompt, same schema, same
+# forced tool_choice) -- deliberately does NOT append a corrective hint
+# about the previous failure. The confirmed real evidence (handoff.
+# ansible-plaibook-merge-findings-string-vs-list-crash.yaml, ansible-plaibook-
+# benchmark's Sonnet-5 rate testing) is that this failure is probabilistic
+# and produces a DIFFERENT malformed shape each time, not the same broken
+# output repeating -- that's exactly the signature of a sampling glitch a
+# plain re-roll is well-suited to fix, not a systematic misunderstanding a
+# hint would correct. A hint tailored to one observed malformation
+# wouldn't generalize to the next, different one, and would make this no
+# longer "the same API call" the whole design is built around.
+#
+# vars expected from the caller: lens_label, lens_result_var, lens_valid_var,
+# lens_system_prompt, lens_schema, lens_attempt_number (the loop var)
+- name: "Retry the lens's dispatch: {{ lens_label ~ ', attempt ' ~ lens_attempt_number ~ ' of ' ~ review_structured_output_max_attempts }}"
+  when: not (lookup('vars', lens_valid_var))
+  block:
+    - name: "Call Claude again with the identical request for lens retry: {{ lens_label }}"
+      aknochow.claude.message:
+        provider: "{{ claude_provider }}"
+        region: "{{ claude_vertex_region if claude_provider == 'vertex' else omit }}"
+        project_id: "{{ claude_vertex_project if claude_provider == 'vertex' else omit }}"
+        api_key: "{{ claude_api_key if claude_provider == 'anthropic' else omit }}"
+        model: "{{ review_agent_model }}"
+        max_tokens: 8192
+        messages:
+          - role: user
+            content: "Review this diff per your instructions."
+        system: "{{ lens_system_prompt }}"
+        cache_system: true
+        tools:
+          - name: report_findings
+            description: Report the review findings and lens scores.
+            input_schema: "{{ lens_schema }}"
+        tool_choice: { type: tool, name: report_findings }
+      register: _lens_retry_raw_result
+
+    # Retries are real, billed API calls, not free polling -- must be
+    # recorded here so pipeline_stats.yml's cost accounting reflects what
+    # actually got spent, same as every other dispatch in this role.
+    # attempt is additive metadata (compute_pipeline_cost.py doesn't need
+    # it to sum correctly, it already sums every entry regardless of
+    # shape) -- present so a human reading pipeline_agent_calls, or a
+    # future stats enhancement, can see how many retries a given review
+    # actually needed.
+    - name: Record this retry attempt's usage for the pipeline-wide stats summary
+      ansible.builtin.set_fact:
+        pipeline_agent_calls: >-
+          {{ pipeline_agent_calls + [{
+               'target': review_org_repo + '#' + review_number, 'lens': lens_label | lower,
+               'model': _lens_retry_raw_result.message.model, 'usage': _lens_retry_raw_result.usage,
+               'attempt': lens_attempt_number
+             }] }}
+
+    - name: "Validate the retried structured output for lens: {{ lens_label }}"
+      ansible.builtin.include_tasks: validate_lens_dispatch.yml
+      vars:
+        lens_raw_result: "{{ _lens_retry_raw_result }}"

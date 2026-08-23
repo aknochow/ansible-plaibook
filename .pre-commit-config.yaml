@@ -1,0 +1,28 @@
+---
+# Layered under Red Hat's org-mandated rh-multi-pre-commit hook (see
+# .git/hooks/pre-commit) -- rh-multi-pre-commit runs pre-commit.com
+# style hooks like this one ALONGSIDE its own mandatory checks, so
+# nothing here replaces or competes with the required security
+# scanning. Registered/synced via `rh-multi-pre-commit update`, not
+# `pre-commit install` (which would overwrite the org-mandated hook
+# dispatcher).
+repos:
+  - repo: local
+    hooks:
+      - id: ansible-lint
+        name: ansible-lint
+        # `language: system` + calling the already-installed binary
+        # directly, NOT the upstream ansible-lint pre-commit hook's
+        # normal repo:/rev: form -- that form makes pre-commit build
+        # its own isolated venv for the hook, which fails on this
+        # machine's default python3 (3.14): the hook's vendored pip
+        # bundles an old pkg_resources that references
+        # pkgutil.ImpImporter, removed in 3.14. Using the system
+        # install sidesteps that entirely and avoids a second,
+        # separately-versioned ansible-lint installation to keep in
+        # sync with the one already verified working (see
+        # .ansible-lint's own header comment for the --offline note).
+        entry: ansible-lint --offline
+        language: system
+        files: \.(yml|yaml)$
+        pass_filenames: false

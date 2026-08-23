@@ -1,0 +1,26 @@
+---
+# Included wherever a system prompt is rendered (lenses.yml, explore.yml,
+# verify_finding.yml), gated by review_debug_dump_prompts (off by
+# default -- see defaults/main.yml). Caller sets dump_prompt_name and
+# dump_prompt_content before including this file. One "skipping" notice
+# for the whole group when the debug mode is off, not one per task --
+# see write_last_run_files.yml's header comment for why this is
+# include_tasks + when at the include site, not block + when.
+#
+# The dump directory itself is created once, in tasks/main.yml, before
+# this file is ever included -- not per-call here.
+
+- name: "Resolve this dump's destination path: {{ dump_prompt_name }}"
+  ansible.builtin.set_fact:
+    dump_prompt_dest: >-
+      {{ lookup('env', 'HOME') }}/.cache/ansible-plaibook/debug_prompts/{{ review_branch | regex_replace('[^A-Za-z0-9_.-]', '_') }}/{{ dump_prompt_name }}.txt
+
+- name: "Dump the rendered prompt: {{ dump_prompt_name }}"
+  ansible.builtin.copy:
+    content: "{{ dump_prompt_content }}"
+    dest: "{{ dump_prompt_dest }}"
+    mode: "0600"
+
+- name: "Show where the dumped prompt landed: {{ dump_prompt_name }}"
+  ansible.builtin.debug:
+    msg: "DEBUG_PROMPT_DUMP: {{ dump_prompt_dest }}"

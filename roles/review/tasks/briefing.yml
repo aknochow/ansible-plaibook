@@ -1,0 +1,414 @@
+---
+# Coordinator setup: diffing, domain detection, prior-review lookup,
+# completeness checks, and checklist execution, all deterministic,
+# zero-LLM. Report-header identity (project/branch/commit) comes
+# directly from already-resolved review_org_repo/review_branch/
+# review_short_sha facts rather than being re-derived here.
+
+# review_org_repo/review_branch are interpolated directly into
+# filesystem paths (this lookup and persist.yml's findings.md write).
+# Neither is reachable with an attacker-controlled value today (always
+# a repo_path basename, a URL-parsed org/repo slug, or a real git
+# ref), but the guard is cheap regardless.
+- name: Validate review_org_repo/review_branch don't contain path-traversal segments
+  ansible.builtin.assert:
+    that:
+      - "'..' not in review_org_repo.split('/')"
+      - "'..' not in review_branch.split('/')"
+    fail_msg: "review_org_repo/review_branch must not contain '..' path segments (possible path traversal)"
+
+# review_output_base (~/reviews) is a controller-local cross-run
+# history tree, never something that lives on a delegated/sandboxed
+# host. ansible.builtin.find handles a nonexistent base path
+# gracefully (empty file list, no failure), so no separate existence
+# check is needed.
+#
+# depth: 2 (review_dir is level 1, a date-sha subdirectory is level 2,
+# where findings.md lives) intentionally bounds the search: an
+# unbounded recurse would also match a findings.md nested inside a
+# date-sha directory's own subdirectory.
+- name: Find prior-review directories with a findings.md for this project/branch
+  ansible.builtin.find:
+    paths: "{{ review_output_base }}/{{ review_org_repo }}/{{ review_branch }}"
+    patterns: ["findings.md"]
+    recurse: true
+    depth: 2
+    file_type: file
+  register: _prior_review_findings_files
+
+- name: Pick the latest prior-review directory
+  find_latest_prior_review:
+    dirs_with_findings: "{{ _prior_review_findings_files.files | map(attribute='path') | map('dirname') | map('basename') | list }}"
+  register: _latest_prior_review
+
+- name: Read the latest prior review's findings.md if one was found
+  ansible.builtin.slurp:
+    path: "{{ review_output_base }}/{{ review_org_repo }}/{{ review_branch }}/{{ _latest_prior_review.latest_dir }}/findings.md"
+  register: _prior_review_raw
+  when: _latest_prior_review.found
+
+- name: Decode the prior review's content
+  ansible.builtin.set_fact:
+    review_prior_review_md: "{{ (_prior_review_raw.content | b64decode) if _latest_prior_review.found else '' }}"
+
+- name: Set report-header identity facts from already-resolved Ansible facts
+  ansible.builtin.set_fact:
+    briefing_project: "{{ review_org_repo }}"
+    briefing_branch: "{{ review_branch }}"
+    briefing_commit: "{{ review_short_sha }}"
+
+# Plain two-ref git diff, not triple-dot, to avoid an invalid-syntax
+# failure against a tree object.
+#
+# Not currently reachable with an attacker-influenced value (every
+# resolve_target_*.yml sets these to a hardcoded ref or a real SHA),
+# but argv list-form only prevents shell injection, not git option
+# injection: a ref value starting with '-' would be parsed by git as a
+# flag rather than a ref name.
+- name: Validate the diff ref args don't look like git options
+  ansible.builtin.assert:
+    that:
+      - not (review_target_ref | trim).startswith('-')
+      - not (review_source_ref | trim).startswith('-')
+    fail_msg: "review_target_ref/review_source_ref must not start with '-' (possible git option injection)"
+
+# Trailing "--" on every git diff call below disambiguates the two
+# preceding args as refs, never paths, regardless of whether a file in
+# the repo happens to share a name with a ref. Defense in depth on top
+# of the leading-dash assert above: the assert guards option
+# injection, "--" guards ref/path ambiguity.
+- name: Fetch the full diff
+  ansible.builtin.command:
+    argv: [git, diff, "{{ review_target_ref }}", "{{ review_source_ref }}", --]
+    chdir: "{{ review_repo_path }}"
+  delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+  ignore_unreachable: true
+  changed_when: false
+  register: _full_diff_result
+  timeout: 30
+
+- name: Fail loudly if the sandbox connection was unreachable
+  ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+  vars:
+    fail_if_unreachable_result_var: _full_diff_result
+
+- name: Fetch the list of changed files
+  ansible.builtin.command:
+    argv: [git, diff, --name-only, "{{ review_target_ref }}", "{{ review_source_ref }}", --]
+    chdir: "{{ review_repo_path }}"
+  delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+  ignore_unreachable: true
+  changed_when: false
+  register: _diff_files_result
+  timeout: 30
+
+- name: Fail loudly if the sandbox connection was unreachable
+  ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+  vars:
+    fail_if_unreachable_result_var: _diff_files_result
+
+- name: Fetch per-file diff stats
+  ansible.builtin.command:
+    argv: [git, diff, --numstat, "{{ review_target_ref }}", "{{ review_source_ref }}", --]
+    chdir: "{{ review_repo_path }}"
+  delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+  ignore_unreachable: true
+  changed_when: false
+  register: _diff_numstat_result
+  timeout: 30
+
+- name: Fail loudly if the sandbox connection was unreachable
+  ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+  vars:
+    fail_if_unreachable_result_var: _diff_numstat_result
+
+- name: Fetch the list of deleted files
+  ansible.builtin.command:
+    argv: [git, diff, --diff-filter=D, --name-only, "{{ review_target_ref }}", "{{ review_source_ref }}", --]
+    chdir: "{{ review_repo_path }}"
+  delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+  ignore_unreachable: true
+  changed_when: false
+  register: _deleted_files_result
+  timeout: 30
+
+- name: Fail loudly if the sandbox connection was unreachable
+  ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+  vars:
+    fail_if_unreachable_result_var: _deleted_files_result
+
+- name: Set the real diff content and file list facts
+  ansible.builtin.set_fact:
+    review_full_diff: "{{ _full_diff_result.stdout }}"
+    review_diff_files: "{{ _diff_files_result.stdout_lines }}"
+
+- name: Parse the per-file diff stats
+  parse_diff_stat:
+    numstat_output: "{{ _diff_numstat_result.stdout }}"
+  register: _diff_stat_result
+
+- name: Categorize the changed files
+  categorize_diff_files:
+    files: "{{ review_diff_files }}"
+    stats: "{{ _diff_stat_result.stats }}"
+  register: _diff_categories_result
+
+- name: Check diff completeness
+  check_diff_completeness:
+    diff_content: "{{ review_full_diff }}"
+    deleted_files: "{{ _deleted_files_result.stdout_lines }}"
+  register: _diff_completeness_result
+
+# diff_stats/diff_categories are summary.json-only structured metrics;
+# deliberately not rendered into findings.md, since the lenses already
+# get the full diff directly. completeness_checks' deleted_files/
+# todo_fixme/trailing_whitespace ARE rendered (see findings.md.j2) as
+# genuinely reviewer-relevant signals.
+#
+# review_completeness_checks is built as one Jinja dict-literal
+# expression rather than three separately-templated YAML keys: this
+# repo's non-native Ansible templating doesn't reliably reconvert a
+# bare top-level dot-accessed int back to a native int through
+# set_fact, but a dict literal containing that same int does convert
+# correctly.
+- name: Store diff stats, categories, and completeness checks as structured facts
+  ansible.builtin.set_fact:
+    review_diff_stats: "{{ _diff_stat_result.stats }}"
+    review_diff_categories: "{{ _diff_categories_result.categories }}"
+    review_completeness_checks: >-
+      {{ {
+        'deleted_files': _diff_completeness_result.deleted_files,
+        'todo_fixme': _diff_completeness_result.todo_fixme,
+        'trailing_whitespace': _diff_completeness_result.trailing_whitespace | int
+      } }}
+
+- name: Check for project-type marker files
+  ansible.builtin.stat:
+    path: "{{ review_repo_path }}/{{ item }}"
+  delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+  ignore_unreachable: true
+  loop:
+    - go.mod
+    - PROJECT
+    - galaxy.yml
+    - galaxy.yaml
+    - pyproject.toml
+    - setup.py
+    - setup.cfg
+    - review-checklist.md
+  loop_control:
+    label: "{{ item }}"
+  register: _marker_file_stats
+
+- name: Fail loudly if the sandbox connection was unreachable
+  ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+  vars:
+    fail_if_unreachable_result_var: _marker_file_stats
+
+- name: Build the marker-file existence dict
+  ansible.builtin.set_fact:
+    _marker_file_exists: "{{ dict(_marker_file_stats.results | map(attribute='item') | zip(_marker_file_stats.results | map(attribute='stat.exists'))) }}"
+
+# 1MB bound: slurp has no partial-read option, so truncate after
+# decoding. go.mod is practically never anywhere near 1MB in real use.
+- name: Read go.mod content if it exists
+  ansible.builtin.slurp:
+    path: "{{ review_repo_path }}/go.mod"
+  delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+  ignore_unreachable: true
+  register: _go_mod_raw
+  when: _marker_file_exists['go.mod']
+
+- name: Fail loudly if the sandbox connection was unreachable
+  ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+  vars:
+    fail_if_unreachable_result_var: _go_mod_raw
+
+- name: Set go.mod content fact
+  ansible.builtin.set_fact:
+    _go_mod_content: "{{ ((_go_mod_raw.content | b64decode)[:1048576]) if _marker_file_exists['go.mod'] else none }}"
+
+- name: Detect the project type
+  detect_project_type:
+    file_exists: "{{ _marker_file_exists }}"
+    go_mod_content: "{{ _go_mod_content }}"
+  register: _project_type_result
+
+# Pre-filter skill/eval paths: detect_diff_domains.py's own content-
+# match rules already exclude them, so there's no reason to spend I/O
+# stat-ing and slurping files whose content will never be examined.
+- name: Exclude skill/eval paths from content-detection I/O
+  ansible.builtin.set_fact:
+    _content_detection_files: "{{ review_diff_files | reject('search', '(^|/)(skills|evals)/') | list }}"
+
+# Check existence first: a deleted-in-this-diff file exists at the
+# target ref but not in the current (source-ref) checkout, so slurp
+# would fail without this check.
+- name: Check which diff files exist in the current checkout
+  ansible.builtin.stat:
+    path: "{{ review_repo_path }}/{{ item }}"
+  delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+  ignore_unreachable: true
+  loop: "{{ _content_detection_files }}"
+  loop_control:
+    label: "{{ item }}"
+  register: _diff_file_stats
+
+- name: Fail loudly if the sandbox connection was unreachable
+  ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+  vars:
+    fail_if_unreachable_result_var: _diff_file_stats
+
+# item.stat.isreg (not just item.stat.exists) excludes directories and
+# broken symlinks, which slurp would reject or mishandle. item.stat.size
+# skips the slurp entirely for a file already known to exceed the 1MB
+# bound, rather than reading it fully into memory first: a large
+# binary or generated file in the diff must not balloon memory.
+- name: Read the content of diff files that exist, are regular files, and are within the size bound
+  ansible.builtin.slurp:
+    path: "{{ review_repo_path }}/{{ item.item }}"
+  delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+  ignore_unreachable: true
+  loop: "{{ _diff_file_stats.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stat.exists and item.stat.isreg and item.stat.size <= 1048576
+  register: _diff_file_contents_raw
+
+- name: Fail loudly if the sandbox connection was unreachable
+  ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+  vars:
+    fail_if_unreachable_result_var: _diff_file_contents_raw
+
+# rejectattr('skipped', 'defined'), not selectattr('content', 'defined'):
+# a non-skipped looped result has no 'skipped' key at all (not
+# skipped: false), so this correctly keeps exactly the entries that ran.
+- name: Filter out skipped diff-file read results
+  ansible.builtin.set_fact:
+    _diff_file_results_ok: "{{ _diff_file_contents_raw.results | rejectattr('skipped', 'defined') | list }}"
+
+# The truncate below is a belt-and-suspenders backstop; the size guard
+# on the slurp task above already excludes anything over the bound
+# before slurp ever runs.
+- name: Build the diff-file contents dict
+  ansible.builtin.set_fact:
+    _diff_file_contents: >-
+      {{ dict(
+           _diff_file_results_ok
+           | map(attribute='item.item')
+           | zip(
+               _diff_file_results_ok
+               | map(attribute='content')
+               | map('b64decode')
+               | map('truncate', 1048576, True, '')
+             )
+         ) }}
+
+- name: Count total commits to detect a brand-new repo
+  ansible.builtin.command:
+    argv: [git, rev-list, --count, HEAD]
+    chdir: "{{ review_repo_path }}"
+  delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+  ignore_unreachable: true
+  changed_when: false
+  failed_when: false
+  register: _commit_count_result
+  timeout: 30
+
+# failed_when: false above absorbs an ordinary non-zero exit (handled
+# below by rc == 0), but not an UNREACHABLE sandbox connection, a
+# different failure class that still needs its own explicit check.
+- name: Fail loudly if the sandbox connection was unreachable
+  ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+  vars:
+    fail_if_unreachable_result_var: _commit_count_result
+
+- name: Detect diff domains
+  detect_diff_domains:
+    diff_files: "{{ review_diff_files }}"
+    file_contents: "{{ _diff_file_contents }}"
+    is_new_repo: "{{ (_commit_count_result.rc == 0) and ((_commit_count_result.stdout | trim | int) <= 10) }}"
+  register: _diff_domains_result
+
+- name: Set briefing_type/briefing_domains/briefing_has_checklist from the real detection
+  ansible.builtin.set_fact:
+    briefing_type: "{{ _project_type_result.type }}"
+    briefing_domains: "{{ _diff_domains_result.domains }}"
+    briefing_has_checklist: "{{ _marker_file_exists['review-checklist.md'] }}"
+
+# library/run_checklist.py is a real Ansible MODULE, not an action
+# plugin, specifically so delegate_to executes the whole worktree/
+# allowlist/teardown lifecycle on review_delegate_host when one is set:
+# checklist commands run against untrusted PR-branch code, so running
+# them on the controller instead of the sandbox would defeat
+# sandboxing's entire purpose. See that module's own docstring for the
+# security properties its adversarial test suite
+# (library/test_run_checklist.py) proves.
+- name: Run the project checklist against the source ref
+  run_checklist:
+    repo_path: "{{ review_repo_path }}"
+    target_ref: "{{ review_target_ref }}"
+    source_ref: "{{ review_source_ref }}"
+  delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+  ignore_unreachable: true
+  register: _checklist_result
+
+- name: Fail loudly if the sandbox connection was unreachable
+  ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+  vars:
+    fail_if_unreachable_result_var: _checklist_result
+
+- name: Store the checklist result as a structured fact
+  ansible.builtin.set_fact:
+    review_checklist:
+      triggered: "{{ _checklist_result.triggered }}"
+      results: "{{ _checklist_result.results }}"
+
+# Conditionally triggered: only scans when the diff itself mentions
+# neutralization-related language. No new I/O: reuses review_full_diff,
+# review_diff_files, and _diff_file_contents, already fetched above.
+- name: Check for remaining hardcoded org references after a neutralization pass
+  check_neutralization_references:
+    diff_content: "{{ review_full_diff }}"
+    changed_files: "{{ review_diff_files }}"
+    file_contents: "{{ _diff_file_contents }}"
+    org_reference_patterns: "{{ review_neutralization_org_patterns }}"
+  register: _neutralization_result
+
+- name: Store the neutralization-reference check as a structured fact
+  ansible.builtin.set_fact:
+    review_neutralization_check:
+      triggered: "{{ _neutralization_result.triggered }}"
+      remaining_refs: "{{ _neutralization_result.remaining_refs }}"
+
+# Same-commit fast path: if the prior review's directory-name SHA
+# matches the current commit's short SHA, the diff hasn't changed
+# since the last review, so lens dispatch can be skipped entirely.
+#
+# The regex_search backreference below must use a single backslash
+# ('\1'). This task uses a `>-` folded block scalar, which does not
+# process backslash escapes the way a double-quoted YAML string does,
+# so a doubled backslash ('\\1') survives as two literal characters
+# and breaks Ansible's regex_search backreference parser.
+- name: Extract the SHA the prior review was written against
+  ansible.builtin.set_fact:
+    prior_review_sha: >-
+      {{
+        (review_prior_review_md | regex_search('commit:\s*([0-9a-f]{7,40})', '\1') | default(['']))[0]
+        if review_prior_review_md else ''
+      }}
+
+# review_same_commit_fast_path_enabled (defaults/main.yml, default
+# true) is a kill switch: set false to force every run through
+# full_review.yml regardless of whether a prior review matches, e.g.
+# to recover from a bad cached review without deleting
+# review_output_base by hand.
+- name: Determine whether the same-commit fast path applies
+  ansible.builtin.set_fact:
+    same_commit_fast_path: >-
+      {{
+        review_same_commit_fast_path_enabled | bool
+        and _latest_prior_review.found
+        and prior_review_sha != ''
+        and prior_review_sha == review_short_sha
+      }}

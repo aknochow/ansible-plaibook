@@ -1,0 +1,43 @@
+---
+# Pipeline-wide token totals and cost estimates (extracted for readability).
+# Accumulates across all agent dispatches. Cost is estimated, not billed truth.
+- name: Compute pipeline-wide token totals and per-call cost estimate
+  compute_pipeline_cost:
+    pipeline_agent_calls: "{{ pipeline_agent_calls }}"
+    pipeline_pricing_table: "{{ pipeline_pricing_table | default({}) }}"
+  register: _pipeline_cost_result
+
+- name: Store the computed totals, unpriced models, and per-call costs
+  ansible.builtin.set_fact:
+    pipeline_total_input_tokens: "{{ _pipeline_cost_result.total_input_tokens }}"
+    pipeline_total_output_tokens: "{{ _pipeline_cost_result.total_output_tokens }}"
+    pipeline_total_cache_write_tokens: "{{ _pipeline_cost_result.total_cache_write_tokens }}"
+    pipeline_total_cache_read_tokens: "{{ _pipeline_cost_result.total_cache_read_tokens }}"
+    pipeline_unpriced_models: "{{ _pipeline_cost_result.unpriced_models }}"
+    pipeline_call_costs: "{{ _pipeline_cost_result.call_costs }}"
+
+- name: Show the final pipeline stats breakdown
+  ansible.builtin.debug:
+    # A literal block scalar (|-), not double-quoted -- caught during
+    # ansible-lint cleanup: a double-quoted YAML scalar folds embedded
+    # line breaks into single spaces at PARSE time regardless of how
+    # the source file is indented, so jinja[spacing]'s suggested
+    # multi-line rewrite can never actually take effect inside one
+    # (confirmed directly: reformatting the source alone left the rule
+    # still flagging the exact same collapsed-to-one-line string). |-
+    # preserves real newlines through to the parsed value; Jinja treats
+    # them as ordinary whitespace between list items, so this evaluates
+    # to the exact same list either way.
+    msg: |-
+      {{ [
+        '=== Pipeline Stats ===',
+        'Targets reviewed: ' + (review_targets | length | string),
+        'Agents dispatched: ' + (pipeline_agent_calls | length | string),
+        'Total input tokens: ' + (pipeline_total_input_tokens | int | string),
+        'Total output tokens: ' + (pipeline_total_output_tokens | int | string),
+        'Total cache-write tokens: ' + (pipeline_total_cache_write_tokens | int | string),
+        'Total cache-read tokens: ' + (pipeline_total_cache_read_tokens | int | string),
+        'Estimated cost: $' + ('%.4f' | format(pipeline_call_costs | map('float') | sum)),
+      ] + ([
+        'WARNING: no pricing data on file for: ' + (pipeline_unpriced_models | join(', ')) + ' — those calls are excluded from the cost estimate'
+      ] if pipeline_unpriced_models else []) }}

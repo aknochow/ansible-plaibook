@@ -1,0 +1,118 @@
+---
+# Bare commit review (no PR/MR). Validates via git; builds free local context.
+# Same output contract as PR/branch modes.
+# Reads commit_sha/repo_path as ambient play vars (defaults: HEAD, $PWD).
+
+- name: Validate repo_path exists
+  ansible.builtin.assert:
+    that: repo_path is directory
+    fail_msg: "repo_path '{{ repo_path }}' is not a valid directory"
+
+# argv prevents shell injection; additionally reject leading "-" to prevent git flag injection.
+- name: Validate commit_sha looks like a plausible git ref
+  ansible.builtin.assert:
+    that:
+      - commit_sha is regex('^[a-zA-Z0-9_.][a-zA-Z0-9_./@^~-]*$')
+      # ".." makes git interpret this as a RANGE (commit1..commit2)
+      # rather than a single ref -- git rev-parse would happily
+      # resolve it, just not to what this playbook expects.
+      - "'..' not in commit_sha"
+    fail_msg: "commit_sha '{{ commit_sha }}' doesn't look like a valid git ref"
+
+# timeout: 30 on every git command below -- a corrupted repo, an
+# NFS-mounted path, or an adversarial .gitconfig hook could otherwise
+# hang these indefinitely and block the playbook (resolve_target_branch.yml's
+# sibling clone task guards the same class of risk with async/poll).
+- name: Resolve the target commit's full and short SHA
+  ansible.builtin.command:
+    argv: [git, rev-parse, "{{ commit_sha }}"]
+    chdir: "{{ repo_path }}"
+  changed_when: false
+  register: _resolved_sha
+  timeout: 30
+
+- name: Resolve the short SHA
+  ansible.builtin.command:
+    argv: [git, rev-parse, "--short", "{{ commit_sha }}"]
+    chdir: "{{ repo_path }}"
+  changed_when: false
+  register: _resolved_short_sha
+  timeout: 30
+
+- name: Resolve the current branch name
+  ansible.builtin.command:
+    argv: [git, rev-parse, "--abbrev-ref", "HEAD"]
+    chdir: "{{ repo_path }}"
+  changed_when: false
+  register: _resolved_branch
+  timeout: 30
+
+# commit_sha defaults to HEAD, which has no parent when it's a repo's
+# very first (root) commit — "{{ sha }}^" doesn't resolve in that case,
+# and the diff generation downstream would fail trying to resolve it.
+- name: Check whether the target commit has a parent (root commits don't)
+  ansible.builtin.command:
+    argv: [git, rev-parse, --verify, "{{ _resolved_sha.stdout | trim }}^"]
+    chdir: "{{ repo_path }}"
+  changed_when: false
+  failed_when: false
+  register: _parent_check
+  timeout: 30
+
+- name: Set the review target/source refs and identifying facts
+  ansible.builtin.set_fact:
+    review_repo_path: "{{ repo_path }}"
+    review_source_ref: "{{ _resolved_sha.stdout | trim }}"
+    # Git's well-known empty-tree object — same fallback `git diff
+    # <empty-tree> <sha>` uses to diff a root commit against nothing,
+    # giving the review engine a full-tree diff instead of failing to
+    # resolve a nonexistent parent.
+    review_target_ref: >-
+      {{ (_resolved_sha.stdout | trim) + '^' if _parent_check.rc == 0
+         else git_empty_tree_sha }}
+    review_short_sha: "{{ _resolved_short_sha.stdout | trim }}"
+    review_branch: "{{ _resolved_branch.stdout | trim }}"
+    review_org_repo: "{{ repo_path | basename }}"
+    review_number: "{{ _resolved_short_sha.stdout | trim }}"
+    # review_targets (for pipeline_stats.yml's "Targets reviewed" line)
+    # is already set by review.yml itself before this role is even
+    # called — see its "Set the single review target for commit-mode"
+    # task — so this role doesn't need to set it, same as
+    # resolve_target_pr.yml/resolve_target_branch.yml never setting it
+    # either.
+
+- name: Get the commit message
+  ansible.builtin.command:
+    argv: [git, log, "-1", "--format=%B", "{{ review_source_ref }}"]
+    chdir: "{{ repo_path }}"
+  changed_when: false
+  register: _commit_message
+  timeout: 30
+
+- name: Get the commit's file stat summary
+  ansible.builtin.command:
+    argv: [git, show, "--stat", "--format=", "{{ review_source_ref }}"]
+    chdir: "{{ repo_path }}"
+  changed_when: false
+  register: _commit_stat
+  timeout: 30
+
+# role_path-relative, not a hardcoded 'roles/code_review/templates/...'
+# string (that was the case before the roles/review + roles/code_review
+# merge, and was already inconsistent with lenses.yml/explore.yml/
+# persist.yml/verify_finding.yml's own role_path-relative template
+# lookups even then) -- fixed as part of this merge since a hardcoded
+# path would have silently broken the moment code_review's templates
+# moved into roles/review/templates/.
+- name: Build the review context
+  ansible.builtin.set_fact:
+    review_context: "{{ lookup('template', role_path + '/templates/commit_context.j2') }}"
+
+# No vars: override needed here, unlike resolve_target_pr.yml/
+# resolve_target_branch.yml — this role already set
+# review_repo_path/review_source_ref/review_target_ref/review_short_sha/
+# review_branch/review_org_repo/review_number/review_context above using
+# the SAME names the review engine expects, as ambient facts, not a
+# differently-named intermediate result that needs bridging.
+- name: Run the review engine
+  ansible.builtin.include_tasks: run_review_engine.yml

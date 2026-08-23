@@ -1,0 +1,77 @@
+---
+# End-to-end proof that UNREACHABLE sandbox connection failures (broken ProxyCommand, hung gateway)
+# still trigger rescue/always blocks instead of silently skipping and leaking the sandbox.
+# Exercises the real resolve_branch.yml call site with the fix applied.
+#
+# Usage:
+#   ansible-playbook tests/test_sandbox_unreachable_teardown.yml
+
+- name: Test that an UNREACHABLE sandbox connection still triggers rescue/always
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Register a fake unreachable sandbox host
+      ansible.builtin.add_host:
+        name: fake_unreachable_sandbox
+        ansible_host: "does-not-exist.invalid"
+        ansible_connection: ssh
+        ansible_ssh_common_args: >-
+          -o ConnectTimeout=1 -o ConnectionAttempts=1
+          -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+          -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR
+
+    - name: Set up the minimal real prerequisites resolve_branch.yml expects
+      ansible.builtin.set_fact:
+        review_delegate_host: fake_unreachable_sandbox
+        branch_review_checkout_dir:
+          path: /tmp/does-not-matter-connection-never-succeeds
+
+    - name: "Exercise the REAL resolve_branch.yml against an unreachable sandbox"
+      block:
+        - name: Run the real resolve_branch.yml task file against an unreachable sandbox
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: resolve_branch
+            public: true
+
+        - name: Should never be reached -- the delegated task above must fail loudly
+          ansible.builtin.set_fact:
+            _teardown_test_reached_success: true
+      rescue:
+        - name: Confirm the rescue fired for the right reason (our explicit check, not some other error)
+          ansible.builtin.assert:
+            that:
+              - "'Could not reach the sandbox' in (ansible_failed_result.msg | default(''))"
+            fail_msg: >-
+              rescue: fired, but not for the expected reason -- got:
+              {{ ansible_failed_result.msg | default('no msg') }}
+        - name: Record that the rescue block fired
+          ansible.builtin.set_fact:
+            _teardown_test_rescued: true
+      always:
+        - name: Simulates a real sandbox teardown step
+          ansible.builtin.set_fact:
+            _teardown_test_always_ran: true
+
+    - name: Assert the fix's full contract held
+      ansible.builtin.assert:
+        that:
+          - _teardown_test_rescued | default(false)
+          - _teardown_test_always_ran | default(false)
+          - not (_teardown_test_reached_success | default(false))
+        fail_msg: >-
+          Expected: rescue: fires with a clear "could not reach the
+          sandbox" message (proving ignore_unreachable + the explicit
+          check converted UNREACHABLE into an ordinary FAILED), always:
+          fires (proving a real sandbox teardown would run in
+          production), and the play never silently succeeds past a
+          connection that never worked.
+          rescued={{ _teardown_test_rescued | default(false) }}
+          always_ran={{ _teardown_test_always_ran | default(false) }}
+          reached_success={{ _teardown_test_reached_success | default(false) }}
+
+    - name: Show the rescue-and-always confirmation message
+      ansible.builtin.debug:
+        msg: "PASSED: unreachable sandbox connection correctly triggered rescue AND always, never silently succeeded"

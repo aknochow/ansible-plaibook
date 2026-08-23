@@ -1,0 +1,73 @@
+---
+# Deterministic regression test for pipeline_stats.yml: validates compute_pipeline_cost.py
+# produces correct cost_usd/token values for last_run.json through the real task chain.
+#
+# Usage:
+#   ansible-playbook tests/test_pipeline_stats.yml
+
+- name: Test pipeline_stats.yml's cost math standalone
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_targets: ["org/repo#1", "org/repo#2"]
+    pipeline_pricing_table:
+      claude-haiku-4-5:
+        input_per_million: 1.00
+        output_per_million: 5.00
+        cache_write_per_million: 1.25
+        cache_read_per_million: 0.10
+    pipeline_agent_calls:
+      - target: "org/repo#1"
+        lens: security
+        model: "claude-haiku-4-5-20251001"
+        usage:
+          input_tokens: 1000
+          output_tokens: 200
+          cache_creation_input_tokens: 50
+          cache_read_input_tokens: 500
+      - target: "org/repo#1"
+        lens: review
+        model: "claude-haiku-4-5-20251001"
+        usage:
+          input_tokens: 2000
+          output_tokens: 300
+          cache_creation_input_tokens: 0
+          cache_read_input_tokens: 1000
+      # Model with no pricing entry: must be flagged and excluded, not crash.
+      - target: "org/repo#2"
+        lens: explore
+        model: "claude-opus-unknown-20260101"
+        usage:
+          input_tokens: 500
+          output_tokens: 100
+          cache_creation_input_tokens: 0
+          cache_read_input_tokens: 0
+
+  tasks:
+    - name: Run pipeline_stats.yml
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/review/tasks/pipeline_stats.yml"
+
+    - name: Assert token totals match hand-computed expectations
+      ansible.builtin.assert:
+        that:
+          - pipeline_total_input_tokens | int == 3500
+          - pipeline_total_output_tokens | int == 600
+          - pipeline_total_cache_write_tokens | int == 50
+          - pipeline_total_cache_read_tokens | int == 1500
+
+    - name: Assert the unpriced model was flagged by its raw (dated) string
+      ansible.builtin.assert:
+        that:
+          - pipeline_unpriced_models == ["claude-opus-unknown-20260101"]
+
+    - name: Assert per-call costs, including the zero-cost unpriced entry
+      vars:
+        costs: "{{ pipeline_call_costs | map('float') | list }}"
+      ansible.builtin.assert:
+        that:
+          - costs | length == 3
+          - (costs[0] - 0.0021125) | abs < 0.0000001
+          - (costs[1] - 0.0036) | abs < 0.0000001
+          - costs[2] == 0.0

@@ -1,0 +1,163 @@
+---
+# One scoped finding per iteration with fresh conversation (independently adversarial).
+# Reset verify_done/messages/turn_count at TOP of loop since facts persist across iterations.
+
+- name: Render the verify agent system prompt for this finding
+  ansible.builtin.set_fact:
+    verify_system_prompt: "{{ lookup('template', role_path + '/templates/verify_agent_prompt.j2') }}"
+  vars:
+    finding: "{{ verify_target_finding }}"
+
+- name: Dump this finding's rendered verify prompt (debug mode only)
+  when: review_debug_dump_prompts | bool
+  ansible.builtin.include_tasks: dump_debug_prompt.yml
+  vars:
+    # Strict sanitization: no '.'/'-' in filenames built from finding data
+    dump_prompt_name: >-
+      verify_{{ (verify_target_finding.file ~ '_' ~ verify_target_finding.line) | regex_replace('[^A-Za-z0-9_]', '_') }}
+    dump_prompt_content: "{{ verify_system_prompt }}"
+
+- name: Seed this finding's verification conversation
+  ansible.builtin.set_fact:
+    verify_messages:
+      - role: user
+        content: >-
+          Try to refute the finding described in your system prompt using
+          your tools, then call report_verdict exactly once.
+    review_verify_done: false
+    verify_turn_count: 0
+    # Deterministic, not model self-report; set only on successful trace execution.
+    verify_reachability_tool_used: false
+
+# Deterministic short-circuit for recurring boolean-stringification hallucination pattern.
+# Empirically disproven multiple times. Skip LLM call when matched; see detect_boolean_stringification_hallucination.py.
+- name: Check whether this finding matches the recurring boolean-stringification hallucination shape
+  detect_boolean_stringification_hallucination:
+    finding: "{{ verify_target_finding }}"
+  register: _boolean_stringification_check
+
+- name: Deterministically refute a matched boolean-stringification hallucination claim
+  when: _boolean_stringification_check.is_hallucination
+  ansible.builtin.set_fact:
+    review_verify_done: true
+    verify_result_status: "refuted"
+    verify_result_evidence: "{{ verify_target_finding.evidence | default('') }}"
+    verify_result_rationale: >-
+      Deterministically refuted: boolean-stringification hallucination.
+      Single-expression Jinja templates and bare YAML booleans keep native Python type;
+      only dot-accessed integers are stringified. Empirically disproven multiple times.
+    verify_result_requires_execution: false
+    # No real severity assessment; finding's own severity passes through unchanged.
+    verify_result_severity_assessed: false
+    verify_result_reachability: "theoretical-only"
+    verify_result_trust_boundary: "unclear"
+    verify_result_worst_outcome_category: "cosmetic-style"
+    verify_result_silent_failure: false
+    verify_result_used_static_reachability_trace: false
+    # No continuity claim; short-circuit skips turn loop. Plain YAML literal for safe None preservation.
+    verify_result_continues_finding_id_rationale: >-
+      N/A -- deterministically refuted without a model call.
+    verify_result_claim_input:
+      continues_finding_id: null
+
+# Cheap keyword gate for reachability claims. False negatives: agent can still call tool voluntarily.
+# False positives: cost one extra harmless tool call. Only gates FORCED trace_reachability.
+- name: Detect whether this finding's claim is about reachability/control-flow
+  ansible.builtin.set_fact:
+    verify_is_reachability_claim: >-
+      {{ verify_target_finding.description
+         is regex('(?i)(unreachable|reachable|dead code|dead-code|never reached|never executes|always exits|always returns|control flow|control-flow|code path)') }}
+
+- name: Run the verification turn loop for this finding
+  ansible.builtin.include_tasks: verify_turn.yml
+  loop: "{{ range(0, review_verify_max_turns | int) | list }}"
+  loop_control:
+    loop_var: turn_index
+  when: not review_verify_done
+
+# Default to inconclusive if loop ends without verdict (auditor-verified gap).
+# Guards against edge cases where loop skips verdict-capture and stall-fallback.
+- name: Default to inconclusive if the turn loop ended without a verdict
+  when: not review_verify_done
+  ansible.builtin.set_fact:
+    verify_result_status: "inconclusive"
+    verify_result_evidence: ""
+    verify_result_rationale: "Verification agent exhausted all turns without reaching a verdict."
+    verify_result_requires_execution: false
+    # No real severity assessment; finding's own severity passes through unchanged.
+    verify_result_severity_assessed: false
+    verify_result_reachability: "theoretical-only"
+    verify_result_trust_boundary: "unclear"
+    verify_result_worst_outcome_category: "cosmetic-style"
+    verify_result_silent_failure: false
+    # Not hardcoded false; loop can exhaust after successful trace on earlier turn.
+    verify_result_used_static_reachability_trace: "{{ verify_reachability_tool_used | default(false) }}"
+    verify_result_continues_finding_id_rationale: "Verification agent exhausted all turns without reaching a verdict."
+    # Plain YAML literal for safe None preservation.
+    verify_result_claim_input:
+      continues_finding_id: null
+
+# Reset to prevent prior iteration's value leaking (removes accidental guard dependencies).
+- name: Reset the suggested-severity result so a prior iteration's value can never leak
+  ansible.builtin.set_fact:
+    _severity_result: {}
+
+# Only trust compute_suggested_severity.py when real verdict reached (verify_result_severity_assessed).
+# block/rescue guards against hallucinated enum values aborting verification for other findings.
+- name: Compute the suggested severity from this finding's real axis-1 sub-answers
+  when: verify_result_severity_assessed
+  block:
+    - name: Call compute_suggested_severity
+      compute_suggested_severity:
+        reachability: "{{ verify_result_reachability }}"
+        trust_boundary: "{{ verify_result_trust_boundary }}"
+        worst_outcome_category: "{{ verify_result_worst_outcome_category }}"
+        silent_failure: "{{ verify_result_silent_failure }}"
+      register: _severity_result
+  rescue:
+    - name: Fall back to no severity dispute if the model returned a value outside the known enums
+      ansible.builtin.set_fact:
+        verify_result_severity_assessed: false
+
+- name: Use the computed suggested severity, or pass the finding's own severity through unchanged
+  ansible.builtin.set_fact:
+    verify_result_suggested_severity: "{{ _severity_result.suggested_severity if verify_result_severity_assessed else verify_target_finding.severity }}"
+
+# Resolve continuity claim independently of severity (orthogonal judgments).
+# should_audit gates cost-bearing audit call (only when claim matches real prior finding).
+- name: Resolve this finding's continuity claim against the prior round's findings
+  resolve_continuity_claim:
+    claim_input: "{{ verify_result_claim_input }}"
+    prior_round_findings: "{{ prior_round_findings }}"
+  register: _continuity_claim_result
+
+# Reset to prevent prior iteration's audit outcome leaking (same as _severity_result).
+- name: Reset this finding's audit result so a prior iteration's value can never leak
+  ansible.builtin.set_fact:
+    verify_result_audit_result: {}
+
+- name: Run the independent continuity audit, only when the claim matched a real prior-round finding
+  when: _continuity_claim_result.should_audit
+  ansible.builtin.include_tasks: verify_continuity_audit.yml
+
+- name: Merge this finding's verdict back into deduped_findings
+  merge_verify_result:
+    findings: "{{ deduped_findings }}"
+    verify_index: "{{ verify_target_finding._verify_index }}"
+    evidence_status: "{{ verify_result_status }}"
+    verification_evidence: "{{ verify_result_evidence }}"
+    verification_rationale: "{{ verify_result_rationale }}"
+    requires_execution: "{{ verify_result_requires_execution }}"
+    suggested_severity: "{{ verify_result_suggested_severity }}"
+    reachability: "{{ verify_result_reachability }}"
+    trust_boundary: "{{ verify_result_trust_boundary }}"
+    worst_outcome_category: "{{ verify_result_worst_outcome_category }}"
+    silent_failure: "{{ verify_result_silent_failure }}"
+    used_static_reachability_trace: "{{ verify_result_used_static_reachability_trace }}"
+    claim_input: "{{ verify_result_claim_input }}"
+    audit_result: "{{ verify_result_audit_result }}"
+  register: _verify_merge_result
+
+- name: Replace deduped_findings with the merged copy
+  ansible.builtin.set_fact:
+    deduped_findings: "{{ _verify_merge_result.findings }}"

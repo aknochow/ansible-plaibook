@@ -1,0 +1,14 @@
+(target: both agents)
+This diff targets OpenShift (not vanilla Kubernetes). Check for
+OpenShift-specific resources: Routes (not Ingress), SCCs
+(SecurityContextConstraints) instead of PSPs, OAuthClient for
+authentication. Verify SCC bindings use least-privilege — avoid
+`system:openshift:scc:privileged` unless justified. Check OLMv1
+operator packaging: ClusterServiceVersion must declare all RBAC
+permissions the operator needs. Verify Route TLS termination
+mode is correct (edge, passthrough, reencrypt). Check that
+`DeploymentConfig` is not used — use `Deployment` instead (DC
+is deprecated). Verify `oc` CLI usage vs `kubectl` — prefer
+`kubectl` for portability unless OpenShift-specific features
+are needed. Check ImageStreams and BuildConfigs for proper
+source-to-image patterns.

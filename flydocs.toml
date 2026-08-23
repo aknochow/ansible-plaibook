@@ -1,0 +1,30 @@
+[project]
+name = "ansible-plaibook"
+description = "An Ansible-native AI code-review and bug-fix pipeline."
+docs_dir = "docs"
+site_dir = "public"
+
+[theme]
+mode = "auto"
+tagline = "Deterministic AI code review, orchestrated in Ansible"
+
+[[nav]]
+"Overview" = [
+    { "Introduction" = "index.md" },
+]
+
+[[nav]]
+"Guides" = [
+    { "Getting Started" = "getting-started.md" },
+]
+
+[[nav]]
+"Concepts" = [
+    { "Architecture" = "architecture.md" },
+    { "Sandboxes and LLM Calls" = "sandbox-and-agent-safety.md" },
+]
+
+[[nav]]
+"Reference" = [
+    { "Variable Reference" = "reference.md" },
+]

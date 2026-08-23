@@ -1,0 +1,109 @@
+---
+# Deterministic-shape regression test for roles/review/tasks/briefing.yml,
+# in isolation from lenses/merge/explore/verify: exercises real
+# diff-fetching, project-type/diff-domain detection, and checklist
+# execution against a real target, no LLM calls.
+#
+# Assertions are shape/sanity-level, not exact-value baselines, since
+# this fixture targets a real, live upstream repo whose actual detected
+# type/domains could shift if that repo's content ever changes. The
+# exact-value equivalence proof lives in the dedicated unit tests for
+# each underlying action plugin; this fixture's job is confirming the
+# real Ansible task chain wires together correctly end to end.
+#
+# Usage:
+#   ansible-playbook tests/test_briefing.yml
+
+- name: Test briefing.yml's diff-fetching and project/domain detection standalone
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_delegate_host: ""
+    review_repo_path: "{{ lookup('env', 'HOME') }}/code/ansible-openshell"
+    review_target_ref: "3049f0e"
+    review_source_ref: "d3cbdd2"
+    review_short_sha: "d3cbdd2"
+    review_branch: "test-briefing-standalone"
+    review_org_repo: "aknochow/ansible-openshell"
+    review_number: "d3cbdd2"
+
+  tasks:
+    - name: Run briefing.yml
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: briefing
+        public: true
+
+    - name: Assert a real, non-empty diff was fetched
+      ansible.builtin.assert:
+        that:
+          - review_full_diff | length > 0
+          - review_diff_files | length > 0
+
+    - name: Assert diff stats and categories were computed for the real changed files
+      ansible.builtin.assert:
+        that:
+          - review_diff_stats.keys() | length > 0
+          - review_diff_categories.keys() | sort == ['config', 'deleted', 'docs', 'modified_logic', 'new_logic', 'tests']
+          - (review_diff_categories.values() | sum(start=[])) | sort == review_diff_files | sort
+
+    - name: Assert completeness checks produced the expected structure
+      ansible.builtin.assert:
+        that:
+          - review_completeness_checks.deleted_files is sequence
+          - review_completeness_checks.todo_fixme is sequence
+          - review_completeness_checks.todo_fixme | length <= 10
+          - review_completeness_checks.trailing_whitespace is number
+
+    - name: Assert the neutralization-reference check produced the expected structure
+      ansible.builtin.assert:
+        that:
+          - review_neutralization_check.triggered in [true, false]
+          - review_neutralization_check.remaining_refs is sequence
+
+    - name: Assert project type and domains were detected with valid shapes
+      ansible.builtin.assert:
+        that:
+          - briefing_type in ['unknown', 'k8s-operator', 'ansible-collection', 'go-project', 'python-project']
+          - briefing_domains is sequence
+          - briefing_domains == briefing_domains | sort
+          - briefing_has_checklist in [true, false]
+
+    - name: Assert the project checklist result produced the expected structure
+      ansible.builtin.assert:
+        that:
+          - review_checklist.triggered in [true, false]
+          - review_checklist.results is sequence
+
+    - name: Assert report-header identity facts come from the already-resolved Ansible facts, not re-derivation
+      ansible.builtin.assert:
+        that:
+          - briefing_project == review_org_repo
+          - briefing_branch == review_branch
+          - briefing_commit == review_short_sha
+
+    - name: Assert no prior review exists for this test-only branch, so the fast path correctly stays off
+      ansible.builtin.assert:
+        that:
+          - _latest_prior_review.found == false
+          - review_prior_review_md == ''
+          - same_commit_fast_path == false
+        fail_msg: >-
+          A prior review unexpectedly exists under
+          {{ review_output_base }}/{{ review_org_repo }}/{{ review_branch }}/
+          -- either a real review was persisted against this test-only
+          branch name, or the same-commit fast path is misfiring.
+          See tests/test_same_commit_fast_path.yml for the dedicated,
+          deliberate found=true fixture.
+
+    - name: Show what was actually detected, for a human skimming test output
+      ansible.builtin.debug:
+        msg:
+          - "type={{ briefing_type }}"
+          - "domains={{ briefing_domains }}"
+          - "diff_files={{ review_diff_files | length }} changed"
+          - "completeness_checks={{ review_completeness_checks }}"
+          - "neutralization_check={{ review_neutralization_check }}"
+          - "checklist={{ review_checklist }}"

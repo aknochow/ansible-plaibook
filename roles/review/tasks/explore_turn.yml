@@ -1,0 +1,105 @@
+---
+# One iteration of the explore loop.
+# Re-checks loop guard in own `when` block (looped `when:` not reliably re-evaluated mid-loop).
+# Done means report_findings is in this turn's tool_calls (not just any non-tool_use stop).
+
+- name: Run this turn (no-op once the agent has already finished)
+  when: not (review_explore_done | default(false))
+  block:
+    - name: Increment the turn counter
+      ansible.builtin.set_fact:
+        explore_turn_count: "{{ (explore_turn_count | default(0) | int) + 1 }}"
+
+    - name: Determine if this is the last allowed turn
+      ansible.builtin.set_fact:
+        explore_last_turn: "{{ (explore_turn_count | int) >= (review_explore_max_turns | int) }}"
+
+    # tool_choice forced only on last turn (free choice on earlier turns).
+    # Dispatch with bounded retry for malformed output; retries separate from turn budget.
+    - name: Reset this turn's dispatch validity flag
+      ansible.builtin.set_fact:
+        explore_dispatch_valid: false
+
+    - name: "Call Claude with the current conversation, attempt 1, explore turn {{ explore_turn_count }}"
+      ansible.builtin.include_tasks: dispatch_explore_turn_attempt.yml
+      vars:
+        explore_attempt_number: 1
+
+    - name: Retry this turn's dispatch if attempt 1's structured output was invalid
+      ansible.builtin.include_tasks: dispatch_explore_turn_attempt.yml
+      loop: "{{ range(2, review_structured_output_max_attempts | int + 1) | list }}"
+      loop_control:
+        loop_var: explore_attempt_number
+      when: not explore_dispatch_valid
+
+    - name: Fail loudly if this turn's structured output was never valid after all attempts
+      ansible.builtin.assert:
+        that:
+          - explore_dispatch_valid
+        fail_msg: >-
+          Explore agent ({{ review_explore_model }}) produced invalid or
+          incomplete structured output on turn {{ explore_turn_count }}
+          after {{ review_structured_output_max_attempts }} attempt(s).
+          This is a confirmed, probabilistic model-generation quirk (see
+          handoff.ansible-plaibook-merge-findings-string-vs-list-crash.yaml) --
+          consider raising review_structured_output_max_attempts, or
+          checking whether this model has a known elevated rate of this
+          issue, before assuming this is a one-off.
+
+    - name: Append the assistant's turn to the conversation
+      ansible.builtin.set_fact:
+        explore_messages: "{{ explore_messages + [{'role': 'assistant', 'content': explore_turn_result.message.content}] }}"
+
+    - name: Check whether the agent called report_findings this turn
+      ansible.builtin.set_fact:
+        explore_report_calls: "{{ explore_turn_result.tool_calls | selectattr('name', 'equalto', 'report_findings') | list }}"
+
+    # Same vulnerability as merge.yml's lens combine step (handoff.ansible-
+    # ai-merge-findings-string-vs-list-crash.yaml) -- this reads
+    # tool_calls[0].input.findings directly, the identical raw-tool-call
+    # shape that can come back as a JSON-encoded string instead of a
+    # native array. Found via that handoff's own "confirm the scope"
+    # diligence (grep for every .input.findings/.structured.findings call
+    # site in this role), not assumed to be merge.yml-only. See
+    # action_plugins/coerce_findings_encoding.py's own module docstring.
+    - name: Coerce the explore agent's findings to a real list, tolerating a JSON-encoded string
+      when: explore_report_calls | length > 0
+      coerce_findings_encoding:
+        value: "{{ explore_report_calls[0].input.findings }}"
+        label: "Explore agent"
+      register: explore_findings_coerce_result
+
+    - name: Finish once report_findings has been called
+      when: explore_report_calls | length > 0
+      ansible.builtin.set_fact:
+        review_explore_done: true
+        review_explore_findings: "{{ explore_findings_coerce_result.findings }}"
+
+    # Nothing to dispatch and nothing sensible to continue the
+    # conversation with if the model stopped without calling any tool
+    # at all (e.g. replied with plain text, ignoring instructions) —
+    # treat that the same as "no additional findings" rather than
+    # appending an empty/malformed turn and looping again.
+    - name: Force completion if the agent stopped without calling any tool
+      when: explore_report_calls | length == 0 and explore_turn_result.stop_reason != 'tool_use'
+      ansible.builtin.set_fact:
+        review_explore_done: true
+        review_explore_findings: []
+
+    - name: Dispatch other tool calls and continue the loop
+      when: explore_report_calls | length == 0 and explore_turn_result.stop_reason == 'tool_use'
+      block:
+        - name: Reset the tool-result accumulator for this turn
+          ansible.builtin.set_fact:
+            explore_tool_results: []
+
+        - name: Execute each requested tool call
+          ansible.builtin.include_tasks: dispatch_explore_tool.yml
+          loop: "{{ explore_turn_result.tool_calls }}"
+          loop_control:
+            loop_var: tool_call
+            label: "{{ tool_call.name }}({{ tool_call.input.path | default('') }})"
+
+        - name: Append the tool results as the next user turn
+          ansible.builtin.set_fact:
+            explore_messages: "{{ explore_messages + [{'role': 'user', 'content': explore_tool_results}] }}"

@@ -1,0 +1,20 @@
+---
+# Sandbox teardown (see setup_sandbox.yml for context).
+# block/always ensures token file removed even if sandbox-destroy RPC fails.
+- name: "Tear down the sandbox ({{ sandbox.sandbox.name }})"
+  block:
+    - name: "Delete the sandbox ({{ sandbox.sandbox.name }})"
+      aknochow.openshell.sandbox:
+        gateway: "{{ sandbox_gateway }}"
+        tls_cert: "{{ sandbox_tls_cert | default(omit, true) }}"
+        tls_key: "{{ sandbox_tls_key | default(omit, true) }}"
+        tls_ca: "{{ sandbox_tls_ca | default(omit, true) }}"
+        bearer_token: "{{ sandbox_bearer_token | default(omit, true) }}"
+        name: "{{ sandbox.sandbox.name }}"
+        state: absent
+  always:
+    - name: Remove the sandbox bearer token file
+      when: sandbox_bearer_token_file is defined
+      ansible.builtin.file:
+        path: "{{ sandbox_bearer_token_file }}"
+        state: absent

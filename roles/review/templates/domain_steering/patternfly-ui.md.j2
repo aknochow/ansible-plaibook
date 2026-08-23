@@ -1,0 +1,12 @@
+(target: Review Agent, both lenses)
+This diff contains React/TypeScript UI code using PatternFly.
+Verify components handle loading, error, and empty states — not
+just the happy path. Check that `useEffect` dependencies are
+complete (missing deps cause stale closures). Verify PatternFly
+components are used instead of raw HTML (e.g., `Button` not
+`<button>`, `TextInput` not `<input>`). Check that user-facing
+strings are internationalized (i18n/t() wrapped). Verify
+accessibility — PatternFly components have built-in a11y but
+custom components need `aria-label`, keyboard handling, and
+focus management. Check that form validation uses PatternFly's
+`validated` prop pattern, not custom error styling.

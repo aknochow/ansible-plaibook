@@ -1,0 +1,23 @@
+---
+# Shared summary writer (all review_types use same always: block).
+# Extracted to consolidate duplicated tail logic; last_run.json is shared path (race-safe for human use only).
+# Use run-scoped last_run.<run_id>.json for programmatic consumption.
+
+- name: Show the final pipeline stats breakdown
+  when: pipeline_findings_reports is defined
+  ansible.builtin.include_tasks: pipeline_stats.yml
+
+# Generate run_id once (password lookup returns fresh value each call).
+# Unconditional generation ensures fixed/run-scoped copies stay in sync.
+# tasks that consume it.
+- name: Generate a unique run ID for this playbook invocation
+  ansible.builtin.set_fact:
+    last_run_id: "{{ lookup('password', '/dev/null length=16 chars=ascii_letters,digits') }}"
+
+# One "skipping" notice for the whole group instead of five, if a
+# failure happened early enough that pipeline_findings_reports was
+# never initialized -- see write_last_run_files.yml's own header
+# comment for why this is include_tasks + when, not block + when.
+- name: Write the last-run summary (fixed and run-scoped copies)
+  when: pipeline_findings_reports is defined
+  ansible.builtin.include_tasks: write_last_run_files.yml

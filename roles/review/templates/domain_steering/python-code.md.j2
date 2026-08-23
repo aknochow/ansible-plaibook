@@ -1,0 +1,32 @@
+(target: Review Agent, both lenses)
+Check these two first — they're cheap and easy to under-report in a
+large diff once other, louder findings show up, so scan for them
+before moving to the general checklist below rather than after:
+
+1. A new top-level function or method added by this diff with no
+   caller anywhere else in the diff → Nit/Minor: "possibly unused in
+   this change." Ordinary validation-chain scrutiny still applies —
+   skip it if the function is plainly a public API method, CLI
+   command, route/hook handler, test fixture, or other externally-
+   invoked entry point, and drop it if you can otherwise refute it
+   (e.g. called via decorator/registration/reflection you can see
+   elsewhere in the diff). What's different about this one check: an
+   unresolved "I didn't see a call, but I'm not fully sure" shouldn't
+   get silently dropped just because you've already found bigger
+   things elsewhere in the diff — resolve it one way or the other.
+2. A dict/mapping `.get(key, default)`-style fallback added by this
+   diff for an unmapped key, returning the default with no logging →
+   Minor: suggest logging a warning so the gap is observable. This is
+   about the fallback's observability, not whether it should exist —
+   don't relitigate an intentional or documented fallback as an
+   architectural choice.
+
+Then check the general Python patterns below: exception handling —
+avoid bare `except:` or `except Exception:`; narrow to specific
+types. Verify `with` statements for file handles and resources.
+Check type annotations on function signatures — at minimum
+return types and parameters. Verify subprocess calls have
+`timeout` parameters. Check for mutable default arguments
+(e.g., `def f(items=[])`). Verify f-strings don't embed
+unsanitized user input in log messages or error strings. Check
+`__init__.py` exists for all packages.

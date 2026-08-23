@@ -1,0 +1,126 @@
+---
+# Test the review engine delegated into an OpenShell sandbox via ssh_proxy.py relay,
+# to verify sandbox decoupling (same role, same result, different execution target).
+
+- name: Test the review engine delegated into a sandbox
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    sandbox_gateway: "https://host.openshell.internal:17670"
+    sandbox_mtls_dir: "{{ lookup('env', 'HOME') }}/.config/openshell/gateways/openshell/mtls"
+    sandbox_image: "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
+    ssh_proxy_script: "{{ lookup('env', 'HOME') }}/code/ansible-openshell/scripts/ssh_proxy.py"
+
+    # Using a small public repo: sandbox has no GitHub auth configured.
+    review_target_ref: "main"
+    review_source_ref: "change-the-title"
+    review_short_sha: "f439fc5"
+    review_branch: "test-sandboxed"
+    review_org_repo: "octocat/Spoon-Knife"
+    review_number: "f439fc5"
+    review_context: ""
+    review_extra_notes: ""
+
+  tasks:
+    # host_vars/localhost.yml is relative to the TOP-LEVEL playbook directory, not tests/;
+    # read it directly to avoid fallback to system python3, which lacks the OpenShell SDK.
+    - name: Discover the controller's own Python interpreter from host_vars/localhost.yml
+      ansible.builtin.set_fact:
+        ansible_python_interpreter: "{{ (lookup('ansible.builtin.file', playbook_dir + '/../host_vars/localhost.yml') | from_yaml).ansible_python_interpreter }}"
+
+    # lenses.yml's pipeline_agent_calls accumulation requires prior initialization.
+    - name: Initialize pipeline-wide agent usage accounting
+      ansible.builtin.set_fact:
+        pipeline_agent_calls: []
+        pipeline_findings_reports: []
+
+    - name: Create the review sandbox
+      aknochow.openshell.sandbox:
+        gateway: "{{ sandbox_gateway }}"
+        tls_cert: "{{ sandbox_mtls_dir }}/tls.crt"
+        tls_key: "{{ sandbox_mtls_dir }}/tls.key"
+        tls_ca: "{{ sandbox_mtls_dir }}/ca.crt"
+        bearer_token: "{{ sandbox_bearer_token | default(omit, true) }}"
+        image: "{{ sandbox_image }}"
+        state: present
+      register: sandbox
+
+    # Bearer token stored as a file for consistent reuse across tasks.
+    - name: Compute the sandbox bearer token file path
+      when: sandbox_bearer_token | default('') | trim | length > 0
+      ansible.builtin.set_fact:
+        sandbox_bearer_token_file: "/tmp/ansible-plaibook-sandbox-bearer-token-{{ sandbox.sandbox.name | regex_replace('[^A-Za-z0-9_-]', '_') }}"
+
+    - name: Write the sandbox bearer token to a file
+      when: sandbox_bearer_token_file is defined
+      ansible.builtin.copy:
+        content: "{{ sandbox_bearer_token }}"
+        dest: "{{ sandbox_bearer_token_file }}"
+        mode: "0600"
+      no_log: true
+
+    - name: Register the sandbox as an Ansible host over SSH
+      ansible.builtin.add_host:
+        name: sandbox_target
+        ansible_host: "{{ sandbox.sandbox.name }}"
+        ansible_user: sandbox
+        ansible_connection: ssh
+        # auto_silent: avoid blocking on missing interpreters
+        ansible_python_interpreter: auto_silent
+        ansible_ssh_common_args: >-
+          -o ProxyCommand="{{ (ansible_python_interpreter | default('python3')) | quote }} {{ ssh_proxy_script | quote }} --gateway {{ sandbox_gateway | quote }}
+          --tls-cert {{ (sandbox_mtls_dir ~ '/tls.crt') | quote }} --tls-key {{ (sandbox_mtls_dir ~ '/tls.key') | quote }}
+          --tls-ca {{ (sandbox_mtls_dir ~ '/ca.crt') | quote }}
+          {{ ('--bearer-token-file ' + (sandbox_bearer_token_file | quote)) if (sandbox_bearer_token_file is defined) else '' }}
+          --sandbox {{ sandbox.sandbox.name | quote }} --workspace {{ sandbox.sandbox.workspace | quote }}"
+          -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+          -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR
+
+    - name: Clone the target repo into the sandbox
+      ansible.builtin.git:
+        repo: "https://github.com/{{ review_org_repo }}.git"
+        dest: "/sandbox/review-target"
+        version: "{{ review_source_ref }}"
+      delegate_to: sandbox_target
+      ignore_unreachable: true
+      ignore_errors: true
+      register: clone_result
+
+    - name: Fail loudly if the sandbox connection was unreachable
+      ansible.builtin.include_tasks: ../roles/review/tasks/fail_if_sandbox_unreachable.yml
+      vars:
+        fail_if_unreachable_result_var: clone_result
+
+    - name: Show clone result (repo may not be pushed to GitHub yet)
+      ansible.builtin.debug:
+        var: clone_result
+
+    - name: Run the code review, delegated into the sandbox
+      when: not clone_result.failed
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: run_review_engine
+      vars:
+        review_delegate_host: "sandbox_target"
+        review_repo_path: "/sandbox/review-target"
+
+    # block/always: ensure token file cleanup even if sandbox-destroy fails.
+    - name: Tear down the review sandbox
+      block:
+        - name: Delete the review sandbox
+          aknochow.openshell.sandbox:
+            gateway: "{{ sandbox_gateway }}"
+            tls_cert: "{{ sandbox_mtls_dir }}/tls.crt"
+            tls_key: "{{ sandbox_mtls_dir }}/tls.key"
+            tls_ca: "{{ sandbox_mtls_dir }}/ca.crt"
+            bearer_token: "{{ sandbox_bearer_token | default(omit, true) }}"
+            name: "{{ sandbox.sandbox.name }}"
+            state: absent
+      always:
+        - name: Remove the sandbox bearer token file
+          when: sandbox_bearer_token_file is defined
+          ansible.builtin.file:
+            path: "{{ sandbox_bearer_token_file }}"
+            state: absent

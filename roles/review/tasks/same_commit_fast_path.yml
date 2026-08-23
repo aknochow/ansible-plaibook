@@ -1,0 +1,21 @@
+---
+# Fast path for same commit (extracted for single-unit skip).
+# Skips lens dispatch, merge, and persist; shows prior review as-is.
+
+- name: Render the fast-path report
+  ansible.builtin.set_fact:
+    review_final_report: |
+      ## Code Review: {{ briefing_project }} — Same Commit (Fast Path)
+
+      No code changes detected since the prior review of commit
+      `{{ prior_review_sha }}`. Findings re-verification was not
+      automated in this port (v1) — showing the prior review as-is.
+      Re-run with a new commit to trigger a full review.
+
+      ---
+
+      {{ review_prior_review_md }}
+
+- name: Skip lens dispatch, merge, and persist
+  ansible.builtin.debug:
+    msg: "Same-commit fast path — findings not re-persisted, no new review directory created."

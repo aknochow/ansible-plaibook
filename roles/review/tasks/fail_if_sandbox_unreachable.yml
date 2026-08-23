@@ -1,0 +1,35 @@
+---
+# Explicit check for unreachable sandbox (ignore_unreachable doesn't catch in rescue/always).
+# Pass result var name as string; fails loudly if sandbox connection never worked.
+# See docs/sandbox-and-agent-safety.md for details.
+#
+# Works the same way for a looped task's register (a `results` list of
+# per-item dicts) as a plain task's register (a single dict) -- wrapping
+# a non-list result in a one-element list before filtering handles both
+# shapes with the same expression.
+#
+# No default() on the lookup below, deliberately -- confirmed live that
+# a task with its own `when: false` still gets its register variable
+# defined (to a real {skipped: true, ...} dict, which correctly has no
+# 'unreachable' key and so is correctly treated as "not unreachable"
+# below), so a default is never needed for that legitimate case. Any
+# genuinely undefined fail_if_unreachable_result_var only happens from
+# a typo in the string passed at the call site -- letting Ansible raise
+# its own clear "'x' is undefined" error on that is exactly the point:
+# a default() here would have silently swallowed the typo as "not
+# unreachable" instead, defeating this whole check for that call site.
+- name: "Fail loudly if the sandbox connection was unreachable ({{ fail_if_unreachable_result_var }})"
+  vars:
+    _fail_if_unreachable_result: "{{ lookup('vars', fail_if_unreachable_result_var) }}"
+    _fail_if_unreachable_items: "{{ _fail_if_unreachable_result.results | default([_fail_if_unreachable_result]) }}"
+  ansible.builtin.fail:
+    msg: >-
+      Could not reach the sandbox over SSH during '{{ fail_if_unreachable_result_var }}'
+      -- see ssh_proxy_script/sandbox_gateway config. Re-run with
+      cleanup_sandbox_onfail=false to leave the sandbox alive for
+      debugging instead of tearing it down immediately.
+  when: >-
+    _fail_if_unreachable_items
+    | selectattr('unreachable', 'defined')
+    | selectattr('unreachable')
+    | list | length > 0

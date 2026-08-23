@@ -1,0 +1,64 @@
+---
+# Verifies the multi-target include_role + loop mechanism: exercises the same pattern
+# as review.yml without live PR/MR API access. Cross-iteration fact leakage would appear
+# in loop_verification_history.
+#
+# Usage:
+#   ansible-playbook tests/test_multi_target_loop.yml
+
+- name: Test the multi-target loop mechanism (review engine only, no PR/MR fetch)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_delegate_host: ""
+    review_context: ""
+    review_extra_notes: ""
+    review_agent_model: "claude-haiku-4-5"
+
+    # Three distinct diffs: first two have different detected domains to expose cross-iteration fact leakage.
+    review_targets:
+      - review_repo_path: "{{ lookup('env', 'HOME') }}/code/ansible-openshell"
+        review_target_ref: "8effc03"
+        review_source_ref: "7cdbda2"
+        review_short_sha: "7cdbda2"
+        review_branch: "test-loop-big"
+        review_org_repo: "aknochow/ansible-openshell"
+      - review_repo_path: "{{ lookup('env', 'HOME') }}/code/ansible-openshell"
+        review_target_ref: "01cbc41"
+        review_source_ref: "8effc03"
+        review_short_sha: "8effc03"
+        review_branch: "test-loop-small"
+        review_org_repo: "aknochow/ansible-openshell"
+      - review_repo_path: "{{ lookup('env', 'HOME') }}/code/ansible-openshell"
+        review_target_ref: "01cbc41"
+        review_source_ref: "7cdbda2"
+        review_short_sha: "7cdbda2"
+        review_branch: "test-loop-full"
+        review_org_repo: "aknochow/ansible-openshell"
+
+  tasks:
+    # Initialize pipeline-wide agent usage accounting (required by lenses.yml's pipeline_agent_calls accumulation).
+    - name: Initialize pipeline-wide agent usage accounting
+      ansible.builtin.set_fact:
+        pipeline_agent_calls: []
+        pipeline_findings_reports: []
+
+    - name: Run the review engine across all targets (mirrors review.yml's include_role + loop pattern)
+      ansible.builtin.include_tasks: test_multi_target_loop_iteration.yml
+      loop: "{{ review_targets }}"
+      loop_control:
+        loop_var: rt
+        label: "{{ rt.review_branch }}"
+
+    - name: Show the full cross-iteration verification history
+      ansible.builtin.debug:
+        var: loop_verification_history
+
+    - name: Assert all findings paths are distinct (no cross-contamination in output paths)
+      ansible.builtin.assert:
+        that:
+          - (loop_verification_history | map(attribute='findings_path') | list | unique | length) == (loop_verification_history | length)
+        fail_msg: "DUPLICATE findings_path across loop iterations — cross-contamination!"
+        success_msg: "All findings_path values are distinct across iterations."

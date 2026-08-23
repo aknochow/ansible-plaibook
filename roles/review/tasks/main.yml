@@ -1,0 +1,14 @@
+---
+# Dispatch review target resolution and execution via review_type parameter.
+# Each resolve_target_*.yml establishes output-variable contract and calls
+# the review engine, with pr/mr post-processing handled after engine completion.
+# Restrict review_type to known dispatch targets before interpolating into
+# include_tasks filename to fail early on invalid values.
+- name: Validate review_type is a known dispatch target
+  ansible.builtin.assert:
+    that:
+      - review_type in ['pr', 'branch', 'commit']
+    fail_msg: "review_type '{{ review_type }}' is not one of: pr, branch, commit"
+
+- name: "Resolve the review target and run the review (review_type={{ review_type }})"
+  ansible.builtin.include_tasks: "resolve_target_{{ review_type }}.yml"

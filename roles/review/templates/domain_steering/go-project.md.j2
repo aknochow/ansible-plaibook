@@ -1,0 +1,10 @@
+(target: both agents)
+This diff contains Go code. Check error handling — every
+returned error must be checked, not discarded with `_`. Verify
+`defer` is used for resource cleanup (file handles, locks, HTTP
+response bodies). Check goroutine lifecycle — goroutines must
+have a shutdown path (context cancellation, done channels, or
+WaitGroup). Verify exported functions have doc comments. Check
+for `sync.Mutex` protecting shared state in concurrent code —
+missing locks are race conditions. Verify `context.Context` is
+threaded through I/O operations and not stored in structs.

@@ -1,0 +1,150 @@
+---
+# Autonomous PR/MR review (Path B only; Path A is interactive).
+
+- name: Parse and validate the review target identifier
+  ansible.builtin.include_tasks: parse_pr_target.yml
+
+# fetch_pr_context.py requires fully-qualified URL; synthesize from known platform.
+- name: Build an unambiguous PR/MR URL for fetch_pr_context.py
+  ansible.builtin.set_fact:
+    review_summary_url: >-
+      {{
+        'https://github.com/' + review_org_repo + '/pull/' + review_number
+        if review_platform == 'github'
+        else 'https://' + (review_hostname or 'gitlab.com') + '/' + review_org_repo + '/-/merge_requests/' + review_number
+      }}
+
+- name: Fetch PR/MR context via fetch_pr_context.py (runs locally — needs gh/glab auth)
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ role_path }}/files/pr_review/fetch_pr_context.py"
+      - "{{ review_summary_url }}"
+  changed_when: false
+  register: pr_summary
+
+- name: Parse fetch_pr_context.py's JSON output
+  ansible.builtin.set_fact:
+    _pr_context: "{{ pr_summary.stdout | from_json }}"
+
+- name: Render review_context from the parsed PR/MR context
+  ansible.builtin.set_fact:
+    review_context: "{{ lookup('template', role_path + '/templates/pr_context.j2') }}"
+
+- name: Determine the repo clone URL
+  ansible.builtin.set_fact:
+    review_clone_url: >-
+      {{ 'https://github.com/' + review_org_repo + '.git'
+         if review_platform == 'github'
+         else 'https://' + (review_hostname or 'gitlab.com') + '/' + review_org_repo + '.git' }}
+
+- name: Create a working checkout directory (controller — the clone always happens here)
+  ansible.builtin.tempfile:
+    state: directory
+    prefix: "review-{{ review_number }}-"
+  register: review_clone_dir_controller
+
+# Clones on the controller rather than delegate_to review_delegate_host —
+# the controller has gh/glab's ambient git credential helper configured
+# (~/.gitconfig's credential.https://github.com.helper, set up by `gh
+# auth setup-git`); a fresh sandbox has none of that, so an HTTPS clone
+# of a private repo fails immediately inside one ("could not read
+# Username for 'https://github.com'"). Mirrors review.yml's own
+# harness-checkout pattern exactly: clone/checkout wherever auth
+# actually lives, then COPY into the sandbox for isolated execution —
+# same reasoning as that file's comment on why the harness is copied in
+# rather than cloned directly inside the sandbox. A single git module
+# call here: clone, fetch the PR/MR head ref via refspec (GitHub exposes
+# refs/pull/N/head, GitLab refs/merge-requests/N/head — both fetchable
+# the same way, no special auth/API access beyond a plain clone), and
+# check it out as 'review-source'. The module's own `after` return
+# value is the full checked-out SHA, so no extra rev-parse call is
+# needed either.
+- name: Clone the target repo and check out the PR/MR head ref
+  ansible.builtin.git:
+    repo: "{{ review_clone_url }}"
+    dest: "{{ review_clone_dir_controller.path }}"
+    refspec: >-
+      +refs/{{ 'pull' if review_platform == 'github' else 'merge-requests' }}/{{ review_number }}/head:refs/heads/review-source
+    version: review-source
+  register: review_clone_result
+  # Real network clone of a potentially large, foreign repo -- see
+  # "Post results back to the PR/MR"'s identical async/poll further
+  # down in this same file. Verified ansible.builtin.git supports
+  # async cleanly (register.after populates correctly) before applying
+  # it here.
+  async: 120
+  poll: 2
+
+# See verify_target_freshness.yml's own header comment for why this
+# check exists and runs here, immediately after the clone and before
+# anything (sandbox copy, the review engine) reads the checkout.
+- name: Verify the cloned commit is still the target's current HEAD
+  ansible.builtin.include_tasks: verify_target_freshness.yml
+
+# One "skipping" notice for this whole group on an unsandboxed run
+# instead of three -- see copy_to_sandbox.yml's own header comment
+# for why this is include_tasks + when, not block + when.
+- name: Copy the controller-side checkout into the sandbox
+  when: review_delegate_host | default('') | length > 0
+  ansible.builtin.include_tasks: copy_to_sandbox.yml
+
+# Not grouped with its own cleanup task below into one block: that
+# cleanup must run AFTER the review engine (the checkout still needs to
+# exist for it to read), so it isn't adjacent to this task — blocking
+# them together would silently reorder cleanup to happen before the
+# review instead of after, deleting the checkout the engine is about to
+# read.
+- name: Use the controller checkout directly when not sandboxed
+  when: not (review_delegate_host | default('') | length > 0)
+  ansible.builtin.set_fact:
+    # Minimal dict, not the raw registered result: the sandboxed branch
+    # above sets the same fact to a plain { path: ... } dict, so both
+    # branches produce the same shape rather than one being a full
+    # tempfile task result (changed/state/etc.) that only happens to
+    # also have a .path attribute.
+    review_checkout_dir: { path: "{{ review_clone_dir_controller.path }}" }
+
+# Plain set_fact, not include_role vars: -- target resolution and the
+# review engine are the same role now, so these just need to be ambient
+# facts before run_review_engine.yml is included, same pattern
+# resolve_target_branch.yml/resolve_target_commit.yml already use.
+- name: Set outputs for the review engine
+  ansible.builtin.set_fact:
+    review_repo_path: "{{ review_checkout_dir.path }}"
+    review_target_ref: "origin/HEAD"
+    review_source_ref: "review-source"
+    review_short_sha: "{{ review_clone_result.after[:7] }}"
+    review_branch: "{{ review_platform }}-{{ review_org_repo | regex_replace('/', '-') }}-{{ review_number }}"
+
+- name: Run the review engine
+  ansible.builtin.include_tasks: run_review_engine.yml
+
+# The sandboxed path already cleans up review_clone_dir_controller
+# right after copying it in (above) — this is the missing other half:
+# when unsandboxed, review_checkout_dir IS review_clone_dir_controller
+# (no copy happens), so it was never cleaned up at all, leaking a
+# tempdir on every unsandboxed run. Runs AFTER the review engine (not
+# grouped with "Use the controller checkout directly" above) since the
+# checkout still needs to exist while the engine reads it.
+- name: Clean up the controller-side checkout (unsandboxed runs only)
+  when: not (review_delegate_host | default('') | length > 0)
+  ansible.builtin.file:
+    path: "{{ review_checkout_dir.path }}"
+    state: absent
+
+- name: Post results back to the PR/MR
+  when: post_results | bool
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['python3', role_path + '/files/pr_review/post_review_comment.py',
+         review_platform, review_org_repo, review_number, review_findings_path]
+        + (['--host', review_hostname] if review_hostname else [])
+      }}
+  changed_when: true
+  # See bug_pipeline.yml's "Push the fix branch" task for why async/poll,
+  # not a timeout: parameter (doesn't exist on ansible.builtin.command) --
+  # this is a real GitHub/GitLab API call, so the overhead is worth it.
+  async: 120
+  poll: 2

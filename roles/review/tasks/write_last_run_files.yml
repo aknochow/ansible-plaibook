@@ -1,0 +1,61 @@
+---
+# Included with `when:` at include site for single skip notice (not per-task).
+# Cache directory not guaranteed to exist; created by hook script or here.
+- name: Ensure the last-run summary cache directory exists
+  ansible.builtin.file:
+    path: "{{ lookup('env', 'HOME') }}/.cache/ansible-plaibook"
+    state: directory
+    mode: "0700"
+
+# Compute content once so fixed and run-scoped copies stay byte-identical.
+- name: Render the last-run summary content
+  ansible.builtin.set_fact:
+    last_run_summary_content: >-
+      {{ {
+        'run_id': last_run_id,
+        'targets': pipeline_findings_reports,
+        'cost_usd': (pipeline_call_costs | default([]) | map('float') | sum) | round(4),
+        'total_input_tokens': pipeline_total_input_tokens | default(0) | int,
+        'total_output_tokens': pipeline_total_output_tokens | default(0) | int,
+        'agents_dispatched': pipeline_agent_calls | default([]) | length
+      } | to_nice_json }}
+
+# A stable, predictable path (NOT date/sha-based like findings.md/
+# summary.json) for a quick human glance -- NOT safe against a
+# concurrent caller: two overlapping runs (this repo or a different
+# one) both land here, last write wins. Anything that needs a
+# guarantee it's reading ITS OWN run's result should read the
+# run-scoped copy below instead, whose path is echoed to this
+# invocation's own stdout.
+- name: Write the stable, predictable last-run summary
+  ansible.builtin.copy:
+    content: "{{ last_run_summary_content }}"
+    dest: "{{ lookup('env', 'HOME') }}/.cache/ansible-plaibook/last_run.json"
+    # Not 0644: this file's report field carries full findings content
+    # (code evidence, file paths) from potentially private repos.
+    mode: "0600"
+
+# Run-scoped sibling of the fixed path above, immune to the
+# last-write-wins race -- a caller that captures THIS path from the
+# debug line below (not the fixed path) is guaranteed to read this
+# invocation's own result, even if another run (this repo or a
+# different one) overwrites the fixed path in between. Never cleaned
+# up automatically -- no automatic deletion of anything per this
+# project's convention; if these ever need pruning, that's a
+# separate, explicit ask.
+- name: Write the run-scoped last-run summary
+  ansible.builtin.copy:
+    content: "{{ last_run_summary_content }}"
+    dest: "{{ lookup('env', 'HOME') }}/.cache/ansible-plaibook/last_run.{{ last_run_id }}.json"
+    mode: "0600"
+
+- name: Show the last-run summary path
+  ansible.builtin.debug:
+    msg: "RESULT_SUMMARY: {{ lookup('env', 'HOME') }}/.cache/ansible-plaibook/last_run.json"
+
+# The guaranteed-correct path for a caller that needs to be sure it's
+# reading THIS invocation's own result and not a concurrent run's --
+# see the run-scoped write above.
+- name: Show the run-scoped last-run summary path
+  ansible.builtin.debug:
+    msg: "RESULT_SUMMARY_RUN_SCOPED: {{ lookup('env', 'HOME') }}/.cache/ansible-plaibook/last_run.{{ last_run_id }}.json"

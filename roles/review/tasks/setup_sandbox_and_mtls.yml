@@ -1,0 +1,27 @@
+---
+# Included with `when: use_sandbox` at include site for single skip notice (not per-task).
+
+- name: Read mTLS certs from a local directory
+  when: sandbox_tls_source == 'local_mtls_dir'
+  ansible.builtin.set_fact:
+    sandbox_tls_cert: "{{ sandbox_mtls_dir }}/tls.crt"
+    sandbox_tls_key: "{{ sandbox_mtls_dir }}/tls.key"
+    sandbox_tls_ca: "{{ sandbox_mtls_dir }}/ca.crt"
+
+# kubernetes.core.k8s_info extracted for conditional loading (module validation at parse time).
+- name: Fetch mTLS certs live from a Kubernetes/OpenShift Secret
+  when: sandbox_tls_source == 'k8s_secret'
+  vars:
+    sandbox_tls_dir_path: "/tmp/ansible-plaibook-sandbox-mtls-{{ sandbox_secret_namespace }}"
+  ansible.builtin.include_tasks: fetch_k8s_secret_tls.yml
+
+# TLS and bearer-token delivery are independent concerns; token exchange runs when SA token available.
+- name: Exchange the sandbox ServiceAccount's token for a gateway JWT
+  when: sandbox_sa_token | default('') | trim | length > 0
+  ansible.builtin.include_tasks: exchange_sandbox_token.yml
+
+# Extracted into an included file — same reasoning as
+# fetch_k8s_secret_tls.yml — so aknochow.openshell.sandbox only needs
+# to be resolvable when a sandbox is actually being used.
+- name: Create the review sandbox and register it as an Ansible host
+  ansible.builtin.include_tasks: setup_sandbox.yml

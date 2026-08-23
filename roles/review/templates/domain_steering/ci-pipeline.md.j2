@@ -1,0 +1,9 @@
+(target: Review Agent, Quality lens)
+This diff includes CI/CD pipeline configuration. Verify that
+commands used in script sections exist in the specified container
+images. Check before_script ordering — do steps that need tools
+run after those tools are installed? Flag `|| true` and
+`2>/dev/null` as potential silent-failure masking. Check
+consistency between CI checks and local checks (pre-commit,
+Makefile). If CI creates tags/releases, verify the version source
+is available in the CI environment.

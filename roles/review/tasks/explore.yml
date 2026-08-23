@@ -1,0 +1,98 @@
+---
+# Bounded, sequential pass after lenses merge. Gives model chance to look beyond diff.
+# Shared single pass preserves concurrent baseline; only pays for extra turns if model needs them.
+# Gating moved to caller (full_review.yml) for cleaner skip behavior.
+
+- name: Render the explore agent system prompt
+  ansible.builtin.set_fact:
+    explore_system_prompt: "{{ lookup('template', role_path + '/templates/explore_agent_prompt.j2') }}"
+  vars:
+    existing_findings: "{{ deduped_findings }}"
+    full_diff: "{{ review_full_diff }}"
+
+- name: Dump the explore agent's rendered prompt (debug mode only)
+  when: review_debug_dump_prompts | bool
+  ansible.builtin.include_tasks: dump_debug_prompt.yml
+  vars:
+    dump_prompt_name: "explore"
+    dump_prompt_content: "{{ explore_system_prompt }}"
+
+- name: Seed the explore conversation
+  ansible.builtin.set_fact:
+    explore_messages:
+      - role: user
+        content: >-
+          Decide whether this change needs checking against the rest
+          of the repo, using your tools if so, then call
+          report_findings.
+    review_explore_done: false
+    review_explore_findings: []
+    explore_turn_count: 0
+
+- name: Run the exploration loop
+  ansible.builtin.include_tasks: explore_turn.yml
+  loop: "{{ range(0, review_explore_max_turns | int) | list }}"
+  loop_control:
+    loop_var: turn_index
+  when: not (review_explore_done | default(false))
+
+- name: Show how many additional findings exploration surfaced
+  ansible.builtin.debug:
+    msg: >-
+      Exploration pass: {{ review_explore_findings | length }}
+      additional finding(s) ({{ explore_turn_count }} turn(s)).
+
+# Exploration findings affect verdict but don't retroactively adjust lens scores.
+# Verify pass (when enabled) recomputes scores against combined set.
+# when:+block here (not hoisted) since review_explore_findings only known after loop.
+- name: Fold exploration findings into the report
+  when: review_explore_findings | length > 0
+  block:
+    # Reuse merge.yml's filter_self_refuted_findings to avoid drift.
+    # Behavior change: exploration findings now dropped by signals this file never checked before.
+    - name: Drop self-refuted findings from the exploration pass
+      filter_self_refuted_findings:
+        findings: "{{ review_explore_findings }}"
+      register: explore_self_refuted_filter_result
+
+    - name: Append exploration findings to the deduplicated set
+      ansible.builtin.set_fact:
+        deduped_findings: "{{ deduped_findings + explore_self_refuted_filter_result.findings }}"
+
+    # Third call site for compute_review_scores.py (see merge.yml's
+    # comment for the migration-roadmap context) -- only the verdict
+    # field is used here, matching this file's own deliberate design
+    # of NOT recomputing scores until verify.yml does (see this
+    # block's own header comment above). The plugin always computes
+    # both since they share the same input findings list and verdict
+    # formula is trivial once scores are computed anyway -- no value
+    # in a separate verdict-only plugin for what callers choose to
+    # read from one result.
+    #
+    # Intentional behavior change from the old inline Jinja verdict
+    # computation here: that expression only checked severity names
+    # against ['Critical', 'Major'], never touching severity_points,
+    # so an unrecognized severity would have silently been treated
+    # as "not blocking" for verdict purposes. This plugin call
+    # validates every finding's severity against severity_points
+    # regardless of whether the verdict actually needs the points
+    # table -- an unknown severity now fails the whole explore step
+    # loudly instead of silently passing through. Deliberate
+    # (matches this codebase's established "fail loud, don't trust
+    # unvalidated model output" posture), not an oversight.
+    - name: Recompute the verdict against the combined findings
+      compute_review_scores:
+        findings: "{{ deduped_findings }}"
+        severity_points: "{{ severity_points }}"
+      register: explore_score_result
+
+    - name: Store the recomputed verdict
+      ansible.builtin.set_fact:
+        review_verdict: "{{ explore_score_result.verdict }}"
+
+    - name: Regroup the combined findings by severity for rendering
+      ansible.builtin.set_fact:
+        findings_critical: "{{ deduped_findings | selectattr('severity', 'equalto', 'Critical') | list }}"
+        findings_major: "{{ deduped_findings | selectattr('severity', 'equalto', 'Major') | list }}"
+        findings_minor: "{{ deduped_findings | selectattr('severity', 'equalto', 'Minor') | list }}"
+        findings_nit: "{{ deduped_findings | selectattr('severity', 'equalto', 'Nit') | list }}"

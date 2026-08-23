@@ -1,0 +1,14 @@
+(target: Review Agent, both lenses)
+This diff contains Ansible content (roles, playbooks, collections,
+or plugins). Verify FQCN (fully qualified collection names) on
+all module calls — bare module names are deprecated. Check that
+`rejectattr()`, `selectattr()`, `map()`, and `filter()` results
+are piped through `| list` before passing to other filters
+(generator vs list incompatibility across Ansible versions). Do
+NOT use Jinja2 templates in role defaults for dynamic data —
+role defaults are evaluated at load time, before tasks run; use
+`set_fact` for dynamic values instead. Verify idempotency —
+tasks should produce no changes on second run. Check that
+`ansible_operator_meta` is not accessed for `.spec` or `.status`
+(it only contains name, namespace, kind — use `k8s_info` for
+full CR data).

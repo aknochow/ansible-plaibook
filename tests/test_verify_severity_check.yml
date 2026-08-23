@@ -1,0 +1,163 @@
+---
+# End-to-end regression test for verify.yml severity re-assessment: exercises the real task
+# against real repo files with real LLM calls. Asserts the deterministic piece: scoping decisions
+# (which findings get verified) via prepare_findings_for_verification.py logic, not LLM judgment.
+#
+# Usage:
+#   ansible-playbook tests/test_verify_severity_check.yml
+
+- name: "Test verify.yml axis 1: severity re-assessment scope and schema wiring"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_delegate_host: ""
+    review_repo_path: "{{ playbook_dir }}/.."
+    review_org_repo: "aknochow/ansible-plaibook"
+    review_number: "test-verify-severity"
+
+    # Enum values from verify_verdict_schema (roles/review/vars/main.yml).
+    valid_worst_outcome_categories:
+      - crash-dos
+      - data-corruption
+      - unauthorized-read
+      - unauthorized-write-or-rce
+      - availability-degradation
+      - cosmetic-style
+
+    # See test_verify_pass.yml's own vars-block comment for why this is
+    # a play var feeding an explicit set_fact below, not seeded directly
+    # as a fact here: deduped_findings must be a FACT (verify.yml itself
+    # calls set_fact on it repeatedly).
+    severity_fixture_findings:
+      # Minor + Security lens: scoped via the lens signal alone,
+      # regardless of file/evidence content. Pointed at this session's
+      # own real freshness-check file for a genuinely checkable claim.
+      - lens: Security
+        file: "roles/review/tasks/verify_target_freshness.yml"
+        line: 21
+        severity: Minor
+        description: >-
+          The GitLab API poll task's argv builds a URL path directly
+          from review_org_repo/review_number without validating their
+          character set first.
+        evidence: "'projects/' + (review_org_repo | replace('/', '%2F')) + '/merge_requests/' + (review_number | string)"
+        confidence: LOW
+        fix: >-
+          Assert review_org_repo/review_number match a safe character
+          set immediately after parsing review_target, before either is
+          used in any platform API URL.
+      # Minor + non-Security lens, but touching a security-sensitive
+      # keyword ("credential") in its description: scoped via the
+      # keyword-pattern signal, not the lens signal.
+      - lens: Functionality
+        file: "roles/review/tasks/resolve_target_pr.yml"
+        line: 79
+        severity: Minor
+        description: >-
+          The controller-side clone relies on ambient credential-helper
+          configuration rather than an explicit credential, which the
+          comment above this task acknowledges directly.
+        evidence: "the controller has gh/glab's ambient git credential helper configured"
+        confidence: LOW
+        fix: >-
+          Document the credential-helper dependency as a prerequisite in
+          the role's top-level README.
+      # Minor + non-Security lens, no security-sensitive signal at all:
+      # must NOT be scoped for verification.
+      - lens: Quality
+        file: "roles/review/tasks/verify_target_freshness.yml"
+        line: 1
+        severity: Minor
+        description: >-
+          This file's header comment could be trimmed for brevity.
+        evidence: "resolve_target_pr.yml's clone (immediately before this include) fetches"
+        confidence: LOW
+        fix: "Shorten the header comment."
+
+  tasks:
+    - name: Initialize pipeline-wide agent usage accounting
+      ansible.builtin.set_fact:
+        pipeline_agent_calls: []
+
+    - name: "Seed deduped_findings as a fact (see the vars block's comment on why)"
+      ansible.builtin.set_fact:
+        deduped_findings: "{{ severity_fixture_findings }}"
+
+    - name: Run the verify stage in isolation
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: verify.yml
+
+    - name: Show every fixture's outcome (for debugging failures)
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.file }}:{{ item.line }} [{{ item.lens }}] -> evidence_status={{ item.evidence_status }}
+          severity_status={{ item.severity_status }} severity={{ item.original_severity | default('n/a') }}->{{ item.severity }}
+          reachability={{ item.reachability | default('n/a') }} trust_boundary={{ item.trust_boundary | default('n/a') }}
+          worst_outcome_category={{ item.worst_outcome_category | default('n/a') }} silent_failure={{ item.silent_failure | default('n/a') }}
+      loop: "{{ deduped_findings }}"
+      loop_control:
+        label: "{{ item.file }}:{{ item.line }}"
+
+    - name: Assert the Security-lens Minor finding was pulled into verification scope
+      ansible.builtin.assert:
+        that:
+          - deduped_findings[0].evidence_status is not none
+          - deduped_findings[0].severity_status is not none
+          - deduped_findings[0].severity_status in ['confirmed', 'disputed']
+        fail_msg: >-
+          Expected the Minor Security-lens fixture to be scoped for
+          verification via the lens signal alone. Got evidence_status={{
+          deduped_findings[0].evidence_status }}, severity_status={{ deduped_findings[0].severity_status }}
+
+    - name: Assert the security-keyword Minor finding was pulled into verification scope
+      ansible.builtin.assert:
+        that:
+          - deduped_findings[1].evidence_status is not none
+          - deduped_findings[1].severity_status is not none
+          - deduped_findings[1].severity_status in ['confirmed', 'disputed']
+        fail_msg: >-
+          Expected the "credential"-keyword Functionality-lens fixture to
+          be scoped for verification via the security-sensitive-pattern
+          signal. Got evidence_status={{ deduped_findings[1].evidence_status }},
+          severity_status={{ deduped_findings[1].severity_status }}
+
+    - name: Assert the plain Minor finding with no signal was NOT scoped for verification
+      ansible.builtin.assert:
+        that:
+          - deduped_findings[2].evidence_status is none
+          - deduped_findings[2].severity_status is none
+          - deduped_findings[2].severity == 'Minor'
+        fail_msg: >-
+          Expected the signal-free Minor/Quality fixture to stay
+          completely untouched by verification. Got evidence_status={{
+          deduped_findings[2].evidence_status }}, severity_status={{ deduped_findings[2].severity_status }},
+          severity={{ deduped_findings[2].severity }}
+
+    - name: Assert the 4 new schema fields landed as real enum values on every scoped finding
+      ansible.builtin.assert:
+        that:
+          - item.reachability in ['realistic', 'requires-unusual-config', 'theoretical-only']
+          - item.trust_boundary in ['crosses-trust-boundary', 'stays-within-trusted-input', 'unclear']
+          - item.worst_outcome_category in valid_worst_outcome_categories
+          - item.silent_failure in [true, false]
+          - item.severity in ['Critical', 'Major', 'Minor', 'Nit']
+        fail_msg: >-
+          {{ item.file }}:{{ item.line }} has an invalid axis-1 field:
+          reachability={{ item.reachability }} trust_boundary={{ item.trust_boundary }}
+          worst_outcome_category={{ item.worst_outcome_category }} silent_failure={{ item.silent_failure }}
+          severity={{ item.severity }}
+      loop: "{{ deduped_findings[0:2] }}"
+      loop_control:
+        label: "{{ item.file }}:{{ item.line }}"
+
+    - name: Assert original_severity is preserved on every scoped finding, whether disputed or not
+      ansible.builtin.assert:
+        that:
+          - item.original_severity == 'Minor'
+        fail_msg: "{{ item.file }}:{{ item.line }} lost its original_severity ({{ item.original_severity | default('missing') }})"
+      loop: "{{ deduped_findings[0:2] }}"
+      loop_control:
+        label: "{{ item.file }}:{{ item.line }}"

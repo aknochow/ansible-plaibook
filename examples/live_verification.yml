@@ -1,0 +1,76 @@
+---
+# Comprehensive live verification across OpenShell gateway targets.
+#
+# Exercises this repo's own proven safe pattern for combining OpenShell
+# sandboxes with Claude/Gemini calls (see docs/sandbox-and-agent-safety.md)
+# -- NOT the community provider-injection/agent-CLI pattern, which we've
+# verified doesn't work out of the box and isn't what review.yml relies on
+# anyway. Reuses roles/review/tasks/setup_sandbox.yml and
+# roles/review/tasks/teardown_sandbox.yml
+# directly, the same files review.yml itself includes.
+#
+# For each target, this:
+#   1. Creates a sandbox and registers it as a real Ansible host (delegate)
+#   2. Runs an isolated command INSIDE the sandbox via delegate_to
+#   3. Reads that result back to the controller and feeds it into a real
+#      Claude call AND a real Gemini call -- both controller-side, never
+#      delegated, proving the "LLM stays on the controller" boundary holds
+#      even when the input originated inside the sandbox
+#   4. Tears the sandbox down
+#
+# Usage:
+#   ansible-playbook examples/live_verification.yml
+#   ansible-playbook examples/live_verification.yml -e '{"live_verify_targets": ["remote-1"]}'
+#
+# Auth -- set what you have; a target with no token (and not "local") is
+# skipped rather than failing the whole run:
+#   export OPENSHELL_BEARER_TOKEN_REMOTE_1=...   # see examples/openshell_workspace_member.yml
+#   export OPENSHELL_BEARER_TOKEN_REMOTE_2=...
+#   export GOOGLE_APPLICATION_CREDENTIALS=/path/to/vertex-key.json   # for claude/gemini calls
+#
+# all_targets below is illustrative -- add your own remote gateways with
+# their real hostnames; nothing here has a working default beyond the
+# local dev gateway.
+
+- name: Comprehensive live verification across gateway targets
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    live_verify_targets: ["local"]
+
+    # local: plaintext dev gateway, no auth needed, not always running --
+    # skipped automatically below if unreachable. Add your own remote
+    # gateway entries here (and to live_verify_targets above) with real
+    # hostnames -- see this file's own header comment.
+    all_targets:
+      local:
+        gateway: "http://127.0.0.1:8081"
+        bearer_token: ""
+      remote-1:
+        gateway: "https://your-openshell-gateway.example.com"
+        bearer_token: "{{ lookup('env', 'OPENSHELL_BEARER_TOKEN_REMOTE_1') }}"
+
+    sandbox_image: "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
+    ssh_proxy_python: "{{ ansible_python_interpreter | default('python3') }}"
+    ssh_proxy_script: "{{ lookup('env', 'HOME') }}/code/ansible-openshell/scripts/ssh_proxy.py"
+
+    claude_provider: vertex
+    claude_vertex_region: global
+    claude_vertex_project: ""
+    gemini_vertex_project: "{{ claude_vertex_project }}"
+    gemini_vertex_location: global
+
+  tasks:
+    - name: "Verify target: {{ target_name }}"
+      ansible.builtin.include_tasks: _live_verification_target.yml
+      when: target_name in live_verify_targets
+      loop: "{{ all_targets.keys() | list }}"
+      loop_control:
+        loop_var: target_name
+      vars:
+        sandbox_gateway: "{{ all_targets[target_name].gateway }}"
+        sandbox_bearer_token: "{{ all_targets[target_name].bearer_token }}"
+        use_sandbox: true
+        review_delegate_host: sandbox_target

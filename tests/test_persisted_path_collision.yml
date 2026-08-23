@@ -1,0 +1,163 @@
+---
+# End-to-end proof that concurrent runs to the same target/branch/commit preserve
+# both results: canonical files show last-write-wins (required for prior-review detection),
+# and both runs' run-scoped copies survive intact with original uncorrupted data.
+#
+# Usage:
+#   ansible-playbook tests/test_persisted_path_collision.yml
+
+- name: Test that two persist.yml writes to the same target don't lose either run's result
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_delegate_host: ""
+    review_write_artifact: false
+    review_org_repo: "test/collision-fixture"
+    review_branch: "collision-test-branch"
+    review_short_sha: "abc1234"
+    review_repo_path: "/tmp/does-not-matter-persist-only"
+    findings_critical: []
+    findings_major: []
+    findings_minor: []
+    findings_nit: []
+    review_diff_stats: {}
+    review_diff_categories: {}
+    review_completeness_checks: { deleted_files: [], todo_fixme: [], trailing_whitespace: 0 }
+    review_neutralization_check: { triggered: false, remaining_refs: [] }
+    review_checklist: { triggered: false, results: [] }
+    score_functionality: 90.0
+    score_security: 90.0
+    score_quality: 90.0
+    briefing_project: "test/collision-fixture"
+    briefing_branch: "collision-test-branch"
+    briefing_commit: "abc1234"
+    review_context: ""
+    fence: "```"
+    severity_points: {}
+    # persist.yml's findings.md.j2 render needs these -- normally set by
+    # guardian_scan.yml, which this test skips entirely (it's testing
+    # persist.yml's own collision handling, not the guardian scan).
+    # Seeded to the same "disabled" shape guardian_scan.yml itself uses
+    # when review_guardian_scan_enabled is false -- confirmed via a real
+    # run that persist.yml fails with an undefined-variable error
+    # without this, pre-existing and unrelated to this session's other
+    # changes (reproduced against the already-committed state with all
+    # of this session's uncommitted work stashed away).
+    guardian_scan_available: false
+    guardian_scan_skip_reason: "review_guardian_scan_enabled is false"
+    guardian_findings: []
+    guardian_scan_truncated: false
+    guardian_blocking_findings: []
+
+  tasks:
+    - name: Create a throwaway review_output_base
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: "persist-collision-fixture-"
+      register: fixture_output
+
+    - name: Initialize pipeline accumulators (normally done once by review.yml before the target loop)
+      ansible.builtin.set_fact:
+        pipeline_findings_reports: []
+        review_output_base: "{{ fixture_output.path }}"
+
+    - name: "Run 1: persist a review that found real issues"
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: persist
+        public: true
+      vars:
+        review_number: "1"
+        review_verdict: "NEEDS_CHANGES"
+        score_overall: 66.7
+        deduped_findings: []
+
+    - name: Capture run 1's own paths and canonical content immediately after its own write
+      ansible.builtin.set_fact:
+        run1_findings_run_scoped_path: "{{ review_findings_run_scoped_path }}"
+        run1_summary_run_scoped_path: "{{ review_summary_run_scoped_path }}"
+        run1_canonical_findings_path: "{{ review_findings_path }}"
+        run1_canonical_summary_path: "{{ review_summary_path }}"
+
+    - name: "Run 2: persist a DIFFERENT review against the IDENTICAL target/branch/commit (the collision)"
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: persist
+        public: true
+      vars:
+        review_number: "1"
+        review_verdict: "READY_FOR_HUMAN_REVIEW"
+        score_overall: 98.3
+        deduped_findings: []
+
+    - name: Sanity check -- both runs really did resolve to the identical canonical path
+      ansible.builtin.assert:
+        that:
+          - review_findings_path == run1_canonical_findings_path
+          - review_summary_path == run1_canonical_summary_path
+        fail_msg: "Test setup bug: run 1 and run 2 didn't collide on the same canonical path as intended"
+
+    - name: Read the canonical (shared, last-write-wins) summary.json
+      ansible.builtin.slurp:
+        path: "{{ review_summary_path }}"
+      register: _canonical_summary_raw
+
+    - name: Read run 1's run-scoped summary.json
+      ansible.builtin.slurp:
+        path: "{{ run1_summary_run_scoped_path }}"
+      register: _run1_summary_raw
+
+    - name: Read run 2's run-scoped summary.json
+      ansible.builtin.slurp:
+        path: "{{ review_summary_run_scoped_path }}"
+      register: _run2_summary_raw
+
+    - name: Assert the collision no longer silently loses either run's real result
+      vars:
+        _canonical: "{{ _canonical_summary_raw.content | b64decode | from_json }}"
+        _run1: "{{ _run1_summary_raw.content | b64decode | from_json }}"
+        _run2: "{{ _run2_summary_raw.content | b64decode | from_json }}"
+      ansible.builtin.assert:
+        that:
+          # Required, unchanged behavior: canonical path is last-write-wins
+          - _canonical.verdict == "READY_FOR_HUMAN_REVIEW"
+          - _canonical.score_overall == 98.3
+          # The actual fix: run 1's real result is NOT gone -- its
+          # run-scoped copy still has run 1's own original data
+          - _run1.verdict == "NEEDS_CHANGES"
+          - _run1.score_overall == 66.7
+          # And run 2's run-scoped copy is independently correct too
+          - _run2.verdict == "READY_FOR_HUMAN_REVIEW"
+          - _run2.score_overall == 98.3
+          # The two run-scoped copies are genuinely different files, not
+          # the same path coincidentally read twice
+          - run1_summary_run_scoped_path != review_summary_run_scoped_path
+        fail_msg: >-
+          Expected: canonical summary.json = run 2 (last-write-wins,
+          unchanged/required), but run 1's run-scoped copy must still
+          show run 1's OWN real result (66.7/NEEDS_CHANGES) -- if it
+          shows run 2's data instead, run 1's real result was silently
+          lost to the collision, which is exactly the bug this fix
+          closes. canonical={{ _canonical.verdict }}/{{ _canonical.score_overall }}
+          run1_scoped={{ _run1.verdict }}/{{ _run1.score_overall }}
+          run2_scoped={{ _run2.verdict }}/{{ _run2.score_overall }}
+
+    - name: Verify pipeline_findings_reports recorded both runs' run-scoped paths distinctly
+      ansible.builtin.assert:
+        that:
+          - pipeline_findings_reports | length == 2
+          - pipeline_findings_reports[0].summary_run_scoped_path == run1_summary_run_scoped_path
+          - pipeline_findings_reports[1].summary_run_scoped_path == review_summary_run_scoped_path
+          - pipeline_findings_reports[0].summary_run_scoped_path != pipeline_findings_reports[1].summary_run_scoped_path
+        fail_msg: "pipeline_findings_reports (what last_run.json is built from) should carry each run's own distinct run-scoped path"
+
+    - name: Show the collision-survival confirmation message
+      ansible.builtin.debug:
+        msg: "PASSED: both runs' real results survive intact via their own run-scoped copies, despite colliding on the canonical path"
+
+    - name: Clean up the fixture output directory
+      ansible.builtin.file:
+        path: "{{ fixture_output.path }}"
+        state: absent

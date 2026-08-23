@@ -1,0 +1,273 @@
+---
+# Severity -> point deduction table, on a 0-100 scale. Agents must use
+# these exact values; also mirrored in review_agent_prompt.j2 and
+# security_agent_prompt.j2's Severity Classification tables shown to
+# the model, which must stay in sync with this table.
+severity_points:
+  Critical: 20
+  Major: 10
+  Minor: 5
+  Nit: 0
+
+# Each agent only scores the lens(es) it actually reviewed (Security
+# Agent: security only; Review Agent: functionality + quality), so
+# each gets its own schema rather than one shared shape both would
+# have to guess at.
+_finding_item:
+  type: object
+  additionalProperties: false
+  properties:
+    lens:
+      type: string
+      enum: [Functionality, Security, Quality]
+    file: { type: string }
+    line: { type: integer }
+    severity:
+      type: string
+      enum: [Critical, Major, Minor, Nit]
+    description: { type: string }
+    evidence: { type: string }
+    confidence:
+      type: string
+      enum: [HIGH, MEDIUM, LOW]
+    fix: { type: string }
+  required: [lens, file, line, severity, description, evidence, confidence, fix]
+
+# scores declared before findings: a model's malformed-JSON failure
+# rate on this schema is measurably higher when the array property
+# comes last and is immediately followed by another object property.
+# Putting the array last avoids that array-to-sibling-object
+# transition. Property order has no effect on JSON Schema validation
+# semantics, only on what order a model tends to generate fields in;
+# every downstream consumer reads these by key, never by position, and
+# compute_review_scores.py never reads the model's self-reported
+# scores at all, recomputing from deduped_findings instead. Stacks
+# with retry_lens_dispatch.yml's retry-on-malformed-output mechanism
+# rather than replacing it: this cuts the raw failure rate the retry
+# has to cover, not the need for a retry itself.
+#
+# explore_findings_schema (below) and verify_verdict_schema (bottom of
+# this file) are deliberately not reordered: explore's schema has no
+# scores property at all to reorder against, and verify_verdict_schema
+# has no array property in it at all, so the transition this fixes
+# doesn't exist in either shape.
+security_findings_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    scores:
+      type: object
+      additionalProperties: false
+      properties:
+        security: { type: number }
+      required: [security]
+    findings:
+      type: array
+      items: "{{ _finding_item }}"
+  required: [findings, scores]
+
+review_findings_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    scores:
+      type: object
+      additionalProperties: false
+      properties:
+        functionality: { type: number }
+        quality: { type: number }
+      required: [functionality, quality]
+    findings:
+      type: array
+      items: "{{ _finding_item }}"
+  required: [findings, scores]
+
+# The explore agent (tasks/explore.yml) only ever reports findings,
+# never its own lens scores: it's a bolt-on pass looking beyond the
+# diff, not a third lens with its own scoring rubric.
+explore_findings_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    findings:
+      type: array
+      items: "{{ _finding_item }}"
+  required: [findings]
+
+# A deliberately small, read-only toolset for the explore agent: just
+# enough to check something beyond the diff (a stale doc reference,
+# another call site of a changed identifier). No write_file/run_command:
+# a reviewer must not be able to mutate the repo it's reviewing.
+explore_tools:
+  - name: read_file
+    description: >-
+      Read the full contents of a file at the given path, relative to
+      the repo root.
+    input_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        path: { type: string }
+      required: [path]
+  - name: search
+    description: >-
+      Search for a literal substring across files under the given path
+      (equivalent to grep -Frn -- fixed-string, not regex), relative to
+      the repo root.
+    input_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        pattern: { type: string }
+        path:
+          type: string
+          description: >-
+            File or directory to search, relative to the repo root.
+            Defaults to the whole repo.
+      required: [pattern]
+
+# One extra tool available only inside tasks/verify_turn.yml's loop,
+# not the shared explore_tools list. Backed by
+# action_plugins/trace_reachability.py: deterministic, AST-based,
+# Python source only. This is a partial, syntactic-only signal, not a
+# substitute for execution-based verification, but it's cheap,
+# deterministic, and closes a real gap in what the verify pass can
+# check on its own.
+trace_reachability_tool:
+  name: trace_reachability
+  description: >-
+    Statically trace whether a line is reachable from its enclosing
+    Python function's entry point, by enumerating guard clauses
+    (if/return, if/raise, if/continue, if/break, or a nested if/else
+    where both branches exit) that unconditionally exit before that
+    line. Python source only, do not call this on non-Python files.
+    This does NOT execute any code and does NOT evaluate whether a
+    guard's condition is actually true in any specific scenario; it
+    only reports what's syntactically present. Use this whenever a
+    finding's core claim is about whether a line of Python is
+    "reachable"/"unreachable"/"dead code", read the full guard list
+    it returns before accepting or refuting that claim.
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      path:
+        type: string
+        description: Path to the Python file, relative to the repo root.
+      line:
+        type: integer
+        description: The target line number to trace reachability for.
+    required: [path, line]
+
+# The terminal tool for tasks/verify_turn.yml. No `confidence` field
+# like _finding_item's: evidence_status itself already encodes
+# certainty (verified/refuted are the confident outcomes, inconclusive
+# is the "not sure" one).
+verify_verdict_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    evidence_status:
+      type: string
+      enum: [verified, refuted, inconclusive]
+    evidence:
+      type: string
+      description: >-
+        A directly quoted snippet from what you actually read/searched
+        supporting this verdict, required even for inconclusive.
+    rationale:
+      type: string
+    requires_execution:
+      type: boolean
+      description: >-
+        True only if this claim is fundamentally about runtime/
+        behavioral semantics unreachable via reading/searching source.
+    # 4 narrow, independently-answerable categorical sub-questions
+    # that compute_suggested_severity.py derives a severity from
+    # deterministically, decomposing the holistic "what's the worst
+    # realistic outcome" judgment instead of re-asking it directly a
+    # second, equally-unreliable way. Answered regardless of
+    # evidence_status (even a refuted finding still gets a severity
+    # opinion): refuted findings are already excluded from scoring
+    # elsewhere, so a wrong severity on one is inert.
+    reachability:
+      type: string
+      enum: [realistic, requires-unusual-config, theoretical-only]
+      description: >-
+        How easily is this actually triggered in practice, independent
+        of how bad it would be if it fired.
+    trust_boundary:
+      type: string
+      enum: [crosses-trust-boundary, stays-within-trusted-input, unclear]
+      description: >-
+        Can genuinely untrusted input (a diff author, PR description, or
+        similar) reach this, or does it only ever see this pipeline's
+        own operator/config-controlled input?
+    worst_outcome_category:
+      type: string
+      enum:
+        - crash-dos
+        - data-corruption
+        - unauthorized-read
+        - unauthorized-write-or-rce
+        - availability-degradation
+        - cosmetic-style
+      description: >-
+        The single worst realistic outcome category, not a free-text
+        description of it.
+    silent_failure:
+      type: boolean
+      description: >-
+        True if this fails without any error, log, or other visible
+        signal that something went wrong.
+    # Claimed independently of evidence_status/severity above: a
+    # refuted or inconclusive finding can still be a genuine
+    # continuation of a prior round's finding, so this is never gated
+    # on the other fields here. Only ever compared against
+    # prior_round_findings actually shown in this prompt;
+    # verify_finding.yml validates the claimed id is one of those
+    # before ever running the audit step.
+    continues_finding_id:
+      type: [string, "null"]
+      description: >-
+        The id of the ONE prior-round finding shown to you below that
+        this finding continues -- same underlying code location/topic
+        evolving across rounds, even if the specific code or wording
+        changed. null if this is unrelated to all of them, or if no
+        prior-round findings were shown to you at all.
+    continues_finding_id_rationale:
+      type: string
+      description: >-
+        One or two sentences on why this finding does or doesn't
+        continue the id above -- referencing the specific location/
+        topic overlap (or lack of one), not a restatement of either
+        finding's full text. Write "N/A -- no prior round findings were
+        shown" if continues_finding_id is null because none were shown.
+  required:
+    - evidence_status
+    - evidence
+    - rationale
+    - requires_execution
+    - reachability
+    - trust_boundary
+    - worst_outcome_category
+    - silent_failure
+    - continues_finding_id
+    - continues_finding_id_rationale
+
+# Independent second call (verify_continuity_audit.yml), run only when
+# verify_finding.yml's own turn loop claimed a continues_finding_id:
+# same "structure the judgment, then check it separately" pattern the
+# severity re-assessment / reachability tool already established. This
+# audit never sees the claiming turn's own conversation or rationale,
+# only the two findings' own file/line/description.
+continuity_audit_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    verdict:
+      type: string
+      enum: [plausible, implausible]
+    rationale:
+      type: string
+  required: [verdict, rationale]

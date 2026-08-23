@@ -1,0 +1,153 @@
+---
+# Deterministic regression test for briefing.yml's checklist execution,
+# in isolation from lenses/merge/explore/verify: runs the real task chain
+# against a self-contained git fixture repo with CHECKLIST.md. Confirms the
+# Ansible task wiring (delegate_to, fact shaping) works end to end; security
+# properties are proven separately in library/test_run_checklist.py.
+#
+# Usage:
+#   ansible-playbook tests/test_checklist_execution.yml
+
+- name: Test briefing.yml's checklist execution standalone
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_delegate_host: ""
+    review_repo_path: "{{ fixture_dir.path }}"
+    review_target_ref: "target_ref"
+    review_source_ref: "HEAD"
+    review_short_sha: "checklisttest"
+    review_branch: "test-checklist-standalone"
+    review_org_repo: "test/checklist-fixture"
+    review_number: "test-checklist-standalone"
+    review_output_base: "{{ fixture_review_output.path }}"
+
+  tasks:
+    - name: Create a throwaway fixture repo directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: "checklist-fixture-repo-"
+      register: fixture_dir
+
+    - name: Create a throwaway review_output_base directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: "checklist-fixture-output-"
+      register: fixture_review_output
+
+    - name: Initialize the fixture repo and configure a commit identity
+      ansible.builtin.command:
+        argv: "{{ item }}"
+        chdir: "{{ fixture_dir.path }}"
+      loop:
+        - [git, init, -q]
+        - [git, config, user.email, "test@test.com"]
+        - [git, config, user.name, "Test"]
+      loop_control:
+        label: "{{ item | join(' ') }}"
+      changed_when: false
+      timeout: 30
+
+    - name: Write the base (target_ref) fixture files, including a real CHECKLIST.md
+      ansible.builtin.copy:
+        dest: "{{ fixture_dir.path }}/{{ item.path }}"
+        content: "{{ item.content }}"
+        mode: "0644"
+      loop:
+        - path: CHECKLIST.md
+          content: |
+            # Check for the word hello
+            ```
+            grep hello file.txt
+            ```
+
+            # Unsafe command, must never run
+            ```
+            rm -rf /tmp/checklist-fixture-should-not-run
+            ```
+        - path: file.txt
+          content: |
+            hello world
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Commit and tag the base fixture state as target_ref
+      ansible.builtin.command:
+        argv: "{{ item }}"
+        chdir: "{{ fixture_dir.path }}"
+      loop:
+        - [git, add, -A]
+        - [git, commit, -q, -m, "base with checklist"]
+        - [git, tag, target_ref]
+      loop_control:
+        label: "{{ item | join(' ') }}"
+      changed_when: false
+      timeout: 30
+
+    - name: Write a trivial source_ref change
+      ansible.builtin.copy:
+        dest: "{{ fixture_dir.path }}/file.txt"
+        mode: "0644"
+        content: |
+          hello world
+          one more line
+
+    - name: Commit the source_ref state
+      ansible.builtin.command:
+        argv: "{{ item }}"
+        chdir: "{{ fixture_dir.path }}"
+      loop:
+        - [git, add, -A]
+        - [git, commit, -q, -m, "trivial change"]
+      loop_control:
+        label: "{{ item | join(' ') }}"
+      changed_when: false
+      timeout: 30
+
+    - name: Run briefing.yml
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: briefing
+        public: true
+
+    - name: Assert the checklist triggered and ran the safe command, skipping the unsafe one
+      ansible.builtin.assert:
+        that:
+          - review_checklist.triggered == true
+          - review_checklist.results | length == 1
+          - review_checklist.results[0].check == "Check for the word hello"
+          - review_checklist.results[0].result == "PASS"
+          - "'hello world' in review_checklist.results[0].output"
+
+    - name: Assert the dangerous command was never actually executed
+      ansible.builtin.stat:
+        path: /tmp/checklist-fixture-should-not-run
+      register: _should_not_exist
+
+    - name: Fail if the unsafe command somehow ran
+      ansible.builtin.assert:
+        that:
+          - not _should_not_exist.stat.exists
+
+    - name: Assert the worktree was cleanly torn down
+      ansible.builtin.command:
+        argv: [git, worktree, list]
+        chdir: "{{ fixture_dir.path }}"
+      changed_when: false
+      register: _worktree_listing
+      timeout: 30
+
+    - name: Fail if a stray checklist worktree was left behind
+      ansible.builtin.assert:
+        that:
+          - _worktree_listing.stdout_lines | length == 1
+
+    - name: Clean up the fixture repo and output directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ fixture_dir.path }}"
+        - "{{ fixture_review_output.path }}"

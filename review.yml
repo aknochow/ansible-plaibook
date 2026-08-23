@@ -1,0 +1,351 @@
+---
+# Top-level entry point: checks out the harness repo (source of the
+# code-review/review-pr-workflow skills this project ports), optionally
+# stands up an OpenShell sandbox for isolated script execution, then
+# loops review_targets through the review role. review_type selects
+# which kind of target this run resolves (pr|branch|commit) — see
+# roles/review/ for the shared per-type resolution logic.
+#
+# Usage:
+#   ansible-playbook review.yml -e review_targets_raw="https://github.com/org/repo/pull/12"
+#   ansible-playbook review.yml -e review_targets_raw="org/repo!34" -e use_sandbox=false
+#   ansible-playbook review.yml -e review_type=commit
+#   ansible-playbook review.yml -e review_type=commit -e commit_sha=abc1234 -e repo_path=/path/to/repo
+#
+# review_type: commit is a fast, cheap, local, single-commit review — no
+# sandbox, no exploration pass, no PR/MR API calls. Meant for a tight
+# feedback loop right after a commit (e.g. a Claude Code PostToolUse
+# hook on `git commit`), not a replacement for a full pr/branch review.
+# No sandbox by default for this type: none of the reasons pr/branch
+# need isolation (untrusted, source-branch-controlled content, e.g. a
+# PR's CHECKLIST.md) apply to reviewing your own local commit on your
+# own machine. It's also the only type that FAILS (non-zero exit) on a
+# NEEDS_CHANGES verdict with a real Critical/Major finding, so a hook
+# can gate directly on the exit code:
+# `if ! ansible-playbook review.yml -e review_type=commit; then ...; fi`.
+# review_type: pr/branch never fail based on verdict — a NEEDS_CHANGES
+# review is still a "successful" playbook run for those. Set
+# fail_on_regressions explicitly to override either default.
+#
+# review_targets_raw accepts GitHub PR URLs, GitLab MR URLs, or bare
+# "org/repo#N" (GitHub) / "org/repo!N" (GitLab) identifiers — plain
+# `key=value` extra-vars, no quoting/brackets needed. For more than one
+# target in a single run, either pass review_targets_raw as a
+# newline-separated string, or use the JSON-list form directly:
+#   ansible-playbook review.yml -e '{"review_targets": ["org/repo#1", "org/repo#2"]}'
+#
+# Sandbox SSH delegation uses a pure-Python, SDK-only relay
+# (aknochow.openshell's scripts/ssh_proxy.py) as the SSH ProxyCommand —
+# no `openshell` CLI binary or CLI-registered gateway required. Only the
+# `openshell` pip package + grpcio (already collection dependencies) are
+# needed on the control node.
+#
+# mTLS credentials can come from a local directory (the openshell CLI's
+# own on-disk gateway config, if you happen to have one) or be fetched
+# live from a Kubernetes/OpenShift Secret — set sandbox_tls_source
+# accordingly. Fetching from a Secret is generic kubernetes.core usage,
+# nothing OpenShell-specific about it.
+
+- name: Code review pipeline
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    # pr | branch | commit — selects which kind of target this run
+    # resolves (roles/review/), and the type-appropriate defaults below.
+    review_type: pr
+
+    # Sandboxing exists to isolate untrusted, source-branch-controlled
+    # content (e.g. a PR/MR's CHECKLIST.md gets executed) — a local
+    # commit under review_type: commit is the operator's own repo, so
+    # it never needs isolation from itself. Override explicitly (-e
+    # use_sandbox=true) if you want it anyway.
+    use_sandbox: "{{ review_type != 'commit' }}"
+    # host.openshell.internal (not 127.0.0.1 / localhost): the gateway
+    # now splits its primary full-API listener from a restricted
+    # compute-driver-callback-only listener, and on a dual-stack host
+    # 127.0.0.1/localhost can land on either depending on resolver
+    # order. host.openshell.internal is baked into the gateway's own
+    # TLS cert SANs and always resolves to the primary listener.
+    sandbox_gateway: "https://host.openshell.internal:17670"
+    sandbox_image: "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
+    # Defaults to the controller's own resolved interpreter (picks up
+    # host_vars-level ansible_python_interpreter overrides, e.g. a local
+    # venv with openshell installed) rather than a hardcoded "python3" —
+    # SSH's ProxyCommand execs this as a raw subprocess, completely
+    # bypassing whatever interpreter Ansible itself uses for module
+    # invocations, so a plain "python3" here can silently land on a
+    # system interpreter that doesn't have openshell installed at all.
+    ssh_proxy_python: "{{ ansible_python_interpreter | default('python3') }}"
+    # Local-dev-friendly default, same as sandbox_gateway/sandbox_tls_source
+    # below -- this personal checkout path doesn't exist inside a real AAP
+    # execution pod. Any real AAP Job Template must override this via
+    # extra_vars (e.g. -e ssh_proxy_script=/opt/openshell/ssh_proxy.py,
+    # the vendored EE path from execution-environment.yml) -- same
+    # override-on-the-Job-Template pattern already required for
+    # sandbox_gateway/sandbox_tls_source, not something to fix by changing
+    # this default (that would break local dev instead).
+    ssh_proxy_script: "{{ lookup('env', 'HOME') }}/code/ansible-openshell/scripts/ssh_proxy.py"
+
+    # 'local_mtls_dir': read certs from an openshell CLI-managed gateway dir.
+    # 'k8s_secret': fetch certs live from a Kubernetes/OpenShift Secret.
+    sandbox_tls_source: "local_mtls_dir"
+    sandbox_gateway_name: "openshell"
+    sandbox_mtls_dir: "{{ lookup('env', 'HOME') }}/.config/openshell/gateways/{{ sandbox_gateway_name }}/mtls"
+
+    # Unset by default — see roles/review/tasks/fetch_k8s_secret_tls.yml: inside a
+    # real AAP execution pod this omits entirely and in-cluster config
+    # auto-detects via the pod's own ServiceAccount. Set explicitly
+    # (e.g. -e sandbox_kubeconfig=~/.kube/config) only for local testing
+    # of this path against a real cluster from a laptop.
+    sandbox_kubeconfig: ~
+    sandbox_secret_name: "openshell-client-tls"
+    sandbox_secret_namespace: "ogo"
+
+    # Unattended-automation auth (see roles/review/tasks/exchange_sandbox_token.yml):
+    # the gateway requires both mTLS AND an OIDC JWT on every call.
+    # sandbox_sa_token is blank by default — set via an AAP credential's
+    # extra_vars injection ("OpenShell Gateway ServiceAccount Token"),
+    # not read from a projected file: AAP Container Groups here generate
+    # pods with automountServiceAccountToken: false and reject any
+    # pod_spec_override attempt to change it, so there's no token file
+    # inside the job pod to read. Local dev's interactive login already
+    # exports OPENSHELL_BEARER_TOKEN, so it never needs this at all.
+    sandbox_sa_token: ""
+    # Overridable like every other var here — same trust boundary as
+    # sandbox_gateway/sandbox_auth_bridge_route (an extra_vars override
+    # could redirect the SA token to an attacker-controlled endpoint).
+    # Not something to lock down in the playbook itself: whoever can override
+    # arbitrary extra_vars on this Job Template already has broader
+    # execute access than this one var would grant on its own. Restrict
+    # via AAP RBAC (limit who can launch with extra_vars overrides), not
+    # here.
+    # No working default on purpose — this only matters for the
+    # unattended-AAP-automation auth path (see exchange_sandbox_token.yml's
+    # own header comment), which is never exercised by local human dev.
+    # Point this at your own OpenShell gateway's auth-bridge route via
+    # an extra_vars override; exchange_sandbox_token.yml's own HTTPS
+    # assert fails loudly if this is left unset when that path runs.
+    sandbox_auth_bridge_route: ""
+
+    # Whether to tear down the sandbox even after a failed run. Default
+    # true (leaking a live sandbox on every failure isn't a safe
+    # default) — set false to leave a failed run's sandbox alive for
+    # SSH-in debugging (see the sandbox's own name in the failure
+    # output / job stats).
+    cleanup_sandbox_onfail: true
+
+    review_targets: []
+    # AAP's Survey feature only produces plain strings/textareas, not
+    # lists — a Job Template survey sets this to a newline-separated
+    # string of URLs rather than review_targets directly. Direct
+    # CLI/API callers (-e '{"review_targets": [...]}') are unaffected;
+    # this var is simply unset in that case.
+    review_targets_raw: ""
+    post_results: false
+
+    # review_type: commit inputs only — ignored for pr/branch.
+    commit_sha: "HEAD"
+    repo_path: "{{ lookup('env', 'PWD') }}"
+
+    # Fast/cheap by design for review_type: commit — both lenses still
+    # run, but the exploration pass is skipped entirely, since it's a
+    # tight per-commit check, not a full audit. pr/branch keep
+    # the review engine's own default (3).
+    review_explore_max_turns: "{{ 0 if review_type == 'commit' else 3 }}"
+
+    # Only review_type: commit fails its own exit code on verdict by
+    # default — see the header comment above. Set explicitly to
+    # override either default.
+    fail_on_regressions: "{{ review_type == 'commit' }}"
+
+    # Free-text, operator-supplied context for this run only — not
+    # persisted anywhere, not part of the diff/PR content. Use it to
+    # tell the reviewer something a re-run keeps getting wrong: "the
+    # always-visible theme dropdown is an intentional design decision,
+    # not a bug" or "pay extra attention to the auth changes in
+    # server.go". Threaded into every lens's system prompt (see
+    # roles/review/templates/*_prompt.j2's "Reviewer Notes"
+    # section) as TRUSTED input, unlike the diff/PR description which
+    # are explicitly untrusted — but it's guidance, not a findings
+    # override; a note claiming something is fine doesn't exempt it
+    # from the validation chain if it plainly isn't. Applies uniformly
+    # to every target in a multi-target run.
+    review_extra_notes: ""
+
+  tasks:
+    - name: Split survey-provided newline-separated targets into a list
+      when: >-
+        review_type != 'commit'
+        and (review_targets | length == 0)
+        and (review_targets_raw | trim | length > 0)
+      ansible.builtin.set_fact:
+        review_targets: "{{ (review_targets_raw | trim).split('\n') | map('trim') | reject('equalto', '') | list }}"
+
+    # review_type: commit has exactly one target (the commit itself,
+    # identified by commit_sha/repo_path, actually resolved inside
+    # resolve_target_commit.yml) — synthesize a single-element list purely so it
+    # flows through the same "Review each target" loop as pr/branch, and
+    # so pipeline_stats.yml's "Targets reviewed" has something to count
+    # without a separate commit-only code path.
+    - name: Set the single review target for commit-mode
+      when: review_type == 'commit'
+      ansible.builtin.set_fact:
+        review_targets: ["{{ repo_path | basename }}@{{ commit_sha }}"]
+
+    # review_type: branch has exactly one target (branch_review_target,
+    # read directly inside resolve_target_branch.yml -- the loop item itself is
+    # unused, same as commit-mode) -- synthesize a single-element list
+    # for the same reason as commit-mode above: without this,
+    # review_targets stays [] and the "Review each target" loop below
+    # silently iterates zero times, never calling resolve_target_branch.yml at
+    # all. If branch_review_target genuinely wasn't set, this still
+    # fires the loop once, so resolve_target_branch.yml's own target-parsing
+    # fails loudly instead of the whole run silently doing nothing.
+    - name: Set the single review target for branch-mode
+      when: review_type == 'branch'
+      ansible.builtin.set_fact:
+        review_targets: ["{{ branch_review_target | default('(branch_review_target not set)') }}"]
+
+    # fail_on_regressions gates on the LAST loop iteration's facts only
+    # (see the "Fail if this review found a real regression" task below)
+    # -- correct for commit-mode's always-one-target loop, but silently
+    # wrong for a multi-target pr/branch run opting into it, where
+    # regressions in every target except the last would never gate the
+    # exit code. Fail fast, before any review work starts, rather than
+    # let that combination silently under-report.
+    - name: Guard against fail_on_regressions with multiple targets
+      when: (fail_on_regressions | bool) and (review_targets | length > 1)
+      ansible.builtin.fail:
+        msg: >-
+          fail_on_regressions only gates on the last target's verdict --
+          refusing to run with {{ review_targets | length }} targets.
+          Use a single target, or set -e fail_on_regressions=false.
+
+    # Before the block, not left to the first loop iteration to set as a
+    # side effect — matching this file's own earlier convention. Without
+    # this, a failure before that point (e.g. during sandbox setup)
+    # leaves pipeline_agent_calls/pipeline_findings_reports undefined,
+    # and the always block's stats/last_run.json write silently skips,
+    # leaving a stale result from whatever ran before.
+    - name: Initialize pipeline-wide agent usage accounting
+      ansible.builtin.set_fact:
+        pipeline_agent_calls: []
+        pipeline_findings_reports: []
+
+    # block/rescue/always so a failure anywhere in the pipeline (a bad
+    # target, a broken script, an SSH hiccup, a review-engine agent-call
+    # error) doesn't leak the sandbox forever and always gets a last-run
+    # write: rescue captures the failure instead of letting it propagate
+    # immediately, always tears the sandbox down (gated by
+    # cleanup_sandbox_onfail) and writes stats/last-run, then the task
+    # after this block re-raises the captured failure so the job still
+    # correctly reports as failed — cleanup shouldn't hide the actual
+    # error.
+    - name: Run the review pipeline (sandbox lifecycle is failure-safe)
+      block:
+        # One "skipping" notice for this whole group on an unsandboxed
+        # (including every review_type: commit) run instead of three --
+        # see roles/review/tasks/setup_sandbox_and_mtls.yml's own header comment for
+        # why this is include_tasks + when, not block + when.
+        - name: Set up an OpenShell sandbox for isolated script execution
+          when: use_sandbox | bool
+          ansible.builtin.include_tasks: roles/review/tasks/setup_sandbox_and_mtls.yml
+
+        - name: Compute the effective delegate host for script execution
+          ansible.builtin.set_fact:
+            review_delegate_host: "{{ 'sandbox_target' if (use_sandbox | bool) else '' }}"
+
+        # review_type flows in ambiently from the play-level var above —
+        # not re-passed here, since it's the same for every iteration of
+        # this loop (unlike review_target, which is per-item).
+        - name: Review each target
+          ansible.builtin.include_role:
+            name: review
+          vars:
+            review_target: "{{ item }}"
+          loop: "{{ review_targets }}"
+          loop_control:
+            label: "{{ item }}"
+
+      rescue:
+        # Strips embedded basic-auth credentials AND common token query
+        # params from any URL in the error text (e.g. a git clone
+        # failure quoting the remote URL, or an API error quoting a
+        # ?token=... URL) before it gets stored in a fact and re-raised
+        # into job output/logs.
+        - name: Capture the failure so it can be re-raised after cleanup
+          ansible.builtin.set_fact:
+            review_pipeline_failed: true
+            review_pipeline_error: >-
+              {{ (ansible_failed_result.msg | default(ansible_failed_task.name ~ ' failed'))
+                 | regex_replace('://[^/@\s]+@', '://***@')
+                 | regex_replace('([?&](?:token|access_token|private_token)=)[^&\s]*', '\1***') }}
+
+      always:
+        # block/rescue here too — without it, a teardown failure (e.g.
+        # gateway unreachable) would propagate out of this `always` and
+        # replace review_pipeline_error with the teardown's own error,
+        # losing the original failure the operator actually needs to see.
+        - name: Tear down the review sandbox (failure-safe)
+          block:
+            - name: Tear down the review sandbox
+              when: >-
+                use_sandbox | bool and sandbox is defined and sandbox.sandbox is defined
+                and (not (review_pipeline_failed | default(false)) or cleanup_sandbox_onfail | bool)
+              ansible.builtin.include_tasks: roles/review/tasks/teardown_sandbox.yml
+          rescue:
+            - name: Warn that sandbox teardown itself failed
+              ansible.builtin.debug:
+                msg: >-
+                  WARNING: sandbox teardown failed ({{ (ansible_failed_result.msg | default('unknown error'))
+                  | regex_replace('://[^/@\s]+@', '://***@')
+                  | regex_replace('([?&](?:token|access_token|private_token)=)[^&\s]*', '\1***') }})
+                  — it may still be running and need manual cleanup. Preserving the
+                  original pipeline error (if any) below rather than this one.
+
+        # Cache-dir creation, last_run.json write, and the stats include
+        # live in one shared file so a fix only needs to land once — see
+        # that file's own header comment for the concurrency/
+        # cache-collision notes.
+        - name: Show pipeline stats and write the last-run summary
+          ansible.builtin.include_tasks: roles/review/tasks/write_last_run_summary.yml
+
+        # Was a plain sequential task after the re-raise, so on a failed
+        # multi-target run any already-completed target's report
+        # (accumulated in pipeline_findings_reports before the failure)
+        # was silently never shown. Gated so a failure early enough
+        # (before any target was reviewed) skips this instead of erroring
+        # on an undefined var.
+        - name: Show every target's rendered findings report
+          when: pipeline_findings_reports is defined
+          ansible.builtin.debug:
+            msg: "{{ ['=== ' + item.target + ' ==='] + item.report.split('\n') }}"
+          loop: "{{ pipeline_findings_reports }}"
+          loop_control:
+            label: "{{ item.target }}"
+
+    - name: Re-raise the pipeline failure (after sandbox cleanup, stats, and findings reports above)
+      ansible.builtin.fail:
+        msg: "{{ review_pipeline_error }}"
+      when: review_pipeline_failed | default(false)
+
+    # Only fires by default for review_type: commit (fail_on_regressions'
+    # own default) — pr/branch runs pass this through as a no-op unless
+    # fail_on_regressions is explicitly overridden. Uses the LAST loop
+    # iteration's facts, which is exactly right for commit-mode's
+    # single-iteration loop; a multi-target pr/branch run opting into
+    # this would only gate on its last target, not a documented use case.
+    - name: Fail if this review found a real regression
+      when: >-
+        (not (review_pipeline_failed | default(false)))
+        and fail_on_regressions | bool
+        and (review_verdict | default('')) == 'NEEDS_CHANGES'
+        and ((findings_critical | default([]) | length) + (findings_major | default([]) | length)) > 0
+      ansible.builtin.fail:
+        msg: >-
+          {{ review_org_repo }}#{{ review_number }} scored {{ score_overall }}/10 with
+          {{ findings_critical | default([]) | length }} Critical and
+          {{ findings_major | default([]) | length }} Major finding(s). See
+          {{ review_findings_path }} for details.

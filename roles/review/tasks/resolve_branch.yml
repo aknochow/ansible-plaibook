@@ -1,0 +1,22 @@
+---
+# Resolve branch name when not already known (included with `when:` at include site).
+
+- name: Resolve the actual checked-out branch name
+  ansible.builtin.command:
+    argv: [git, rev-parse, --abbrev-ref, HEAD]
+  args:
+    chdir: "{{ branch_review_checkout_dir.path }}"
+  delegate_to: "{{ review_delegate_host | default(omit, true) }}"
+  ignore_unreachable: true
+  changed_when: false
+  register: _branch_review_branch_result
+  timeout: 30
+
+- name: Fail loudly if the sandbox connection was unreachable
+  ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
+  vars:
+    fail_if_unreachable_result_var: _branch_review_branch_result
+
+- name: Set the resolved branch name fact
+  ansible.builtin.set_fact:
+    branch_review_branch_name: "{{ _branch_review_branch_result.stdout | trim }}"

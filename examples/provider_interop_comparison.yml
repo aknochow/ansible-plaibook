@@ -1,0 +1,267 @@
+---
+# Compare aknochow.claude and aknochow.gemini on the SAME structured-output
+# tasks: correctness, tokens, and cost, head-to-head ACROSS providers — not
+# across models within one provider, which is what both collections' own
+# examples already do (aknochow.claude/examples/cost_effectiveness_comparison.yml,
+# aknochow.gemini/examples/model_comparison.yml). Built for
+# handoff.ansible-plaibook-multi-provider-agents.yaml's pick-one-concrete-use-case
+# item: the narrow "independent second-opinion lens" use case, evaluated for
+# real rather than just designed on paper.
+#
+# Scope: structured-output-only, schema-constrained SINGLE-SHOT calls — the
+# same shape roles/review/tasks/lenses.yml uses for its report_findings
+# dispatch (one forced/schema-constrained response per call, no back-and-forth).
+# Deliberately NOT covering multi-turn tool-calling (explore.yml/verify.yml's
+# several-turn read_file/search loops) — a separate, harder question tracked
+# in handoff.ansible-plaibook-multi-provider-agents.yaml's
+# confirm-tool-schema-compatibility item.
+#
+# Provider mechanism asymmetry (a real finding, not a simplification choice):
+# - Claude dispatches via FORCED TOOL_CHOICE, not output_config's json_schema
+#   format — same reason lenses.yml does: output_config requires Vertex's
+#   "structured_outputs" partner-model feature to be allowlisted per-project,
+#   which this project is not confirmed to have. Forced tool_choice is
+#   functionally equivalent structured output without that dependency.
+# - Gemini dispatches via response_schema directly — it's a first-party
+#   Vertex model, not a partner model behind that allowlist gate, so no
+#   analogous workaround is needed.
+# The two providers also disagree on field names for otherwise-identical
+# data: Claude's forced-tool result lands in tool_calls[0].input, Gemini's
+# response_schema result lands directly in .structured; usage counters are
+# input_tokens/output_tokens (Claude) vs. prompt_token_count/
+# candidates_token_count (Gemini). Both providers use the same '.structured'
+# convention once normalized below, purely by dispatch-task-side mapping,
+# neither module does this for you.
+#
+# Model note: aknochow.gemini's own README recommends gemini-3.6-flash as
+# the default (see aknochow.gemini/examples/model_comparison.yml), but a
+# GCP project's vertexai.allowedModels org policy can block it. Check via
+# `gcloud org-policies describe constraints/vertexai.allowedModels
+# --project=<project> --effective`. gemini-3.5-flash (the prior
+# flash-tier default, same tier) is used here as a policy-safe choice.
+# If you see a 400 FAILED_PRECONDITION
+# "vertexai.allowedModels violated" error, check that policy for your own
+# project before assuming a code problem.
+#
+# Requirements: Vertex AI access to a GCP project with both an Anthropic
+# partner model and a Gemini model allowlisted (see model note above);
+# gcloud application-default credentials logged in.
+#
+# Usage:
+#   ansible-playbook examples/provider_interop_comparison.yml
+
+- name: Compare Claude vs Gemini — same structured-output tasks, cost/correctness head-to-head
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    # --- Claude config (mirrors roles/review/defaults/main.yml's claude_provider/
+    # claude_vertex_region/claude_vertex_project vars) ---
+    claude_provider: vertex
+    claude_vertex_region: global
+    claude_vertex_project: ""  # set to your own GCP project
+    claude_model: claude-haiku-4-5
+    # $ per million tokens. Source: roles/review/defaults/main.yml's own
+    # claude_pricing table (Vertex AI global endpoint rates).
+    claude_pricing:
+      claude-haiku-4-5: { input_per_million: 1.00, output_per_million: 5.00 }
+
+    # --- Gemini config ---
+    gemini_backend: vertex
+    gemini_vertex_project: "{{ claude_vertex_project }}"
+    gemini_vertex_location: global
+    gemini_model: gemini-3.5-flash
+    # $ per million tokens. Source: aknochow.gemini/examples/model_comparison.yml's
+    # own sourced pricing table.
+    gemini_pricing:
+      gemini-3.5-flash: { input_per_million: 1.50, output_per_million: 9.00 }
+
+    # --- Provider selection per task ---
+    # This is the actual "easy way to swap which provider handles which
+    # task" this playbook exists to prove out: change a task's provider by
+    # editing one line here. No dispatch-task code changes needed either
+    # way — both providers' dispatch tasks below always run for every task
+    # (so the comparison stays complete); this mapping only decides which
+    # provider's result is treated as "the one actually used" in the
+    # production-selection summary at the end.
+    default_task_provider: claude
+    task_provider_overrides:
+      sentiment: gemini
+
+    # Same 3 tasks aknochow.claude's own cost_effectiveness_comparison.yml
+    # uses, so these numbers are directly comparable to that precedent's
+    # single-provider (API vs. CLI) results too.
+    benchmark_tasks:
+      - name: math
+        prompt: "What is 17 * 6?"
+        schema:
+          type: object
+          properties:
+            answer: { type: integer }
+          required: [answer]
+          additionalProperties: false
+        expected: { answer: 102 }
+
+      - name: sentiment
+        prompt: "Classify the sentiment: 'This collection saved me hours of work!'"
+        schema:
+          type: object
+          properties:
+            sentiment: { type: string, enum: [positive, neutral, negative] }
+          required: [sentiment]
+          additionalProperties: false
+        expected: { sentiment: positive }
+
+      - name: extraction
+        prompt: "Extract name and age from: John is 42 years old."
+        schema:
+          type: object
+          properties:
+            name: { type: string }
+            age: { type: integer }
+          required: [name, age]
+          additionalProperties: false
+        expected: { name: John, age: 42 }
+
+  tasks:
+    # set_fact persists for the whole play; without this, re-running these
+    # tasks (e.g. via --start-at-task) would append to whatever a prior
+    # invocation left behind instead of starting fresh — same footgun
+    # roles/review/tasks/lenses.yml resets domain_steering_raw/_parsed for.
+    - name: Initialize per-provider result accumulators
+      ansible.builtin.set_fact:
+        claude_results: []
+        gemini_results: []
+
+    # =========================================================================
+    # Path A: Claude — forced tool_choice (matches lenses.yml's report_findings
+    # dispatch exactly, including WHY it avoids output_config)
+    # =========================================================================
+
+    - name: "Claude: run each task via forced tool_choice"
+      aknochow.claude.message:
+        provider: "{{ claude_provider }}"
+        region: "{{ claude_vertex_region }}"
+        project_id: "{{ claude_vertex_project }}"
+        model: "{{ claude_model }}"
+        max_tokens: 256
+        messages:
+          - role: user
+            content: "{{ item.prompt }}"
+        tools:
+          - name: report_answer
+            description: Report the answer in the required schema.
+            input_schema: "{{ item.schema }}"
+        tool_choice: { type: tool, name: report_answer }
+      loop: "{{ benchmark_tasks }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: claude_raw_results
+
+    - name: "Claude: normalize onto a common result shape"
+      ansible.builtin.set_fact:
+        claude_results: "{{ claude_results + [entry] }}"
+      loop: "{{ claude_raw_results.results }}"
+      loop_control:
+        label: "{{ benchmark_tasks[idx].name }}"
+        index_var: idx
+      vars:
+        structured: "{{ item.tool_calls[0].input }}"
+        pricing: "{{ claude_pricing[claude_model] }}"
+        # Same formula as the Gemini normalize task below, field names only
+        # differ because the two SDKs name usage counters differently
+        # (input_tokens/output_tokens vs. prompt_token_count/
+        # candidates_token_count) -- keep both in sync if this changes.
+        cost: >-
+          {{ (item.usage.input_tokens * pricing.input_per_million
+              + item.usage.output_tokens * pricing.output_per_million) / 1000000 }}
+        entry:
+          provider: claude
+          model: "{{ claude_model }}"
+          task: "{{ benchmark_tasks[idx].name }}"
+          correct: "{{ structured == benchmark_tasks[idx].expected }}"
+          input_tokens: "{{ item.usage.input_tokens }}"
+          output_tokens: "{{ item.usage.output_tokens }}"
+          cost_usd: "{{ cost | float }}"
+
+    # =========================================================================
+    # Path B: Gemini — response_schema (native single-shot structured output;
+    # no forced-tool-call workaround needed, see header note)
+    # =========================================================================
+
+    - name: "Gemini: run each task via response_schema"
+      aknochow.gemini.generate:
+        backend: "{{ gemini_backend }}"
+        project_id: "{{ gemini_vertex_project }}"
+        location: "{{ gemini_vertex_location }}"
+        model: "{{ gemini_model }}"
+        max_output_tokens: 256
+        contents: "{{ item.prompt }}"
+        response_schema: "{{ item.schema }}"
+      loop: "{{ benchmark_tasks }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: gemini_raw_results
+
+    - name: "Gemini: normalize onto a common result shape"
+      ansible.builtin.set_fact:
+        gemini_results: "{{ gemini_results + [entry] }}"
+      loop: "{{ gemini_raw_results.results }}"
+      loop_control:
+        label: "{{ benchmark_tasks[idx].name }}"
+        index_var: idx
+      vars:
+        pricing: "{{ gemini_pricing[gemini_model] }}"
+        cost: >-
+          {{ (item.usage.prompt_token_count * pricing.input_per_million
+              + item.usage.candidates_token_count * pricing.output_per_million) / 1000000 }}
+        entry:
+          provider: gemini
+          model: "{{ gemini_model }}"
+          task: "{{ benchmark_tasks[idx].name }}"
+          correct: "{{ item.structured == benchmark_tasks[idx].expected }}"
+          input_tokens: "{{ item.usage.prompt_token_count }}"
+          output_tokens: "{{ item.usage.candidates_token_count }}"
+          cost_usd: "{{ cost | float }}"
+
+    # =========================================================================
+    # Comparison report
+    # =========================================================================
+
+    - name: Show per-task, per-provider comparison
+      ansible.builtin.debug:
+        msg:
+          - "--- {{ benchmark_tasks[idx].name }} ---"
+          - "  claude: correct={{ claude_entry.correct }}  tokens={{ claude_entry.input_tokens }}in/{{ claude_entry.output_tokens }}out  cost=${{ '%.6f' | format(claude_entry.cost_usd | float) }}"
+          - "  gemini: correct={{ gemini_entry.correct }}  tokens={{ gemini_entry.input_tokens }}in/{{ gemini_entry.output_tokens }}out  cost=${{ '%.6f' | format(gemini_entry.cost_usd | float) }}"
+      loop: "{{ range(0, benchmark_tasks | length) | list }}"
+      loop_control:
+        loop_var: idx
+        label: "{{ benchmark_tasks[idx].name }}"
+      vars:
+        claude_entry: "{{ claude_results[idx] }}"
+        gemini_entry: "{{ gemini_results[idx] }}"
+
+    - name: Show aggregate summary
+      ansible.builtin.debug:
+        msg:
+          - "=== AGGREGATE ({{ benchmark_tasks | length }} tasks) ==="
+          - >-
+            claude ({{ claude_model }}): {{ claude_results | selectattr('correct') | list | length }}/{{ benchmark_tasks | length }} correct,
+            total cost ${{ '%.6f' | format(claude_results | map(attribute='cost_usd') | map('float') | sum) }}
+          - >-
+            gemini ({{ gemini_model }}): {{ gemini_results | selectattr('correct') | list | length }}/{{ benchmark_tasks | length }} correct,
+            total cost ${{ '%.6f' | format(gemini_results | map(attribute='cost_usd') | map('float') | sum) }}
+
+    - name: Show which provider actually serves each task (per task_provider_overrides)
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.name }} -> {{ task_provider_overrides[item.name] | default(default_task_provider) }}
+          ({{ '%.6f' | format(
+                ((claude_results if task_provider_overrides[item.name] | default(default_task_provider) == 'claude' else gemini_results)
+                | selectattr('task', 'equalto', item.name) | first).cost_usd | float)
+             }} USD this call)
+      loop: "{{ benchmark_tasks }}"
+      loop_control:
+        label: "{{ item.name }}"

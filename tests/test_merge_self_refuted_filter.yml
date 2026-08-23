@@ -1,0 +1,73 @@
+---
+# Fast, no-LLM smoke test of merge.yml's self-refuted-finding drop and score computation,
+# exercised through the real review role context.
+#
+# Usage:
+#   ansible-playbook tests/test_merge_self_refuted_filter.yml
+
+- name: Test merge.yml's action plugins standalone
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    # Real configured severity values (roles/review/vars/main.yml).
+    severity_points:
+      Critical: 20
+      Major: 10
+      Minor: 5
+      Nit: 0
+    security_result:
+      structured:
+        findings:
+          - evidence: "e1"
+            fix: "Logic is correct upon re-examination — dropping."
+            description: "d1"
+            severity: "Major"
+            lens: "Security"
+            file: "a.py"
+            line: 1
+    review_result:
+      structured:
+        findings:
+          - evidence: "tar.extractall() called without a filter argument"
+            fix: "Add filter='data' to the extractall() call to prevent path traversal."
+            description: "Archive extraction can write outside the target directory."
+            severity: "Critical"
+            lens: "Security"
+            file: "b.py"
+            line: 5
+
+  tasks:
+    - name: Run merge.yml through the review role context
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: merge
+
+    - name: Assert the self-refuted finding was dropped and the real one survived
+      ansible.builtin.assert:
+        that:
+          - combined_findings | length == 1
+          - combined_findings[0].file == 'b.py'
+        fail_msg: >-
+          Expected merge.yml (via filter_self_refuted_findings.py) to drop
+          the self-refuted a.py finding and keep only the real b.py finding.
+          Got: {{ combined_findings }}
+        success_msg: "filter_self_refuted_findings.py correctly filtered combined_findings."
+
+    - name: Assert scores and verdict reflect the one surviving Critical/Security finding
+      ansible.builtin.assert:
+        that:
+          - score_security | float == 80.0
+          - score_functionality | float == 100.0
+          - score_quality | float == 100.0
+          - score_overall | float == 93.3
+          - review_verdict == 'NEEDS_CHANGES'
+        fail_msg: >-
+          Expected compute_review_scores.py to score the one surviving
+          Critical/Security finding as security=80.0 (100 - 20),
+          functionality=quality=100.0 (no findings), overall=93.3, verdict
+          NEEDS_CHANGES. Got: security={{ score_security }}
+          functionality={{ score_functionality }} quality={{ score_quality }}
+          overall={{ score_overall }} verdict={{ review_verdict }}.
+        success_msg: "compute_review_scores.py correctly scored the surviving findings."
