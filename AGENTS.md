@@ -14,7 +14,7 @@ output, check these first:
 
 ansible-plaibook is an **Ansible-native AI code-review and bug-fix
 pipeline**, deterministic Ansible orchestration around
-`aknochow.claude`/`aknochow.gemini`/`aknochow.llama` provider
+`aknochow.claude`/`aknochow.gemini`/`aknochow.openai` provider
 modules, not an interactive agent loop. Two entry points:
 `review.yml` (PR/MR/branch/commit review, `-e review_type=...`) and
 `bug_pipeline.yml` (Jira-driven autonomous fix, GitHub only).
