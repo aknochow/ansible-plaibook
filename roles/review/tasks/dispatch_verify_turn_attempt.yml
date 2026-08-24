@@ -25,12 +25,24 @@
          else omit) }}
   register: verify_turn_result
 
+# Normalized usage -- see dispatch_explore_turn_attempt.yml's identical
+# comment; same rename, same reason, still Claude-only.
 - name: Record this attempt's usage for the pipeline-wide stats summary
   ansible.builtin.set_fact:
     pipeline_agent_calls: >-
       {{ pipeline_agent_calls + [{
            'target': review_org_repo + '#' + review_number, 'lens': 'verify',
-           'model': verify_turn_result.message.model, 'usage': verify_turn_result.usage,
+           'model': verify_turn_result.message.model,
+           'usage': {
+             'input_tokens': verify_turn_result.usage.input_tokens | default(0) | int,
+             'output_tokens': verify_turn_result.usage.output_tokens | default(0) | int,
+             'cache_write_tokens': verify_turn_result.usage.cache_creation_input_tokens | default(0) | int,
+             'cache_read_tokens': verify_turn_result.usage.cache_read_input_tokens | default(0) | int,
+             'total_tokens': (verify_turn_result.usage.input_tokens | default(0) | int)
+               + (verify_turn_result.usage.output_tokens | default(0) | int)
+               + (verify_turn_result.usage.cache_creation_input_tokens | default(0) | int)
+               + (verify_turn_result.usage.cache_read_input_tokens | default(0) | int)
+           },
            'attempt': verify_attempt_number | default(1)
          }] }}
 

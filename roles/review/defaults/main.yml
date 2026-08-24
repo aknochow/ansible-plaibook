@@ -32,6 +32,21 @@ branch_review_branch: ""
 
 review_agent_model: "claude-opus-4-6"
 
+# Per-task-config-var provider selection for lens dispatch (see
+# AGENTS.md's "Per-task-config-var for multi-provider dispatch" --
+# decided, don't re-litigate: no generic abstraction-class layer).
+# roles/review/tasks/lenses.yml (and retry_lens_dispatch.yml,
+# verify_continuity_audit.yml) include_tasks
+# "dispatch_lens_{{ agent_family }}.yml"/"dispatch_verify_continuity_
+# audit_{{ agent_family }}.yml" -- one hand-written, provider-native
+# task file per family, never a shared abstraction. claude is default
+# so existing behavior/callers are unchanged. qwen isn't implemented
+# yet (only claude/gemini dispatch files exist) -- named here so it
+# slots in later without a rename, per
+# ansible-agentbench/harness/tier1_lens_dispatch.yml's own precedent
+# (that harness already proves a Qwen path via aknochow.openai.chat).
+agent_family: claude   # claude | gemini | qwen
+
 # aknochow.claude auth: no provider or project baked in on purpose --
 # this role doesn't get to assume which backend you use. Falls back to
 # omit when unconfigured, so aknochow.claude's own argspec defaults/
@@ -43,6 +58,20 @@ claude_provider: "{{ lookup('ansible.builtin.env', 'ANSIBLE_CLAUDE_PROVIDER') | 
 claude_vertex_region: "{{ lookup('ansible.builtin.env', 'ANTHROPIC_VERTEX_REGION') | default('global', true) }}"
 claude_vertex_project: "{{ lookup('ansible.builtin.env', 'ANTHROPIC_VERTEX_PROJECT_ID') | default(omit) }}"
 claude_api_key: "{{ lookup('ansible.builtin.env', 'ANTHROPIC_API_KEY') | default(omit) }}"
+
+# aknochow.gemini auth, mirrors claude_provider/claude_api_key above.
+# backend defaults to "api" (aknochow.gemini's own argspec default) so
+# a bare `-e agent_family=gemini` works off GEMINI_API_KEY/GOOGLE_API_KEY
+# alone -- no Vertex project/location required, matching the AI Studio
+# free-tier dogfooding use case this was added for.
+gemini_backend: "{{ lookup('ansible.builtin.env', 'ANSIBLE_GEMINI_BACKEND') | default('api', true) }}"
+gemini_vertex_project: "{{ lookup('ansible.builtin.env', 'GOOGLE_CLOUD_PROJECT') | default(omit) }}"
+gemini_vertex_location: "{{ lookup('ansible.builtin.env', 'GOOGLE_CLOUD_LOCATION') | default(omit) }}"
+gemini_api_key: "{{ lookup('ansible.builtin.env', 'GEMINI_API_KEY') | default(lookup('ansible.builtin.env', 'GOOGLE_API_KEY'), true) | default(omit, true) }}"
+# gemini-3.7-flash is the verified-working free-tier model as of
+# 2026-08; gemini-3.6-flash is the documented fallback (see
+# ansible-gemini's .agents/rules/development.md).
+review_gemini_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_GEMINI_MODEL') | default('gemini-3.7-flash', true) }}"
 
 review_output_base: "{{ lookup('env', 'HOME') }}/reviews"
 
@@ -252,7 +281,26 @@ review_neutralization_org_patterns: []
 # and flagged in the final summary rather than silently costed as $0.
 #   https://cloud.google.com/blog/products/ai-machine-learning/expanding-vertex-ai-with-claude-opus-4-6
 #   https://platform.claude.com/docs/en/about-claude/pricing
-claude_pricing:
+#
+# Renamed from claude_pricing (Claude-only name) now that this table
+# also carries Gemini rates for agent_family=gemini dispatch. Free-tier
+# AI Studio usage is $0 but MUST still be counted in tokens -- the
+# token ledger stays meaningful even when the dollar cost is zero, see
+# pipeline_stats.yml. gemini-3.5-flash's rate is sourced from
+# ansible-agentbench/scoring/provider_pricing.yaml (confirmed live
+# 2026-08-19) since this repo has no rate of its own yet.
+# gemini-3.7-flash (the model actually used for free-tier dogfooding,
+# see review_gemini_model) has NO sourced rate here -- it was not
+# reliably found on a pricing page during this pass, so it's
+# deliberately absent rather than guessed; a model missing from this
+# table is excluded from the cost total and flagged in the final
+# summary (compute_pipeline_cost.py's unpriced_models), not silently
+# costed as $0. Add a real rate here once sourced.
+#
+# claude_pricing is kept as an alias to this same table so anything
+# still reading the old name (grepped repo-wide; nothing in this repo
+# does as of this rename) doesn't silently break.
+agent_pricing: &agent_pricing
   claude-opus-4-6:
     input_per_million: 5.00
     output_per_million: 25.00
@@ -263,6 +311,18 @@ claude_pricing:
     output_per_million: 5.00
     cache_write_per_million: 1.25
     cache_read_per_million: 0.10
+  # Gemini has no sourced cache-tier rate in this repo (implicit
+  # caching, no cache_system-style explicit control -- see
+  # dispatch_lens_gemini.yml's own comment) -- cache_write/cache_read
+  # rates deliberately absent rather than guessed; compute_pipeline_cost.py
+  # only prices cache tiers when both a rate AND a nonzero breakdown
+  # exist, so omitting them here just falls back to the blended
+  # input/output rate, never fabricates a cache price.
+  gemini-3.5-flash:
+    input_per_million: 1.50
+    output_per_million: 9.00
+
+claude_pricing: *agent_pricing
 
 # git's real empty-tree object hash (verify with `git hash-object -t
 # tree /dev/null`), used as review_target_ref to diff an entire

@@ -112,101 +112,32 @@
     dump_prompt_name: "review_lens"
     dump_prompt_content: "{{ review_system_prompt }}"
 
-# Print request config before async dispatch (async shows only job metadata).
-# Omit api_key (secret); show everything else including rendered system prompt.
-- name: Show the Security agent's request configuration
-  ansible.builtin.debug:
-    msg: "{{ [
-      'provider: ' + claude_provider,
-      'region: ' + (claude_vertex_region if claude_provider == 'vertex' else 'n/a'),
-      'project_id: ' + (claude_vertex_project if claude_provider == 'vertex' else 'n/a'),
-      'model: ' + review_agent_model,
-      'max_tokens: 8192',
-      'cache_system: true',
-      'tools: [report_findings] (forced via tool_choice)',
-      '',
-      '--- system prompt ---',
-      ] + security_system_prompt.split('\n') }}"
+# Dispatch both lenses via the provider-native module for agent_family
+# (claude | gemini | qwen; qwen not implemented yet). Mirrors
+# tasks/main.yml's own "include_tasks: resolve_target_{{ review_type }}.yml"
+# idiom one level up. Each dispatch_lens_*.yml is a hand-written,
+# provider-native task file (never a shared abstraction class, see
+# AGENTS.md) that ends by setting security_result/review_result in the
+# SAME normalized shape: .structured.{findings,scores}, .resolved_model,
+# .usage_normalized.
+- name: "Dispatch lenses via provider-native module (agent_family={{ agent_family }})"
+  ansible.builtin.include_tasks: "dispatch_lens_{{ agent_family }}.yml"
 
-- name: Dispatch the Security agent (async)
-  aknochow.claude.message:
-    provider: "{{ claude_provider }}"
-    region: "{{ claude_vertex_region if claude_provider == 'vertex' else omit }}"
-    project_id: "{{ claude_vertex_project if claude_provider == 'vertex' else omit }}"
-    api_key: "{{ claude_api_key if claude_provider == 'anthropic' else omit }}"
-    model: "{{ review_agent_model }}"
-    max_tokens: 8192
-    messages:
-      - role: user
-        content: "Review this diff per your instructions."
-    system: "{{ security_system_prompt }}"
-    cache_system: true
-    # Forced tool_choice avoids Vertex 'structured_outputs' allowlist requirement.
-    tools:
-      - name: report_findings
-        description: Report the review findings and lens scores.
-        input_schema: "{{ security_findings_schema }}"
-    tool_choice: { type: tool, name: report_findings }
-  async: 600
-  poll: 0
-  register: security_job
-
-# (See Security agent task above for why config is printed before dispatch.)
-- name: Show the Review agent's request configuration
-  ansible.builtin.debug:
-    msg: "{{ [
-      'provider: ' + claude_provider,
-      'region: ' + (claude_vertex_region if claude_provider == 'vertex' else 'n/a'),
-      'project_id: ' + (claude_vertex_project if claude_provider == 'vertex' else 'n/a'),
-      'model: ' + review_agent_model,
-      'max_tokens: 8192',
-      'cache_system: true',
-      'tools: [report_findings] (forced via tool_choice)',
-      '',
-      '--- system prompt ---',
-      ] + review_system_prompt.split('\n') }}"
-
-- name: Dispatch the Review agent (async)
-  aknochow.claude.message:
-    provider: "{{ claude_provider }}"
-    region: "{{ claude_vertex_region if claude_provider == 'vertex' else omit }}"
-    project_id: "{{ claude_vertex_project if claude_provider == 'vertex' else omit }}"
-    api_key: "{{ claude_api_key if claude_provider == 'anthropic' else omit }}"
-    model: "{{ review_agent_model }}"
-    max_tokens: 8192
-    messages:
-      - role: user
-        content: "Review this diff per your instructions."
-    system: "{{ review_system_prompt }}"
-    cache_system: true
-    tools:
-      - name: report_findings
-        description: Report the review findings and lens scores.
-        input_schema: "{{ review_findings_schema }}"
-    tool_choice: { type: tool, name: report_findings }
-  async: 600
-  poll: 0
-  register: review_job
-
-- name: Wait for both agents to finish
-  ansible.builtin.async_status:
-    jid: "{{ item.ansible_job_id }}"
-  loop:
-    - "{{ security_job }}"
-    - "{{ review_job }}"
-  register: lens_results
-  until: lens_results.finished
-  retries: 60
-  delay: 5
-
-- name: Extract lens results
+# Retry-on-malformed structured output only applies to Claude's forced
+# tool-call path (a probabilistic model-generation quirk). Gemini's
+# response_schema makes malformed structured output structurally
+# impossible -- dispatch_lens_gemini.yml already asserts .structured is
+# present and set the normalized fields directly, so there is nothing
+# to validate/retry for agent_family != claude.
+- name: Mark non-Claude lens dispatch valid directly (already schema-validated)
+  when: agent_family != 'claude'
   ansible.builtin.set_fact:
-    security_result: "{{ lens_results.results[0] }}"
-    review_result: "{{ lens_results.results[1] }}"
+    security_lens_valid: true
+    review_lens_valid: true
 
-# Retry-on-malformed structured output (probabilistic model-generation quirk).
 # Reset per-lens validity flags; facts persist across review_targets loop iterations.
 - name: Reset per-lens validity flags for this iteration
+  when: agent_family == 'claude'
   ansible.builtin.set_fact:
     security_lens_valid: false
     review_lens_valid: false
@@ -215,6 +146,7 @@
 # Sequential retries only on malformed first attempt.
 # See validate_lens_dispatch.yml for "valid" criteria; retry_lens_dispatch.yml for retry logic.
 - name: Validate the Security lens's first-attempt structured output
+  when: agent_family == 'claude'
   ansible.builtin.include_tasks: validate_lens_dispatch.yml
   vars:
     lens_label: "Security"
@@ -223,6 +155,7 @@
     lens_valid_var: "security_lens_valid"
 
 - name: Validate the Review lens's first-attempt structured output
+  when: agent_family == 'claude'
   ansible.builtin.include_tasks: validate_lens_dispatch.yml
   vars:
     lens_label: "Review"
@@ -243,7 +176,7 @@
     lens_valid_var: "security_lens_valid"
     lens_system_prompt: "{{ security_system_prompt }}"
     lens_schema: "{{ security_findings_schema }}"
-  when: not security_lens_valid
+  when: agent_family == 'claude' and not security_lens_valid
 
 - name: Retry the Review lens's dispatch if its structured output was invalid
   ansible.builtin.include_tasks: retry_lens_dispatch.yml
@@ -256,70 +189,77 @@
     lens_valid_var: "review_lens_valid"
     lens_system_prompt: "{{ review_system_prompt }}"
     lens_schema: "{{ review_findings_schema }}"
-  when: not review_lens_valid
+  when: agent_family == 'claude' and not review_lens_valid
 
 - name: Fail loudly if the Security lens never produced valid structured output
   ansible.builtin.assert:
     that:
       - security_lens_valid
     fail_msg: >-
-      Security lens ({{ review_agent_model }}) failed to produce valid structured output
-      after {{ review_structured_output_max_attempts }} attempt(s).
-      Consider raising review_structured_output_max_attempts or checking model reliability.
+      Security lens ({{ review_agent_model }}, agent_family={{ agent_family }}) failed to
+      produce valid structured output after {{ review_structured_output_max_attempts }}
+      attempt(s). Consider raising review_structured_output_max_attempts or checking model
+      reliability.
 
 - name: Fail loudly if the Review lens never produced valid structured output
   ansible.builtin.assert:
     that:
       - review_lens_valid
     fail_msg: >-
-      Review lens ({{ review_agent_model }}) failed to produce valid structured output
-      after {{ review_structured_output_max_attempts }} attempt(s).
-      Consider raising review_structured_output_max_attempts or checking model reliability.
+      Review lens ({{ review_agent_model }}, agent_family={{ agent_family }}) failed to
+      produce valid structured output after {{ review_structured_output_max_attempts }}
+      attempt(s). Consider raising review_structured_output_max_attempts or checking model
+      reliability.
 
-# Surface raw model output (otherwise only in merged findings.md).
-# message.model is API's echo of resolved model; may differ from requested alias.
+# Surface resolved model (otherwise only in merged findings.md).
+# resolved_model is each dispatch_lens_*.yml's normalized echo of the
+# actually-served model; may differ from the requested alias.
 - name: Show which provider/model served the Security agent
   ansible.builtin.debug:
     msg: >-
-      provider={{ claude_provider }}
-      requested_model={{ review_agent_model }}
-      resolved_model={{ security_result.message.model }}
+      agent_family={{ agent_family }}
+      resolved_model={{ security_result.resolved_model }}
 
 - name: Show the Security agent's raw findings
   ansible.builtin.debug:
     msg: "{{ (security_result.structured | to_nice_json(indent=2)).split('\n') }}"
 
-- name: Show the Security agent's token usage
+- name: Show the Security agent's normalized token usage
   ansible.builtin.debug:
-    var: security_result.usage
+    var: security_result.usage_normalized
 
 - name: Show which provider/model served the Review agent
   ansible.builtin.debug:
     msg: >-
-      provider={{ claude_provider }}
-      requested_model={{ review_agent_model }}
-      resolved_model={{ review_result.message.model }}
+      agent_family={{ agent_family }}
+      resolved_model={{ review_result.resolved_model }}
 
 - name: Show the Review agent's raw findings
   ansible.builtin.debug:
     msg: "{{ (review_result.structured | to_nice_json(indent=2)).split('\n') }}"
 
-- name: Show the Review agent's token usage
+- name: Show the Review agent's normalized token usage
   ansible.builtin.debug:
-    var: review_result.usage
+    var: review_result.usage_normalized
 
 # pipeline_agent_calls: NOT reset (accumulates across review_targets loop for pipeline-wide summary).
+# 'usage' here is always the NORMALIZED shape (input_tokens/output_tokens/
+# cache_write_tokens/cache_read_tokens/total_tokens) regardless of
+# agent_family -- compute_pipeline_cost.py reads exactly these key names
+# from every entry, never a provider-specific raw usage dict.
 - name: Record this iteration's agent calls for the pipeline-wide stats summary
   ansible.builtin.set_fact:
     pipeline_agent_calls: >-
       {{ pipeline_agent_calls + [
            {'target': review_org_repo + '#' + review_number, 'lens': 'security',
-            'model': security_result.message.model, 'usage': security_result.usage},
+            'model': security_result.resolved_model, 'usage': security_result.usage_normalized},
            {'target': review_org_repo + '#' + review_number, 'lens': 'review',
-            'model': review_result.message.model, 'usage': review_result.usage},
+            'model': review_result.resolved_model, 'usage': review_result.usage_normalized},
          ] }}
 
 # Make pricing table available for pipeline-wide summary (survives role scope).
+# agent_pricing (renamed from claude_pricing) now carries both providers'
+# rates keyed by model, so this one assignment works for any agent_family.
 - name: Make the pricing table available to the pipeline-wide summary
   ansible.builtin.set_fact:
-    pipeline_pricing_table: "{{ claude_pricing }}"
+    pipeline_pricing_table: "{{ agent_pricing }}"

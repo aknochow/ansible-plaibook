@@ -67,8 +67,8 @@ _DATED_SNAPSHOT_SUFFIX = re.compile(r"-\d{8}$")
 _USAGE_RATE_PAIRS = (
     ("input_tokens", "input_per_million"),
     ("output_tokens", "output_per_million"),
-    ("cache_creation_input_tokens", "cache_write_per_million"),
-    ("cache_read_input_tokens", "cache_read_per_million"),
+    ("cache_write_tokens", "cache_write_per_million"),
+    ("cache_read_tokens", "cache_read_per_million"),
 )
 _USAGE_KEYS = tuple(usage_key for usage_key, _ in _USAGE_RATE_PAIRS)
 
@@ -130,8 +130,8 @@ def compute_pipeline_cost(pipeline_agent_calls: list[dict], pipeline_pricing_tab
     return {
         "total_input_tokens": totals["input_tokens"],
         "total_output_tokens": totals["output_tokens"],
-        "total_cache_write_tokens": totals["cache_creation_input_tokens"],
-        "total_cache_read_tokens": totals["cache_read_input_tokens"],
+        "total_cache_write_tokens": totals["cache_write_tokens"],
+        "total_cache_read_tokens": totals["cache_read_tokens"],
         "unpriced_models": unpriced_models,
         "call_costs": call_costs,
     }

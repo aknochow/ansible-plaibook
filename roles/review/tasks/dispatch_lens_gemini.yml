@@ -1,0 +1,135 @@
+---
+# Gemini lens dispatch (agent_family: gemini). Uses response_schema
+# directly (no forced-tool-call workaround needed -- that's a
+# Claude-on-Vertex allowlist-gate workaround, not a general SDK
+# requirement, see examples/provider_interop_comparison.yml's header
+# and ansible-agentbench/harness/tier1_lens_dispatch.yml's own Gemini
+# branch, which this mirrors).
+#
+# Sets security_result/review_result in the SAME normalized shape
+# validate_lens_dispatch.yml produces for Claude, so every downstream
+# consumer in lenses.yml/pipeline_stats.yml/write_last_run_files.yml
+# only ever reads .structured.{findings,scores}, .resolved_model, and
+# .usage_normalized -- never a provider-specific field.
+#
+# No retry-on-malformed-output loop here (unlike Claude's tool-call
+# path): response_schema makes the SDK either return .structured
+# matching the schema or leave it unset entirely -- there is no
+# "malformed JSON the model almost got right" failure mode to retry
+# for, so lenses.yml marks security_lens_valid/review_lens_valid true
+# directly for agent_family != claude.
+#
+# Prompt caching: Claude's dispatch sets cache_system: true and reports
+# real cache_creation/cache_read tokens. Gemini's API has implicit
+# caching with NO equivalent request-side parameter -- there is nothing
+# to set and nothing this collection can honestly claim was cached on
+# purpose. usage_normalized below reports cache_write_tokens: 0 for
+# Gemini rather than inventing a number; Gemini's own
+# cached_content_token_count (when nonzero) is surfaced separately as
+# cached_content_unpriced for visibility, matching
+# tier1_lens_dispatch.yml's own precedent, but is never priced (no
+# sourced Gemini cache-tier rate in agent_pricing).
+
+- name: "Gemini: show the Security agent's request configuration"
+  ansible.builtin.debug:
+    msg: "{{ [
+      'backend: ' + gemini_backend,
+      'project_id: ' + (gemini_vertex_project if gemini_backend == 'vertex' else 'n/a'),
+      'location: ' + (gemini_vertex_location if gemini_backend == 'vertex' else 'n/a'),
+      'model: ' + review_gemini_model,
+      'max_output_tokens: 8192',
+      'response_schema: security_findings_schema',
+      '',
+      '--- system prompt ---',
+      ] + security_system_prompt.split('\n') }}"
+
+- name: "Gemini: dispatch the Security agent"
+  aknochow.gemini.generate:
+    backend: "{{ gemini_backend }}"
+    project_id: "{{ gemini_vertex_project if gemini_backend == 'vertex' else omit }}"
+    location: "{{ gemini_vertex_location if gemini_backend == 'vertex' else omit }}"
+    api_key: "{{ gemini_api_key if gemini_backend == 'api' else omit }}"
+    model: "{{ review_gemini_model }}"
+    max_output_tokens: 8192
+    system_instruction: "{{ security_system_prompt }}"
+    contents: "Review this diff per your instructions."
+    response_schema: "{{ security_findings_schema }}"
+  register: _gemini_security_raw
+
+- name: "Gemini: show the Review agent's request configuration"
+  ansible.builtin.debug:
+    msg: "{{ [
+      'backend: ' + gemini_backend,
+      'project_id: ' + (gemini_vertex_project if gemini_backend == 'vertex' else 'n/a'),
+      'location: ' + (gemini_vertex_location if gemini_backend == 'vertex' else 'n/a'),
+      'model: ' + review_gemini_model,
+      'max_output_tokens: 8192',
+      'response_schema: review_findings_schema',
+      '',
+      '--- system prompt ---',
+      ] + review_system_prompt.split('\n') }}"
+
+- name: "Gemini: dispatch the Review agent"
+  aknochow.gemini.generate:
+    backend: "{{ gemini_backend }}"
+    project_id: "{{ gemini_vertex_project if gemini_backend == 'vertex' else omit }}"
+    location: "{{ gemini_vertex_location if gemini_backend == 'vertex' else omit }}"
+    api_key: "{{ gemini_api_key if gemini_backend == 'api' else omit }}"
+    model: "{{ review_gemini_model }}"
+    max_output_tokens: 8192
+    system_instruction: "{{ review_system_prompt }}"
+    contents: "Review this diff per your instructions."
+    response_schema: "{{ review_findings_schema }}"
+  register: _gemini_review_raw
+
+- name: "Gemini: fail loudly if the Security agent produced no structured output"
+  ansible.builtin.assert:
+    that:
+      - _gemini_security_raw.structured is defined
+    fail_msg: >-
+      Security lens ({{ review_gemini_model }}, agent_family=gemini) produced no
+      .structured output despite response_schema being set
+      (finish_reason={{ _gemini_security_raw.finish_reason | default('unknown') }}).
+
+- name: "Gemini: fail loudly if the Review agent produced no structured output"
+  ansible.builtin.assert:
+    that:
+      - _gemini_review_raw.structured is defined
+    fail_msg: >-
+      Review lens ({{ review_gemini_model }}, agent_family=gemini) produced no
+      .structured output despite response_schema being set
+      (finish_reason={{ _gemini_review_raw.finish_reason | default('unknown') }}).
+
+- name: "Gemini: build the normalized Security result"
+  ansible.builtin.set_fact:
+    security_result:
+      structured:
+        findings: "{{ _gemini_security_raw.structured.findings | default([]) }}"
+        scores: "{{ _gemini_security_raw.structured.scores | default({}) }}"
+      resolved_model: "{{ review_gemini_model }}"
+      usage_normalized:
+        input_tokens: "{{ _gemini_security_raw.usage.prompt_token_count | default(0) | int }}"
+        output_tokens: "{{ _gemini_security_raw.usage.candidates_token_count | default(0) | int }}"
+        cache_write_tokens: 0
+        cache_read_tokens: 0
+        total_tokens: >-
+          {{ (_gemini_security_raw.usage.prompt_token_count | default(0) | int)
+             + (_gemini_security_raw.usage.candidates_token_count | default(0) | int) }}
+      cached_content_unpriced: "{{ _gemini_security_raw.usage.cached_content_token_count | default(0) | int }}"
+
+- name: "Gemini: build the normalized Review result"
+  ansible.builtin.set_fact:
+    review_result:
+      structured:
+        findings: "{{ _gemini_review_raw.structured.findings | default([]) }}"
+        scores: "{{ _gemini_review_raw.structured.scores | default({}) }}"
+      resolved_model: "{{ review_gemini_model }}"
+      usage_normalized:
+        input_tokens: "{{ _gemini_review_raw.usage.prompt_token_count | default(0) | int }}"
+        output_tokens: "{{ _gemini_review_raw.usage.candidates_token_count | default(0) | int }}"
+        cache_write_tokens: 0
+        cache_read_tokens: 0
+        total_tokens: >-
+          {{ (_gemini_review_raw.usage.prompt_token_count | default(0) | int)
+             + (_gemini_review_raw.usage.candidates_token_count | default(0) | int) }}
+      cached_content_unpriced: "{{ _gemini_review_raw.usage.cached_content_token_count | default(0) | int }}"
