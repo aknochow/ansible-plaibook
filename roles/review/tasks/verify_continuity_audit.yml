@@ -80,7 +80,7 @@
     max_output_tokens: 1024
     system_instruction: "{{ _continuity_audit_prompt }}"
     contents: "Assess the continuity claim described in your system prompt."
-    response_schema: "{{ continuity_audit_schema }}"
+    response_schema: "{{ continuity_audit_schema | to_gemini_schema }}"
   register: _continuity_audit_gemini_result
 
 - name: "Gemini: normalize the continuity audit result"
@@ -95,9 +95,16 @@
       total_tokens: >-
         {{ (_continuity_audit_gemini_result.usage.prompt_token_count | default(0) | int)
            + (_continuity_audit_gemini_result.usage.candidates_token_count | default(0) | int) }}
+    # (Gemini dogfooding finding, live run 2026-08-24): accessing
+    # .structured.verdict directly raised AnsibleUndefinedVariable
+    # whenever .structured itself was absent (the SDK only sets the
+    # key when parsing succeeds), instead of letting
+    # _continuity_audit_answered evaluate to false as intended --
+    # `| default({})` on .structured itself, not just on the final
+    # attribute, is required for the fallback to actually work.
     _continuity_audit_answered: "{{ _continuity_audit_gemini_result.structured is defined }}"
-    _continuity_audit_verdict: "{{ _continuity_audit_gemini_result.structured.verdict | default('') }}"
-    _continuity_audit_rationale: "{{ _continuity_audit_gemini_result.structured.rationale | default('') }}"
+    _continuity_audit_verdict: "{{ (_continuity_audit_gemini_result.structured | default({})).verdict | default('') }}"
+    _continuity_audit_rationale: "{{ (_continuity_audit_gemini_result.structured | default({})).rationale | default('') }}"
 
 - name: Record this audit call's usage for the pipeline-wide stats summary
   ansible.builtin.set_fact:
