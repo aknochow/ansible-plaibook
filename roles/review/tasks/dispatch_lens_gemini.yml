@@ -27,7 +27,7 @@
 # applies instead. That default was verified live to be ON for at
 # least one thinking-capable model (ansible-gemini's generate.py
 # DOCUMENTATION, thinking_budget). Leaving it unset here would have
-# silently turned max_output_tokens: 8192 into a shared budget for
+# silently turned review_gemini_max_output_tokens into a shared budget for
 # invisible reasoning AND visible findings output, and left thinking
 # tokens completely uncounted. usage_normalized's thinking_tokens
 # field below (from usage.thoughts_token_count) makes that spend
@@ -52,7 +52,7 @@
       'project_id: ' + (gemini_vertex_project if gemini_backend == 'vertex' else 'n/a'),
       'location: ' + (gemini_vertex_location if gemini_backend == 'vertex' else 'n/a'),
       'model: ' + review_gemini_model,
-      'max_output_tokens: 8192',
+      'max_output_tokens: ' + (review_gemini_max_output_tokens | string),
       'thinking_level: ' + review_gemini_thinking_level,
       'response_schema: security_findings_schema',
       '',
@@ -66,7 +66,7 @@
     location: "{{ gemini_vertex_location if gemini_backend == 'vertex' else omit }}"
     api_key: "{{ gemini_api_key if gemini_backend == 'api' else omit }}"
     model: "{{ review_gemini_model }}"
-    max_output_tokens: 8192
+    max_output_tokens: "{{ review_gemini_max_output_tokens }}"
     thinking_level: "{{ review_gemini_thinking_level }}"
     system_instruction: "{{ security_system_prompt }}"
     contents: "Review this diff per your instructions."
@@ -80,7 +80,7 @@
       'project_id: ' + (gemini_vertex_project if gemini_backend == 'vertex' else 'n/a'),
       'location: ' + (gemini_vertex_location if gemini_backend == 'vertex' else 'n/a'),
       'model: ' + review_gemini_model,
-      'max_output_tokens: 8192',
+      'max_output_tokens: ' + (review_gemini_max_output_tokens | string),
       'thinking_level: ' + review_gemini_thinking_level,
       'response_schema: review_findings_schema',
       '',
@@ -94,7 +94,7 @@
     location: "{{ gemini_vertex_location if gemini_backend == 'vertex' else omit }}"
     api_key: "{{ gemini_api_key if gemini_backend == 'api' else omit }}"
     model: "{{ review_gemini_model }}"
-    max_output_tokens: 8192
+    max_output_tokens: "{{ review_gemini_max_output_tokens }}"
     thinking_level: "{{ review_gemini_thinking_level }}"
     system_instruction: "{{ review_system_prompt }}"
     contents: "Review this diff per your instructions."
