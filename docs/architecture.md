@@ -71,7 +71,7 @@ lens's own reasoning.
 ## Multi-model dispatch
 
 Where a stage supports more than one model/provider (Claude, Gemini,
-and, as of the `aknochow.llama` collection, a locally-hosted Qwen
+and, as of the `aknochow.openai` collection, a locally-hosted Qwen
 model), dispatch is explicit per-provider branches guarded by a config
 variable, not a generic provider-abstraction class hierarchy. This was a
 deliberate decision, not an oversight: the actual provider mechanics
