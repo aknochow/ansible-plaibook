@@ -36,9 +36,9 @@
         'verdict': review_prior_summary.verdict,
         'score': review_prior_summary.score_overall | float,
         'summary_path': review_output_base + '/' + review_org_repo + '/' + review_branch + '/' + _latest_prior_review.latest_dir + '/summary.json',
-        'findings_path': review_prior_summary.findings_path,
+        'findings_path': review_prior_summary.findings_path | default(review_output_base + '/' + review_org_repo + '/' + review_branch + '/' + _latest_prior_review.latest_dir + '/findings.md'),
         'summary_run_scoped_path': review_output_base + '/' + review_org_repo + '/' + review_branch + '/' + _latest_prior_review.latest_dir + '/summary.json',
-        'findings_run_scoped_path': review_prior_summary.findings_path,
+        'findings_run_scoped_path': review_prior_summary.findings_path | default(review_output_base + '/' + review_org_repo + '/' + review_branch + '/' + _latest_prior_review.latest_dir + '/findings.md'),
         'cache_hit': true
       }] }}
 
