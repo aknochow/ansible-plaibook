@@ -37,6 +37,29 @@ def to_gemini_schema(schema: dict) -> dict:
     return _strip(copy.deepcopy(schema))
 
 
+def to_gemini_function_declarations(tools: list) -> list:
+    """Translate this pipeline's Claude-shaped tool dicts (name/description/input_schema)
+    into Gemini's function_declarations shape (name/description/parameters), stripping
+    additionalProperties the same way to_gemini_schema() does for response_schema.
+
+    Used by dispatch_verify_turn_attempt_gemini.yml to reuse the SAME
+    explore_tools/trace_reachability_tool/report_verdict tool
+    definitions (roles/review/vars/main.yml) the Claude side already
+    uses, rather than a second Gemini-only copy that could drift.
+    """
+    return [
+        {
+            "name": tool["name"],
+            "description": tool["description"],
+            "parameters": to_gemini_schema(tool["input_schema"]),
+        }
+        for tool in tools
+    ]
+
+
 class FilterModule:
     def filters(self):
-        return {"to_gemini_schema": to_gemini_schema}
+        return {
+            "to_gemini_schema": to_gemini_schema,
+            "to_gemini_function_declarations": to_gemini_function_declarations,
+        }

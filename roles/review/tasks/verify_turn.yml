@@ -27,13 +27,21 @@
       ansible.builtin.set_fact:
         verify_dispatch_valid: false
 
-    - name: "Call Claude with the current conversation, attempt 1, verify turn {{ verify_turn_count }}"
-      ansible.builtin.include_tasks: dispatch_verify_turn_attempt.yml
+    # dispatch_lens_{{ agent_family }}.yml's own idiom (tasks/lenses.yml)
+    # -- see dispatch_verify_turn_attempt_gemini.yml's header for why a
+    # multi-turn tool-calling loop needs its own provider-native file
+    # rather than the single generic aknochow.claude.message call this
+    # replaced. A missing dispatch_verify_turn_attempt_<agent_family>.yml
+    # (e.g. agent_family=qwen) fails loudly here with Ansible's own
+    # "could not find included file" rather than silently falling
+    # through to Claude -- the same guarantee lenses.yml already gives.
+    - name: "Call {{ agent_family }} with the current conversation, attempt 1, verify turn {{ verify_turn_count }}"
+      ansible.builtin.include_tasks: "dispatch_verify_turn_attempt_{{ agent_family }}.yml"
       vars:
         verify_attempt_number: 1
 
     - name: Retry this turn's dispatch if the forced final verdict call didn't happen
-      ansible.builtin.include_tasks: dispatch_verify_turn_attempt.yml
+      ansible.builtin.include_tasks: "dispatch_verify_turn_attempt_{{ agent_family }}.yml"
       loop: "{{ range(2, review_structured_output_max_attempts | int + 1) | list }}"
       loop_control:
         loop_var: verify_attempt_number
@@ -44,7 +52,7 @@
         that:
           - verify_dispatch_valid
         fail_msg: >-
-          Verify agent ({{ review_verify_model }}) never produced a
+          Verify agent ({{ review_verify_model if agent_family == 'claude' else review_verify_gemini_model }}) never produced a
           report_verdict tool call on the forced final turn after
           {{ review_structured_output_max_attempts }} attempt(s), despite
           forced tool_choice. This is a confirmed, probabilistic model-

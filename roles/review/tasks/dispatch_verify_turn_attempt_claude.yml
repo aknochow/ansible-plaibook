@@ -3,6 +3,14 @@
 # Retries don't consume review_verify_max_turns budget (separate resource).
 # Scalar verdict schema tolerates missing/malformed fields; retries only on forced-last-turn no-tool case.
 # Sets verify_turn_result and verify_dispatch_valid.
+#
+# agent_family dispatch, mirrors dispatch_lens_{claude,gemini}.yml's own
+# pattern: verify_turn.yml includes "dispatch_verify_turn_attempt_{{
+# agent_family }}.yml", this is the Claude-native half. See
+# dispatch_verify_turn_attempt_gemini.yml's header for why Gemini's
+# multi-turn tool-calling translation needed its own file rather than
+# a shared abstraction -- Claude and Gemini's tool-calling wire formats
+# are genuinely different, not just cosmetically renamed.
 - name: "Call Claude with the current conversation, verify turn {{ verify_turn_count ~ ', attempt ' ~ (verify_attempt_number | default(1)) }}"
   aknochow.claude.message:
     provider: "{{ claude_provider }}"

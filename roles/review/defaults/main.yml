@@ -216,6 +216,15 @@ review_verify_max_turns: 3
 # diff needs checking, and an N-findings x M-turns cost multiplier
 # makes an expensive default too costly to run on every review.
 review_verify_model: "claude-haiku-4-5"
+# Gemini equivalent of review_verify_model above -- same "verify can be
+# cheaper than the lens pass" intent, applied to agent_family=gemini.
+# gemini-3.5-flash rather than review_gemini_model's gemini-3.6-flash:
+# the older/smaller flash tier, mirroring claude-haiku-4-5 being a
+# smaller/cheaper model than the lens dispatch's own claude model.
+# Used by both dispatch_verify_turn_attempt_gemini.yml (the per-turn
+# tool-calling loop) and verify_continuity_audit.yml's Gemini branch
+# (a single-shot call, but still logically part of "verify").
+review_verify_gemini_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_VERIFY_GEMINI_MODEL') | default('gemini-3.5-flash', true) }}"
 
 # Under this pipeline's forced tool_choice + structured-output
 # schemas, a lens model can produce genuinely invalid structured

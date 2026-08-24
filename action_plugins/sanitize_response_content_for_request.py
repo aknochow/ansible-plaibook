@@ -31,7 +31,15 @@ from ansible.plugins.action import ActionBase
 
 _ALLOWED_KEYS_BY_TYPE = {
     "text": frozenset(("type", "text")),
-    "tool_use": frozenset(("type", "id", "name", "input")),
+    # "_gemini_thought_signature" is not a real Anthropic Messages API
+    # field -- it's this pipeline's own internal passthrough (see
+    # filter_plugins/gemini_conversation.py) carrying Gemini's
+    # required thought_signature through the SAME sanitize step
+    # Claude's tool_use blocks go through, so it survives round-
+    # tripping across verify turns on agent_family=gemini. Harmless to
+    # Claude: only ever populated when the dispatching provider is
+    # Gemini, and to_gemini_contents() is the only reader.
+    "tool_use": frozenset(("type", "id", "name", "input", "_gemini_thought_signature")),
 }
 
 

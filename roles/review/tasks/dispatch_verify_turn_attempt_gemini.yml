@@ -1,0 +1,124 @@
+---
+# One dispatch attempt for current verify turn (first try or retry), Gemini side.
+#
+# Live-verified against the real Developer API (backend=api,
+# gemini-3.5-flash, 2026-08-24) before writing this file, per this
+# phase's own requirement not to guess at the multi-turn tool-calling
+# wire format:
+#
+#   1. A function_call part comes back with an opaque `thought_signature`
+#      alongside id/name/args. Re-sending the NEXT turn's history with a
+#      function_call part reconstructed from only id/name/args (which is
+#      all aknochow.gemini.generate's own `tool_calls` return value
+#      carries -- see plugins/modules/generate.py's flatten_response())
+#      is REJECTED outright: "400 INVALID_ARGUMENT: Function call is
+#      missing a thought_signature in functionCall parts." Multi-turn
+#      Gemini tool calling is impossible without threading this through.
+#      Confirmed live: identical two-call round trip failed 3/3 attempts
+#      without it, succeeded immediately with it restored.
+#   2. finish_reason is STOP even on a turn that ONLY returned a
+#      function_call (no text) -- unlike Claude's stop_reason, it can't
+#      be used to detect "the model wants to call a tool". stop_reason
+#      below is synthesized from tool_calls presence instead.
+#
+# This is therefore genuinely multi-turn, tool-calling parity with the
+# Claude side, not a single-shot fallback -- see
+# filter_plugins/gemini_conversation.py for the two-way translation
+# this relies on (to_gemini_contents threads thought_signature and
+# recovers function_response's required `name`, which the shared,
+# provider-agnostic dispatch_explore_tool.yml never populates since it
+# was written against Claude's tool_result shape).
+#
+# Sets verify_turn_result in the SAME normalized shape verify_turn.yml
+# already consumes from the Claude side (.tool_calls, .message.content,
+# .message.model, .stop_reason, .usage.*) so verify_turn.yml itself
+# stays provider-agnostic -- only this file and its Claude sibling know
+# their own provider's wire format, matching dispatch_lens_{claude,
+# gemini}.yml's own normalized-fields precedent.
+#
+# No retry-on-malformed-structured-output distinction from the Claude
+# side needed here: verify_dispatch_valid's "forced last turn produced
+# no report_verdict call" check is provider-agnostic once tool_calls is
+# normalized, so it's computed identically below.
+
+- name: "Gemini: translate the current conversation into contents[]"
+  ansible.builtin.set_fact:
+    _verify_gemini_contents: "{{ verify_messages | to_gemini_contents }}"
+
+- name: "Gemini: build this turn's tool_config"
+  ansible.builtin.set_fact:
+    _verify_gemini_tool_config: >-
+      {{ {'function_calling_config': {'mode': 'ANY', 'allowed_function_names': ['report_verdict']}} if verify_last_turn
+         else ({'function_calling_config': {'mode': 'ANY', 'allowed_function_names': ['trace_reachability']}}
+               if (verify_first_turn and verify_is_reachability_claim) else omit) }}
+
+- name: "Call Gemini with the current conversation, verify turn {{ verify_turn_count ~ ', attempt ' ~ (verify_attempt_number | default(1)) }}"
+  aknochow.gemini.generate:
+    backend: "{{ gemini_backend }}"
+    project_id: "{{ gemini_vertex_project if gemini_backend == 'vertex' else omit }}"
+    location: "{{ gemini_vertex_location if gemini_backend == 'vertex' else omit }}"
+    api_key: "{{ gemini_api_key if gemini_backend == 'api' else omit }}"
+    model: "{{ review_verify_gemini_model }}"
+    max_output_tokens: 4096
+    thinking_level: "{{ review_gemini_thinking_level }}"
+    system_instruction: "{{ verify_system_prompt }}"
+    contents: "{{ _verify_gemini_contents }}"
+    tools: >-
+      {{ [{'function_declarations': (explore_tools + [trace_reachability_tool, {
+             'name': 'report_verdict',
+             'description': 'Report your verdict on the single finding you were given.',
+             'input_schema': verify_verdict_schema
+           }]) | to_gemini_function_declarations }] }}
+    tool_config: "{{ _verify_gemini_tool_config }}"
+  register: _verify_gemini_raw
+
+- name: "Gemini: extract this turn's response candidate parts"
+  ansible.builtin.set_fact:
+    _verify_gemini_parts: >-
+      {{ (_verify_gemini_raw.response.candidates[0].content.parts | default([]))
+         if (_verify_gemini_raw.response.candidates | default([]) | length > 0) else [] }}
+
+- name: "Gemini: normalize this turn's result into the shared verify_turn_result shape"
+  ansible.builtin.set_fact:
+    verify_turn_result:
+      message:
+        content: "{{ _verify_gemini_parts | gemini_parts_to_message_content }}"
+        model: "{{ review_verify_gemini_model }}"
+      tool_calls: "{{ _verify_gemini_parts | gemini_parts_to_tool_calls }}"
+      # Synthesized, not read from Gemini's own finish_reason -- see
+      # this file's header comment: finish_reason is STOP even on a
+      # tool-call-only turn, unlike Claude's stop_reason=='tool_use'.
+      stop_reason: >-
+        {{ 'tool_use' if (_verify_gemini_parts | gemini_parts_to_tool_calls | length > 0) else 'end_turn' }}
+      usage:
+        input_tokens: "{{ _verify_gemini_raw.usage.prompt_token_count | default(0) | int }}"
+        output_tokens: "{{ _verify_gemini_raw.usage.candidates_token_count | default(0) | int }}"
+        cache_creation_input_tokens: 0
+        cache_read_input_tokens: 0
+
+- name: Record this attempt's usage for the pipeline-wide stats summary
+  ansible.builtin.set_fact:
+    pipeline_agent_calls: >-
+      {{ pipeline_agent_calls + [{
+           'target': review_org_repo + '#' + review_number, 'lens': 'verify',
+           'model': review_verify_gemini_model,
+           'usage': {
+             'input_tokens': _verify_gemini_raw.usage.prompt_token_count | default(0) | int,
+             'output_tokens': _verify_gemini_raw.usage.candidates_token_count | default(0) | int,
+             'cache_write_tokens': 0,
+             'cache_read_tokens': 0,
+             'thinking_tokens': _verify_gemini_raw.usage.thoughts_token_count | default(0) | int,
+             'total_tokens': (_verify_gemini_raw.usage.prompt_token_count | default(0) | int)
+               + (_verify_gemini_raw.usage.candidates_token_count | default(0) | int)
+               + (_verify_gemini_raw.usage.thoughts_token_count | default(0) | int)
+           },
+           'attempt': verify_attempt_number | default(1)
+         }] }}
+
+- name: Check whether this attempt called report_verdict
+  ansible.builtin.set_fact:
+    _verify_attempt_report_calls: "{{ verify_turn_result.tool_calls | selectattr('name', 'equalto', 'report_verdict') | list }}"
+
+- name: Mark this attempt valid unless it's the forced last turn with no tool call at all
+  ansible.builtin.set_fact:
+    verify_dispatch_valid: "{{ (not verify_last_turn) or (_verify_attempt_report_calls | length > 0) }}"

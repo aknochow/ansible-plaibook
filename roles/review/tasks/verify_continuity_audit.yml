@@ -77,7 +77,7 @@
     project_id: "{{ gemini_vertex_project if gemini_backend == 'vertex' else omit }}"
     location: "{{ gemini_vertex_location if gemini_backend == 'vertex' else omit }}"
     api_key: "{{ gemini_api_key if gemini_backend == 'api' else omit }}"
-    model: "{{ review_gemini_model }}"
+    model: "{{ review_verify_gemini_model }}"
     max_output_tokens: 1024
     thinking_level: "{{ review_gemini_thinking_level }}"
     system_instruction: "{{ _continuity_audit_prompt }}"
@@ -88,7 +88,7 @@
 - name: "Gemini: normalize the continuity audit result"
   when: agent_family == 'gemini'
   ansible.builtin.set_fact:
-    _continuity_audit_resolved_model: "{{ review_gemini_model }}"
+    _continuity_audit_resolved_model: "{{ review_verify_gemini_model }}"
     _continuity_audit_usage_normalized:
       input_tokens: "{{ _continuity_audit_gemini_result.usage.prompt_token_count | default(0) | int }}"
       output_tokens: "{{ _continuity_audit_gemini_result.usage.candidates_token_count | default(0) | int }}"
