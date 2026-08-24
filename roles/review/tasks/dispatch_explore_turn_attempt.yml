@@ -42,6 +42,7 @@
              'output_tokens': explore_turn_result.usage.output_tokens | default(0) | int,
              'cache_write_tokens': explore_turn_result.usage.cache_creation_input_tokens | default(0) | int,
              'cache_read_tokens': explore_turn_result.usage.cache_read_input_tokens | default(0) | int,
+             'thinking_tokens': 0,
              'total_tokens': (explore_turn_result.usage.input_tokens | default(0) | int)
                + (explore_turn_result.usage.output_tokens | default(0) | int)
                + (explore_turn_result.usage.cache_creation_input_tokens | default(0) | int)

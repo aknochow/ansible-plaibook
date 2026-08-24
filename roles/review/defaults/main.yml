@@ -73,6 +73,28 @@ gemini_api_key: "{{ lookup('ansible.builtin.env', 'GEMINI_API_KEY') | default(lo
 # ansible-gemini's .agents/rules/development.md).
 review_gemini_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_GEMINI_MODEL') | default('gemini-3.7-flash', true) }}"
 
+# Explicit, not inherited-by-omission: aknochow.gemini's own thinking_budget
+# default is 0, but on backend=api that means "no thinking_config sent at
+# all" (the Developer API rejects an explicit 0), which lets the model's
+# own default thinking apply instead -- verified live to be ON for at
+# least one thinking-capable model (see ansible-gemini's generate.py
+# DOCUMENTATION for thinking_budget, and its 2026-08-24 commit fixing the
+# vertex/api split). Leaving this unset here would silently reproduce
+# that exact ambiguity for every lens dispatch: max_output_tokens would
+# stop being a visible-output-only budget, and thinking tokens would
+# burn part of it without ever being returned or counted.
+#
+# minimal is the deliberate default, not a guess: report_findings is a
+# schema-constrained single-shot structured-output call (Security/Review
+# lenses, continuity audit) with a well-specified rubric already spelled
+# out in the system prompt -- exactly the shape thinking-capable models
+# need the least extra deliberation for, and every extra thinking token
+# is both invisible cost and truncation risk against a fixed
+# max_output_tokens budget on a large diff. Override per run (e.g. a
+# future benchmark comparison sweeping this value against finding
+# quality/recall) via -e review_gemini_thinking_level=<level>.
+review_gemini_thinking_level: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_GEMINI_THINKING_LEVEL') | default('minimal', true) }}"
+
 review_output_base: "{{ lookup('env', 'HOME') }}/reviews"
 
 # Kill switch for briefing.yml's same-commit fast path: set false to
