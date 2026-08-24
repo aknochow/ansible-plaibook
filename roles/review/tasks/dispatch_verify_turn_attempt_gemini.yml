@@ -47,10 +47,15 @@
 
 - name: "Gemini: build this turn's tool_config"
   ansible.builtin.set_fact:
+    # `omit` is a sentinel for module parameters, not a settable
+    # set_fact value -- a fact that resolves to it produces "No
+    # key/value pairs provided" (confirmed live, 2026-08-24). Use `{}`
+    # for "no forced tool" instead, and let the module call below turn
+    # that into a real omit via `| default(omit, true)`.
     _verify_gemini_tool_config: >-
       {{ {'function_calling_config': {'mode': 'ANY', 'allowed_function_names': ['report_verdict']}} if verify_last_turn
          else ({'function_calling_config': {'mode': 'ANY', 'allowed_function_names': ['trace_reachability']}}
-               if (verify_first_turn and verify_is_reachability_claim) else omit) }}
+               if (verify_first_turn and verify_is_reachability_claim) else {}) }}
 
 - name: "Call Gemini with the current conversation, verify turn {{ verify_turn_count ~ ', attempt ' ~ (verify_attempt_number | default(1)) }}"
   aknochow.gemini.generate:
@@ -69,7 +74,7 @@
              'description': 'Report your verdict on the single finding you were given.',
              'input_schema': verify_verdict_schema
            }]) | to_gemini_function_declarations }] }}
-    tool_config: "{{ _verify_gemini_tool_config }}"
+    tool_config: "{{ _verify_gemini_tool_config | default(omit, true) }}"
   register: _verify_gemini_raw
 
 - name: "Gemini: extract this turn's response candidate parts"

@@ -14,6 +14,17 @@ live 2026-08-24 against gemini-3.7-flash, not a guessed incompatibility.
 This filter recursively drops every additionalProperties key so the
 SAME schema source (no forked Gemini-only copy to drift out of sync)
 works for both providers' dispatch files.
+
+It also rewrites a JSON-Schema nullable-union `type: [X, "null"]` (this
+repo's verify_verdict_schema uses this for `continues_finding_id`,
+which is a real string when the agent claims continuity and legitimately
+null otherwise) into Gemini's OpenAPI-subset form `type: X, nullable:
+true`. Confirmed live (2026-08-24, gemini-3.5-flash): sending the raw
+`['string', 'null']` list is rejected by the SDK's own pydantic
+validation before any request is made ("Input should be
+'TYPE_UNSPECIFIED', 'STRING', ... [type=enum, input_value=['string',
+'null']]") -- Gemini's schema has no concept of a type union, only a
+single scalar type plus a separate `nullable` flag.
 """
 from __future__ import annotations
 
@@ -22,11 +33,23 @@ import copy
 
 def _strip(node):
     if isinstance(node, dict):
-        return {
-            key: _strip(value)
-            for key, value in node.items()
-            if key != "additionalProperties"
-        }
+        result = {}
+        for key, value in node.items():
+            if key == "additionalProperties":
+                continue
+            if key == "type" and isinstance(value, list):
+                non_null_types = [t for t in value if t != "null"]
+                if "null" in value and len(non_null_types) == 1:
+                    result["type"] = non_null_types[0]
+                    result["nullable"] = True
+                    continue
+                # Multiple non-null types in a union isn't representable
+                # in Gemini's schema either; leave as-is so the API's own
+                # error surfaces rather than guessing at a collapse.
+                result[key] = _strip(value)
+                continue
+            result[key] = _strip(value)
+        return result
     if isinstance(node, list):
         return [_strip(item) for item in node]
     return node
