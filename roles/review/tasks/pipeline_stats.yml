@@ -13,6 +13,7 @@
     pipeline_total_output_tokens: "{{ _pipeline_cost_result.total_output_tokens }}"
     pipeline_total_cache_write_tokens: "{{ _pipeline_cost_result.total_cache_write_tokens }}"
     pipeline_total_cache_read_tokens: "{{ _pipeline_cost_result.total_cache_read_tokens }}"
+    pipeline_total_thinking_tokens: "{{ _pipeline_cost_result.total_thinking_tokens }}"
     pipeline_unpriced_models: "{{ _pipeline_cost_result.unpriced_models }}"
     pipeline_call_costs: "{{ _pipeline_cost_result.call_costs }}"
 
@@ -37,6 +38,7 @@
         'Total output tokens: ' + (pipeline_total_output_tokens | int | string),
         'Total cache-write tokens: ' + (pipeline_total_cache_write_tokens | int | string),
         'Total cache-read tokens: ' + (pipeline_total_cache_read_tokens | int | string),
+        'Total thinking tokens: ' + (pipeline_total_thinking_tokens | int | string),
         'Estimated cost: $' + ('%.4f' | format(pipeline_call_costs | map('float') | sum)),
       ] + ([
         'WARNING: no pricing data on file for: ' + (pipeline_unpriced_models | join(', ')) + ' — those calls are excluded from the cost estimate'

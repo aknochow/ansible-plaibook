@@ -144,8 +144,31 @@ def test_empty_calls_list_returns_zeroed_totals():
     assert result["total_output_tokens"] == 0
     assert result["total_cache_write_tokens"] == 0
     assert result["total_cache_read_tokens"] == 0
+    assert result["total_thinking_tokens"] == 0
     assert result["unpriced_models"] == []
     assert result["call_costs"] == []
+
+
+# thinking_tokens is lenient like the per-call cost formula, NOT strict
+# like the other four totals -- a Gemini call sets a real value
+# (usage.thoughts_token_count), a Claude call sets a literal 0, but an
+# older/unrelated pipeline_agent_calls entry with no thinking_tokens key
+# at all must not crash the whole stats summary (see compute_pipeline_cost's
+# own comment on this deliberate asymmetry).
+def test_thinking_tokens_totals_leniently_and_is_never_priced():
+    calls = [
+        {"model": "gemini-3.5-flash", "usage": {**_EMPTY_USAGE, "thinking_tokens": 42}},
+        {"model": "claude-haiku-4-5", "usage": {**_EMPTY_USAGE, "thinking_tokens": 0}},
+        {"model": "claude-haiku-4-5", "usage": _EMPTY_USAGE},  # no thinking_tokens key at all
+    ]
+    result = compute_pipeline_cost(calls, PRICING_TABLE)
+    assert result["total_thinking_tokens"] == 42
+    # No rate for thinking tokens in PRICING_TABLE (or gemini-3.5-flash at
+    # all) -- must not silently price them at $0 vs. genuinely unpriced;
+    # gemini-3.5-flash is correctly flagged unpriced, and even if it had
+    # rates, thinking_tokens has no _USAGE_RATE_PAIRS entry to price against.
+    assert "gemini-3.5-flash" in result["unpriced_models"]
+    assert result["call_costs"][0] == 0.0
 
 
 # --- ActionModule wiring smoke test (see filter_self_refuted_findings's

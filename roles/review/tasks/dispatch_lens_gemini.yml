@@ -19,6 +19,21 @@
 # for, so lenses.yml marks security_lens_valid/review_lens_valid true
 # directly for agent_family != claude.
 #
+# thinking_level is set explicitly to review_gemini_thinking_level
+# (default "minimal") on every call below -- NOT left to inherit
+# aknochow.gemini's own thinking_budget=0 default, which on
+# backend=api means no thinking_config is sent at all (the Developer
+# API rejects an explicit 0) and the model's own default thinking
+# applies instead. That default was verified live to be ON for at
+# least one thinking-capable model (ansible-gemini's generate.py
+# DOCUMENTATION, thinking_budget). Leaving it unset here would have
+# silently turned max_output_tokens: 8192 into a shared budget for
+# invisible reasoning AND visible findings output, and left thinking
+# tokens completely uncounted. usage_normalized's thinking_tokens
+# field below (from usage.thoughts_token_count) makes that spend
+# visible even when it's small, rather than folding it invisibly into
+# output_tokens or dropping it.
+#
 # Prompt caching: Claude's dispatch sets cache_system: true and reports
 # real cache_creation/cache_read tokens. Gemini's API has implicit
 # caching with NO equivalent request-side parameter -- there is nothing
@@ -38,6 +53,7 @@
       'location: ' + (gemini_vertex_location if gemini_backend == 'vertex' else 'n/a'),
       'model: ' + review_gemini_model,
       'max_output_tokens: 8192',
+      'thinking_level: ' + review_gemini_thinking_level,
       'response_schema: security_findings_schema',
       '',
       '--- system prompt ---',
@@ -51,6 +67,7 @@
     api_key: "{{ gemini_api_key if gemini_backend == 'api' else omit }}"
     model: "{{ review_gemini_model }}"
     max_output_tokens: 8192
+    thinking_level: "{{ review_gemini_thinking_level }}"
     system_instruction: "{{ security_system_prompt }}"
     contents: "Review this diff per your instructions."
     response_schema: "{{ security_findings_schema | to_gemini_schema }}"
@@ -64,6 +81,7 @@
       'location: ' + (gemini_vertex_location if gemini_backend == 'vertex' else 'n/a'),
       'model: ' + review_gemini_model,
       'max_output_tokens: 8192',
+      'thinking_level: ' + review_gemini_thinking_level,
       'response_schema: review_findings_schema',
       '',
       '--- system prompt ---',
@@ -77,6 +95,7 @@
     api_key: "{{ gemini_api_key if gemini_backend == 'api' else omit }}"
     model: "{{ review_gemini_model }}"
     max_output_tokens: 8192
+    thinking_level: "{{ review_gemini_thinking_level }}"
     system_instruction: "{{ review_system_prompt }}"
     contents: "Review this diff per your instructions."
     response_schema: "{{ review_findings_schema | to_gemini_schema }}"
@@ -112,9 +131,11 @@
         output_tokens: "{{ _gemini_security_raw.usage.candidates_token_count | default(0) | int }}"
         cache_write_tokens: 0
         cache_read_tokens: 0
+        thinking_tokens: "{{ _gemini_security_raw.usage.thoughts_token_count | default(0) | int }}"
         total_tokens: >-
           {{ (_gemini_security_raw.usage.prompt_token_count | default(0) | int)
-             + (_gemini_security_raw.usage.candidates_token_count | default(0) | int) }}
+             + (_gemini_security_raw.usage.candidates_token_count | default(0) | int)
+             + (_gemini_security_raw.usage.thoughts_token_count | default(0) | int) }}
       cached_content_unpriced: "{{ _gemini_security_raw.usage.cached_content_token_count | default(0) | int }}"
 
 - name: "Gemini: build the normalized Review result"
@@ -129,7 +150,9 @@
         output_tokens: "{{ _gemini_review_raw.usage.candidates_token_count | default(0) | int }}"
         cache_write_tokens: 0
         cache_read_tokens: 0
+        thinking_tokens: "{{ _gemini_review_raw.usage.thoughts_token_count | default(0) | int }}"
         total_tokens: >-
           {{ (_gemini_review_raw.usage.prompt_token_count | default(0) | int)
-             + (_gemini_review_raw.usage.candidates_token_count | default(0) | int) }}
+             + (_gemini_review_raw.usage.candidates_token_count | default(0) | int)
+             + (_gemini_review_raw.usage.thoughts_token_count | default(0) | int) }}
       cached_content_unpriced: "{{ _gemini_review_raw.usage.cached_content_token_count | default(0) | int }}"

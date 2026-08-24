@@ -68,6 +68,7 @@
                  'output_tokens': _lens_retry_raw_result.usage.output_tokens | default(0) | int,
                  'cache_write_tokens': _lens_retry_raw_result.usage.cache_creation_input_tokens | default(0) | int,
                  'cache_read_tokens': _lens_retry_raw_result.usage.cache_read_input_tokens | default(0) | int,
+                 'thinking_tokens': 0,
                  'total_tokens': (_lens_retry_raw_result.usage.input_tokens | default(0) | int)
                    + (_lens_retry_raw_result.usage.output_tokens | default(0) | int)
                    + (_lens_retry_raw_result.usage.cache_creation_input_tokens | default(0) | int)

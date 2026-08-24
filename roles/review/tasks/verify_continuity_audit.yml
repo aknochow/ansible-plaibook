@@ -52,6 +52,7 @@
       output_tokens: "{{ _continuity_audit_claude_result.usage.output_tokens | default(0) | int }}"
       cache_write_tokens: "{{ _continuity_audit_claude_result.usage.cache_creation_input_tokens | default(0) | int }}"
       cache_read_tokens: "{{ _continuity_audit_claude_result.usage.cache_read_input_tokens | default(0) | int }}"
+      thinking_tokens: 0
       total_tokens: >-
         {{ (_continuity_audit_claude_result.usage.input_tokens | default(0) | int)
            + (_continuity_audit_claude_result.usage.output_tokens | default(0) | int)
@@ -78,6 +79,7 @@
     api_key: "{{ gemini_api_key if gemini_backend == 'api' else omit }}"
     model: "{{ review_gemini_model }}"
     max_output_tokens: 1024
+    thinking_level: "{{ review_gemini_thinking_level }}"
     system_instruction: "{{ _continuity_audit_prompt }}"
     contents: "Assess the continuity claim described in your system prompt."
     response_schema: "{{ continuity_audit_schema | to_gemini_schema }}"
@@ -92,9 +94,11 @@
       output_tokens: "{{ _continuity_audit_gemini_result.usage.candidates_token_count | default(0) | int }}"
       cache_write_tokens: 0
       cache_read_tokens: 0
+      thinking_tokens: "{{ _continuity_audit_gemini_result.usage.thoughts_token_count | default(0) | int }}"
       total_tokens: >-
         {{ (_continuity_audit_gemini_result.usage.prompt_token_count | default(0) | int)
-           + (_continuity_audit_gemini_result.usage.candidates_token_count | default(0) | int) }}
+           + (_continuity_audit_gemini_result.usage.candidates_token_count | default(0) | int)
+           + (_continuity_audit_gemini_result.usage.thoughts_token_count | default(0) | int) }}
     # (Gemini dogfooding finding, live run 2026-08-24): accessing
     # .structured.verdict directly raised AnsibleUndefinedVariable
     # whenever .structured itself was absent (the SDK only sets the
