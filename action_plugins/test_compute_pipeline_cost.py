@@ -20,7 +20,7 @@ from compute_pipeline_cost import (
     compute_pipeline_cost,
 )
 
-_EMPTY_USAGE = {"input_tokens": 0, "output_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+_EMPTY_USAGE = {"input_tokens": 0, "output_tokens": 0, "cache_write_tokens": 0, "cache_read_tokens": 0}
 
 PRICING_TABLE = {
     "claude-haiku-4-5": {
@@ -36,17 +36,17 @@ PRICING_TABLE = {
 WELL_FORMED_CALLS = [
     {
         "target": "org/repo#1", "lens": "security", "model": "claude-haiku-4-5-20251001",
-        "usage": {"input_tokens": 1000, "output_tokens": 200, "cache_creation_input_tokens": 50, "cache_read_input_tokens": 500},
+        "usage": {"input_tokens": 1000, "output_tokens": 200, "cache_write_tokens": 50, "cache_read_tokens": 500},
     },
     {
         "target": "org/repo#1", "lens": "review", "model": "claude-haiku-4-5-20251001",
-        "usage": {"input_tokens": 2000, "output_tokens": 300, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 1000},
+        "usage": {"input_tokens": 2000, "output_tokens": 300, "cache_write_tokens": 0, "cache_read_tokens": 1000},
     },
     # A model with no pricing table entry -- must be flagged as
     # unpriced, and its cost excluded (rates default to {}, so 0).
     {
         "target": "org/repo#2", "lens": "explore", "model": "claude-opus-unknown-20260101",
-        "usage": {"input_tokens": 500, "output_tokens": 100, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+        "usage": {"input_tokens": 500, "output_tokens": 100, "cache_write_tokens": 0, "cache_read_tokens": 0},
     },
 ]
 
@@ -133,7 +133,7 @@ def test_totals_raise_on_missing_usage_dict_entirely():
 
 
 def test_missing_model_key_raises_instead_of_keyerror():
-    calls = [{"usage": {"input_tokens": 10, "output_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}]
+    calls = [{"usage": {"input_tokens": 10, "output_tokens": 0, "cache_write_tokens": 0, "cache_read_tokens": 0}}]
     with pytest.raises(MissingModelError, match="no 'model' key"):
         compute_pipeline_cost(calls, PRICING_TABLE)
 

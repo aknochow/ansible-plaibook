@@ -6,6 +6,12 @@
 # free-text fields consistently. The PRIMARY <finding_data> block (the
 # finding actually under review) stays unbounded, matching established
 # precedent elsewhere in this pipeline.
+#
+# agent_family dispatch, mirrors lenses.yml's own pattern for this one
+# single-shot call: Claude uses forced tool_choice, Gemini uses
+# response_schema directly. Both branches set _continuity_audit_resolved_model/
+# _continuity_audit_usage_normalized/_continuity_audit_verdict/_continuity_audit_rationale
+# in the same normalized shape before the shared "build audit_result" task below.
 
 - name: Render the continuity audit prompt
   ansible.builtin.set_fact:
@@ -15,7 +21,8 @@
     claimed_prior: "{{ _continuity_claim_result.claimed_prior_finding }}"
     claiming_rationale: "{{ verify_result_continues_finding_id_rationale }}"
 
-- name: Call Claude to independently audit the continuity claim
+- name: "Claude: call Claude to independently audit the continuity claim"
+  when: agent_family == 'claude'
   aknochow.claude.message:
     provider: "{{ claude_provider }}"
     region: "{{ claude_vertex_region if claude_provider == 'vertex' else omit }}"
@@ -34,30 +41,87 @@
         description: Report whether a continuity claim between two findings is plausible.
         input_schema: "{{ continuity_audit_schema }}"
     tool_choice: { type: "tool", name: "report_continuity_audit" }
-  register: _continuity_audit_call_result
+  register: _continuity_audit_claude_result
+
+- name: "Claude: normalize the continuity audit result"
+  when: agent_family == 'claude'
+  ansible.builtin.set_fact:
+    _continuity_audit_resolved_model: "{{ _continuity_audit_claude_result.message.model }}"
+    _continuity_audit_usage_normalized:
+      input_tokens: "{{ _continuity_audit_claude_result.usage.input_tokens | default(0) | int }}"
+      output_tokens: "{{ _continuity_audit_claude_result.usage.output_tokens | default(0) | int }}"
+      cache_write_tokens: "{{ _continuity_audit_claude_result.usage.cache_creation_input_tokens | default(0) | int }}"
+      cache_read_tokens: "{{ _continuity_audit_claude_result.usage.cache_read_input_tokens | default(0) | int }}"
+      total_tokens: >-
+        {{ (_continuity_audit_claude_result.usage.input_tokens | default(0) | int)
+           + (_continuity_audit_claude_result.usage.output_tokens | default(0) | int)
+           + (_continuity_audit_claude_result.usage.cache_creation_input_tokens | default(0) | int)
+           + (_continuity_audit_claude_result.usage.cache_read_input_tokens | default(0) | int) }}
+    _continuity_audit_tool_calls: >-
+      {{ _continuity_audit_claude_result.tool_calls | selectattr('name', 'equalto', 'report_continuity_audit') | list }}
+
+- name: "Claude: record whether the model actually answered"
+  when: agent_family == 'claude'
+  ansible.builtin.set_fact:
+    _continuity_audit_answered: "{{ _continuity_audit_tool_calls | length > 0 }}"
+    _continuity_audit_verdict: "{{ _continuity_audit_tool_calls[0].input.verdict | default('implausible') if _continuity_audit_tool_calls | length > 0 else '' }}"
+    _continuity_audit_rationale: >-
+      {{ _continuity_audit_tool_calls[0].input.rationale | default('Continuity audit agent did not populate a rationale.')
+         if _continuity_audit_tool_calls | length > 0 else '' }}
+
+- name: "Gemini: call Gemini to independently audit the continuity claim"
+  when: agent_family == 'gemini'
+  aknochow.gemini.generate:
+    backend: "{{ gemini_backend }}"
+    project_id: "{{ gemini_vertex_project if gemini_backend == 'vertex' else omit }}"
+    location: "{{ gemini_vertex_location if gemini_backend == 'vertex' else omit }}"
+    api_key: "{{ gemini_api_key if gemini_backend == 'api' else omit }}"
+    model: "{{ review_gemini_model }}"
+    max_output_tokens: 1024
+    system_instruction: "{{ _continuity_audit_prompt }}"
+    contents: "Assess the continuity claim described in your system prompt."
+    response_schema: "{{ continuity_audit_schema }}"
+  register: _continuity_audit_gemini_result
+
+- name: "Gemini: normalize the continuity audit result"
+  when: agent_family == 'gemini'
+  ansible.builtin.set_fact:
+    _continuity_audit_resolved_model: "{{ review_gemini_model }}"
+    _continuity_audit_usage_normalized:
+      input_tokens: "{{ _continuity_audit_gemini_result.usage.prompt_token_count | default(0) | int }}"
+      output_tokens: "{{ _continuity_audit_gemini_result.usage.candidates_token_count | default(0) | int }}"
+      cache_write_tokens: 0
+      cache_read_tokens: 0
+      total_tokens: >-
+        {{ (_continuity_audit_gemini_result.usage.prompt_token_count | default(0) | int)
+           + (_continuity_audit_gemini_result.usage.candidates_token_count | default(0) | int) }}
+    _continuity_audit_answered: "{{ _continuity_audit_gemini_result.structured is defined }}"
+    _continuity_audit_verdict: "{{ _continuity_audit_gemini_result.structured.verdict | default('') }}"
+    _continuity_audit_rationale: "{{ _continuity_audit_gemini_result.structured.rationale | default('') }}"
 
 - name: Record this audit call's usage for the pipeline-wide stats summary
   ansible.builtin.set_fact:
     pipeline_agent_calls: >-
       {{ pipeline_agent_calls + [{
            'target': review_org_repo + '#' + review_number, 'lens': 'verify-continuity-audit',
-           'model': _continuity_audit_call_result.message.model, 'usage': _continuity_audit_call_result.usage
+           'model': _continuity_audit_resolved_model, 'usage': _continuity_audit_usage_normalized
          }] }}
-
-- name: Extract the audit verdict
-  ansible.builtin.set_fact:
-    _continuity_audit_calls: "{{ _continuity_audit_call_result.tool_calls | selectattr('name', 'equalto', 'report_continuity_audit') | list }}"
 
 # Same "schema required isn't a compliance guarantee" defensive
 # posture as every other report_* tool call in this pass -- neither
 # field here is ever legitimately null (verdict is a required enum,
-# rationale a required string), so ordinary `| default(...)` extraction
-# is safe -- no risk of the continues_finding_id-style stringified-None
-# bug, since nothing here is nullable by design.
-- name: Build this finding's audit_result dict for merge_verify_result (empty if the model never called the tool)
+# rationale a required string) once the model actually answered, so
+# ordinary `| default(...)` extraction is safe -- no risk of the
+# continues_finding_id-style stringified-None bug, since nothing here
+# is nullable by design. Preserves the original behavior: an empty
+# dict (not a fabricated verdict) when the model never answered at all
+# (Claude: never called the tool; Gemini: no .structured despite
+# response_schema), so merge_verify_result's own "no audit result"
+# handling still applies unchanged.
+- name: Build this finding's audit_result dict for merge_verify_result (empty if the model never answered)
   ansible.builtin.set_fact:
     verify_result_audit_result: >-
       {{ {
-        'verdict': _continuity_audit_calls[0].input.verdict | default('implausible'),
-        'rationale': _continuity_audit_calls[0].input.rationale | default('Continuity audit agent did not populate a rationale.')
-      } if _continuity_audit_calls | length > 0 else {} }}
+        'verdict': _continuity_audit_verdict | default('implausible'),
+        'rationale': _continuity_audit_rationale | default('Continuity audit agent did not populate a rationale.')
+      } if (_continuity_audit_answered | default(false) | bool) else {} }}
