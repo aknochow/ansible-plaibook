@@ -12,12 +12,6 @@ root, dispatching on `review_type` (`pr` | `branch` | `commit`).
 section is not optional context, it's how you avoid grepping fragile
 stdout.
 
-(A second playbook, `bug_pipeline.yml` — Jira-driven autonomous bug
-fix — is deliberately parked on the `wip/bug-fix-pipeline` branch, not
-on `main`, pending a known fix and the review pipeline's own
-foundation work landing first. See
-handoff.ansible-plaibook-bug-fix-pipeline-deferred.yaml.)
-
 ## `review.yml` — one playbook, `review_type` selects the mode
 
 ### `review_type: pr` (default) — review a GitHub PR or GitLab MR

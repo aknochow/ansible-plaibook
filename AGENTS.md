@@ -7,7 +7,7 @@ output, check these first:
 
 - **[docs/](docs/)**: OKF-compliant docs (`flydocs build`/`flydocs lint` to render/validate)
 - **[docs/index.md](docs/index.md)**: navigation index
-- **[.claude/skills/ansible-plaibook-review/SKILL.md](.claude/skills/ansible-plaibook-review/SKILL.md)**: how to run `review.yml`/`bug_pipeline.yml` and read `~/.cache/ansible-plaibook/last_run.json` correctly
+- **[.claude/skills/ansible-plaibook-review/SKILL.md](.claude/skills/ansible-plaibook-review/SKILL.md)**: how to run `review.yml` and read `~/.cache/ansible-plaibook/last_run.json` correctly
 - **[README.md](README.md)**: project overview (separate from `docs/` for now, not flydocs-generated)
 
 ## What This Is
@@ -15,9 +15,8 @@ output, check these first:
 ansible-plaibook is an **Ansible-native AI code-review and bug-fix
 pipeline**, deterministic Ansible orchestration around
 `aknochow.claude`/`aknochow.gemini`/`aknochow.openai` provider
-modules, not an interactive agent loop. Two entry points:
-`review.yml` (PR/MR/branch/commit review, `-e review_type=...`) and
-`bug_pipeline.yml` (Jira-driven autonomous fix, GitHub only).
+modules, not an interactive agent loop. **One entry point:**
+`review.yml` (PR/MR/branch/commit review, `-e review_type=...`).
 
 ## Security Context: Critical
 
@@ -85,16 +84,14 @@ re-deriving a claim from scratch.
   `detect_diff_domains.py`, injecting
   `roles/review/templates/domain_steering/*.md.j2` blocks. Add new
   domain guidance there, not into the universal lens prompts.
-- `bug_pipeline.yml` opens GitHub PRs only; GitLab MR creation isn't
-  implemented for that entry point yet (unlike `review.yml`'s own
-  `post_review_comment.py`, which handles both).
+- `review.yml`'s `post_review_comment.py` posts results to both GitHub
+  and GitLab.
 
 ## Key Files
 
 | File | Purpose |
 |---|---|
 | `review.yml` | Entry point: PR/MR/branch/commit review |
-| `bug_pipeline.yml` | Entry point: Jira-driven autonomous bug fix |
 | `roles/review/tasks/merge.yml` | Dedup, self-refuted-finding filter, score computation |
 | `roles/review/tasks/verify.yml` / `verify_finding.yml` / `verify_turn.yml` | Independent adversarial re-check of each Critical/Major finding |
 | `action_plugins/` | Real Python for anything beyond trivial Jinja |
