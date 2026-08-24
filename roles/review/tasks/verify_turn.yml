@@ -55,9 +55,14 @@
           issue, before assuming this is a one-off.
       when: verify_last_turn
 
+    - name: Strip response-only fields before round-tripping this turn's content into the next request
+      sanitize_response_content_for_request:
+        content: "{{ verify_turn_result.message.content }}"
+      register: _verify_turn_sanitized_content
+
     - name: Append the assistant's turn to the conversation
       ansible.builtin.set_fact:
-        verify_messages: "{{ verify_messages + [{'role': 'assistant', 'content': verify_turn_result.message.content}] }}"
+        verify_messages: "{{ verify_messages + [{'role': 'assistant', 'content': _verify_turn_sanitized_content.content}] }}"
 
     - name: Check whether the agent called report_verdict this turn
       ansible.builtin.set_fact:

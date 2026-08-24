@@ -46,9 +46,14 @@
           checking whether this model has a known elevated rate of this
           issue, before assuming this is a one-off.
 
+    - name: Strip response-only fields before round-tripping this turn's content into the next request
+      sanitize_response_content_for_request:
+        content: "{{ explore_turn_result.message.content }}"
+      register: _explore_turn_sanitized_content
+
     - name: Append the assistant's turn to the conversation
       ansible.builtin.set_fact:
-        explore_messages: "{{ explore_messages + [{'role': 'assistant', 'content': explore_turn_result.message.content}] }}"
+        explore_messages: "{{ explore_messages + [{'role': 'assistant', 'content': _explore_turn_sanitized_content.content}] }}"
 
     - name: Check whether the agent called report_findings this turn
       ansible.builtin.set_fact:
