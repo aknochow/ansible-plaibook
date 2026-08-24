@@ -53,7 +53,7 @@
     max_output_tokens: 8192
     system_instruction: "{{ security_system_prompt }}"
     contents: "Review this diff per your instructions."
-    response_schema: "{{ security_findings_schema }}"
+    response_schema: "{{ security_findings_schema | to_gemini_schema }}"
   register: _gemini_security_raw
 
 - name: "Gemini: show the Review agent's request configuration"
@@ -79,7 +79,7 @@
     max_output_tokens: 8192
     system_instruction: "{{ review_system_prompt }}"
     contents: "Review this diff per your instructions."
-    response_schema: "{{ review_findings_schema }}"
+    response_schema: "{{ review_findings_schema | to_gemini_schema }}"
   register: _gemini_review_raw
 
 - name: "Gemini: fail loudly if the Security agent produced no structured output"
