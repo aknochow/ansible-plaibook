@@ -28,6 +28,9 @@ requirements this allowlist doesn't attempt to model).
 from __future__ import annotations
 
 from ansible.plugins.action import ActionBase
+from ansible.utils.display import Display
+
+display = Display()
 
 _ALLOWED_KEYS_BY_TYPE = {
     "text": frozenset(("type", "text")),
@@ -41,6 +44,17 @@ def sanitize_response_content_for_request(content: list[dict]) -> list[dict]:
     for block in content:
         allowed_keys = _ALLOWED_KEYS_BY_TYPE.get(block.get("type"))
         if allowed_keys is None:
+            # Passed through unmodified, not guessed at -- but silently, so a
+            # future block type carrying its own response-only fields (the
+            # exact failure mode this plugin exists to prevent) would recur
+            # with no diagnostic signal. Warn instead of failing outright:
+            # the block type may genuinely have no response-only fields to
+            # strip, so refusing to pass it through would be over-eager.
+            display.warning(
+                f"sanitize_response_content_for_request: unknown content block type "
+                f"'{block.get('type')}' passed through unchanged -- if it carries "
+                f"response-only fields, add it to _ALLOWED_KEYS_BY_TYPE"
+            )
             sanitized.append(block)
         else:
             sanitized.append({key: value for key, value in block.items() if key in allowed_keys})
