@@ -32,13 +32,14 @@ branch_review_branch: ""
 
 review_agent_model: "claude-opus-4-6"
 
-# aknochow.claude auth: no working default project baked in on purpose
-# (a real GCP project ID doesn't belong here) -- falls back to the
-# same env vars Claude Code itself uses, so a machine already set up
-# for Claude Code needs no extra config. Override any of these via
-# extra_vars, or switch claude_provider to a mode that doesn't need
-# Vertex at all.
-claude_provider: "vertex"
+# aknochow.claude auth: no provider or project baked in on purpose --
+# this role doesn't get to assume which backend you use. Falls back to
+# omit when unconfigured, so aknochow.claude's own argspec defaults/
+# env fallback (provider defaults to "anthropic", ANSIBLE_CLAUDE_PROVIDER/
+# ANTHROPIC_API_KEY env vars) take over unchanged. Override any of
+# these via extra_vars, or set them once in your own gitignored
+# host_vars/localhost.yml if you always use the same provider.
+claude_provider: "{{ lookup('ansible.builtin.env', 'ANSIBLE_CLAUDE_PROVIDER') | default(omit) }}"
 claude_vertex_region: "{{ lookup('ansible.builtin.env', 'ANTHROPIC_VERTEX_REGION') | default('global', true) }}"
 claude_vertex_project: "{{ lookup('ansible.builtin.env', 'ANTHROPIC_VERTEX_PROJECT_ID') | default(omit) }}"
 claude_api_key: "{{ lookup('ansible.builtin.env', 'ANTHROPIC_API_KEY') | default(omit) }}"
