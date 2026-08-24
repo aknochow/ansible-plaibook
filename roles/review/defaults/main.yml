@@ -32,14 +32,16 @@ branch_review_branch: ""
 
 review_agent_model: "claude-opus-4-6"
 
-# aknochow.claude auth: no working default project on purpose (a real
-# GCP project ID doesn't belong here); set claude_vertex_project via an
-# extra_vars override, or switch claude_provider to a mode that doesn't
-# need one.
+# aknochow.claude auth: no working default project baked in on purpose
+# (a real GCP project ID doesn't belong here) -- falls back to the
+# same env vars Claude Code itself uses, so a machine already set up
+# for Claude Code needs no extra config. Override any of these via
+# extra_vars, or switch claude_provider to a mode that doesn't need
+# Vertex at all.
 claude_provider: "vertex"
-claude_vertex_region: "global"
-claude_vertex_project: ""
-claude_api_key: ""
+claude_vertex_region: "{{ lookup('ansible.builtin.env', 'ANTHROPIC_VERTEX_REGION') | default('global', true) }}"
+claude_vertex_project: "{{ lookup('ansible.builtin.env', 'ANTHROPIC_VERTEX_PROJECT_ID') | default(omit) }}"
+claude_api_key: "{{ lookup('ansible.builtin.env', 'ANTHROPIC_API_KEY') | default(omit) }}"
 
 review_output_base: "{{ lookup('env', 'HOME') }}/reviews"
 
