@@ -18,6 +18,31 @@
 # cache_read_tokens/cache_write_tokens/thinking_tokens/total_tokens),
 # so it is passed through verbatim rather than re-mapped field by field.
 #
+# usage_normalized.input_tokens will look surprisingly small (single
+# digits) on a real review call -- this is real and correct, not a
+# dropped-data bug. Confirmed live by dumping the SDK's raw usage dict
+# (including its own per-call `iterations` breakdown) for both agents
+# on a real corpus-case run: each call used exactly one iteration/turn
+# (stop_reason: tool_use, no decline/retry), and the top-level usage
+# fields matched that single iteration's own numbers exactly -- so
+# nothing from an earlier turn is being lost. What actually happens:
+# on a cold cache (a fresh session every run), the ~800-line
+# security/review system prompt is written to the prompt cache on
+# this first use, so the SDK reports the bulk of it under
+# cache_creation_input_tokens (-> usage_normalized.cache_write_tokens),
+# not input_tokens -- input_tokens is genuinely just the small
+# uncached remainder. This is the same categorization
+# dispatch_lens_claude.yml's own cache_system: true path already
+# produces (validate_lens_dispatch.yml maps
+# usage.cache_creation_input_tokens the same way); it isn't new here.
+# pipeline_stats.yml already reports cache-write/cache-read as their
+# own separate totals alongside input tokens for exactly this reason --
+# read all three together for a call's real prompt volume, not
+# total_input_tokens alone (Gemini's dispatch has no equivalent split:
+# it has no request-side caching control, so its own input-token total
+# already includes everything -- comparing raw total_input_tokens
+# across agent_family values is not apples to apples).
+#
 # No retry-on-malformed-output loop here, same as Gemini's dispatch:
 # output_format is native schema enforcement (a forced StructuredOutput
 # tool call the SDK itself parses), not best-effort text parsing on
@@ -143,6 +168,21 @@
         scores: "{{ _claude_cli_security_raw.structured.scores | default({}) }}"
       resolved_model: "{{ _claude_cli_security_raw.resolved_model }}"
       usage_normalized: "{{ _claude_cli_security_raw.usage_normalized }}"
+      # The SDK's own observed cost for this call, verbatim -- distinct
+      # from agent_pricing-table-derived cost_usd elsewhere in this
+      # pipeline (compute_pipeline_cost.py), which is unpriced ($0) for
+      # any model without a sourced per-million-token rate on file (see
+      # review_claude_cli_model's own comment: no rate is guessed for
+      # claude-sonnet-5). This is a real figure measured by the provider
+      # for THIS call, not a computed estimate -- confirmed live
+      # non-zero (agent.py's cost_usd RETURN field, sourced from the
+      # SDK's own ResultMessage.total_cost_usd). Carried on the
+      # normalized result itself rather than wired into
+      # pipeline_agent_calls/compute_pipeline_cost.py's own totals in
+      # this change -- that touches shared cost-computation logic used
+      # by every agent_family and deserves its own pass, not a
+      # last-minute addition riding on this dispatch file.
+      observed_cost_usd: "{{ _claude_cli_security_raw.cost_usd }}"
 
 - name: "Claude CLI: build the normalized Review result"
   ansible.builtin.set_fact:
@@ -152,3 +192,4 @@
         scores: "{{ _claude_cli_review_raw.structured.scores | default({}) }}"
       resolved_model: "{{ _claude_cli_review_raw.resolved_model }}"
       usage_normalized: "{{ _claude_cli_review_raw.usage_normalized }}"
+      observed_cost_usd: "{{ _claude_cli_review_raw.cost_usd }}"
