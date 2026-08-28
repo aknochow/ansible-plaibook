@@ -41,11 +41,16 @@ review_agent_model: "claude-opus-4-6"
 # audit_{{ agent_family }}.yml" -- one hand-written, provider-native
 # task file per family, never a shared abstraction. claude is default
 # so existing behavior/callers are unchanged. qwen isn't implemented
-# yet (only claude/gemini dispatch files exist) -- named here so it
-# slots in later without a rename, per
+# yet (only claude/gemini/claude_cli dispatch files exist) -- named
+# here so it slots in later without a rename, per
 # ansible-agentbench/harness/tier1_lens_dispatch.yml's own precedent
 # (that harness already proves a Qwen path via aknochow.openai.chat).
-agent_family: claude   # claude | gemini | qwen
+# claude_cli dispatches via aknochow.claude.agent (claude-agent-sdk,
+# the library behind the `claude` CLI) instead of dispatch_lens_claude.yml's
+# raw Messages API call -- draws on a claude.ai Pro/Max subscription's
+# own OAuth session rather than per-token API credits. See
+# dispatch_lens_claude_cli.yml's own header for the full rationale.
+agent_family: claude   # claude | gemini | claude_cli | qwen
 
 # aknochow.claude auth: no provider or project baked in on purpose --
 # this role doesn't get to assume which backend you use. Falls back to
@@ -119,6 +124,59 @@ review_gemini_thinking_level: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_
 # max_tokens: 8192 because its extended thinking is not enabled on this
 # path, so nothing competes with visible output there.
 review_gemini_max_output_tokens: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_GEMINI_MAX_OUTPUT_TOKENS') | default(16384, true) | int }}"
+
+# aknochow.claude.agent auth for agent_family=claude_cli: no
+# ANTHROPIC_API_KEY/provider config here on purpose, mirroring
+# claude_provider/claude_api_key above -- dispatch_lens_claude_cli.yml
+# clears ANTHROPIC_API_KEY on its own module tasks instead (see that
+# file's header) so the underlying `claude` CLI subprocess falls back
+# to whatever subscription OAuth session is already set up on the
+# host, which is the entire point of this dispatch path.
+#
+# No model baked in on purpose, same reasoning as claude_provider
+# above (AGENTS.md: "Never bake in a default choice that assumes a
+# specific backend/provider/environment"): which models a given
+# claude.ai subscription tier can actually reach varies (confirmed
+# live, agent.py's own notes: the account used to build this module
+# reported subscriptionType "Claude Pro"), so this role doesn't get to
+# assume claude-opus-4-6 (review_agent_model's own default, priced for
+# API billing) is even reachable. Left unset, aknochow.claude.agent
+# falls back to the CLI's own default model. Override with
+# -e review_claude_cli_model=<model> once you know what your
+# subscription can reach.
+review_claude_cli_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_CLAUDE_CLI_MODEL') | default(omit, true) }}"
+
+# high by default, same "review quality is the point of this pipeline"
+# reasoning as review_gemini_thinking_level above. Unlike Gemini's
+# thinking_level, this rides on subscription usage rather than
+# per-token billing, so there is no direct dollar cost to weigh against
+# quality here -- only subscription rate-limit headroom, which the
+# operator is better placed to judge than a baked-in default.
+review_claude_cli_effort: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_CLAUDE_CLI_EFFORT') | default('high', true) }}"
+
+# [] is the module's own default too, but set explicitly here rather
+# than left to inherit it -- this is a review-integrity setting, not
+# just a token-cost one, so it belongs in this role's own defaults
+# where it is visible and reviewable, not just in agent.py's argspec.
+# Confirmed live (agent.py's own setting_sources docs): leaving this
+# unset loads the reviewed repo's own CLAUDE.md/skills into the
+# reviewing session's context -- ~234 input tokens with [] vs. ~2,485
+# with everything loaded on the same call. Beyond the token cost, a
+# repo being reviewed should never get to steer its own review by
+# shipping instructions in its own CLAUDE.md. Not env-lookup-backed
+# like the vars above: this is a security-relevant default, not a
+# per-host preference, so changing it is a deliberate -e override, not
+# something to leave sitting in an environment variable.
+review_claude_cli_setting_sources: []
+
+# >= 2 whenever output_format is set (which every dispatch_lens_claude_cli.yml
+# call does) -- confirmed live (agent.py's own max_turns/output_format
+# docs): Claude can decline the structured-output tool call on its
+# first turn and needs a retry turn to try again; with max_turns: 1 the
+# SDK raises error_max_turns instead of failing cleanly. 2 is the
+# floor, not a generous budget -- raise it if declines are still
+# common after that.
+review_claude_cli_max_turns: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_CLAUDE_CLI_MAX_TURNS') | default(2, true) | int }}"
 
 review_output_base: "{{ lookup('env', 'HOME') }}/reviews"
 
