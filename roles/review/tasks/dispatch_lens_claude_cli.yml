@@ -103,6 +103,7 @@
       type: json_schema
       schema: "{{ security_findings_schema }}"
     max_turns: "{{ review_claude_cli_max_turns }}"
+    timeout: "{{ review_claude_cli_timeout }}"
     setting_sources: "{{ review_claude_cli_setting_sources }}"
     cwd: "{{ review_repo_path }}"
   environment:
@@ -132,6 +133,7 @@
       type: json_schema
       schema: "{{ review_findings_schema }}"
     max_turns: "{{ review_claude_cli_max_turns }}"
+    timeout: "{{ review_claude_cli_timeout }}"
     setting_sources: "{{ review_claude_cli_setting_sources }}"
     cwd: "{{ review_repo_path }}"
   environment:

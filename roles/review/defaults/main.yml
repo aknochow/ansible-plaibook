@@ -178,6 +178,21 @@ review_claude_cli_setting_sources: []
 # common after that.
 review_claude_cli_max_turns: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_CLAUDE_CLI_MAX_TURNS') | default(2, true) | int }}"
 
+# Wall-clock ceiling for a single claude_cli lens call, passed to
+# aknochow.claude.agent's own `timeout`.
+#
+# The module defaults to 300s, which is half what this pipeline already
+# allows the Messages API path (dispatch_lens_claude.yml uses async:
+# 600) -- and the CLI path is the slower of the two: it spawns a
+# subprocess, and runs with thinking enabled at review_claude_cli_effort
+# (high by default). Reviewing a ~1200-line diff exceeded 300s and the
+# module correctly aborted rather than hanging the play, so the default
+# was simply too tight for a real PR rather than a corpus-sized case.
+#
+# 900 not 600: the CLI has subprocess startup on top of the same model
+# work, and a timeout here wastes the whole run's prior stages.
+review_claude_cli_timeout: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_CLAUDE_CLI_TIMEOUT') | default(900, true) | float }}"
+
 review_output_base: "{{ lookup('env', 'HOME') }}/reviews"
 
 # Kill switch for briefing.yml's same-commit fast path: set false to
