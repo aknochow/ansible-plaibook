@@ -53,3 +53,4 @@ tmp/
 .nicegui/
 artifacts/
 public/
+.claude/worktrees/

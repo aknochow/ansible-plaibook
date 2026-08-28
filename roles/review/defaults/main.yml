@@ -125,6 +125,21 @@ review_gemini_thinking_level: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_
 # path, so nothing competes with visible output there.
 review_gemini_max_output_tokens: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_GEMINI_MAX_OUTPUT_TOKENS') | default(16384, true) | int }}"
 
+# Wall-clock ceiling for a single Gemini call, passed to
+# aknochow.gemini.generate's own `timeout`.
+#
+# The collection defaults to 120s with max_retries: 2, so a slow call
+# burns 3 x 120s and fails at ~6 minutes. That was enough for
+# corpus-sized cases but not for a real pull request: reviewing a live
+# PR timed out on verify turn 3 at exactly 6:02, having spent the whole
+# budget on retries that were never going to be faster than the first
+# attempt.
+#
+# 300 rather than the module's 120 because a verify turn runs at
+# review_gemini_thinking_level (high by default) over a full diff, and
+# a timeout here discards every prior stage of the run.
+review_gemini_timeout: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_GEMINI_TIMEOUT') | default(300, true) | float }}"
+
 # aknochow.claude.agent auth for agent_family=claude_cli: no
 # ANTHROPIC_API_KEY/provider config here on purpose, mirroring
 # claude_provider/claude_api_key above -- dispatch_lens_claude_cli.yml
