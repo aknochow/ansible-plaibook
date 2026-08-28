@@ -90,7 +90,6 @@
       message:
         content: "{{ _verify_gemini_parts | gemini_parts_to_message_content }}"
         model: "{{ review_verify_gemini_model }}"
-    timeout: "{{ review_gemini_timeout }}"
       tool_calls: "{{ _verify_gemini_parts | gemini_parts_to_tool_calls }}"
       # Synthesized, not read from Gemini's own finish_reason -- see
       # this file's header comment: finish_reason is STOP even on a
