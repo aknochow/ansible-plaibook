@@ -52,7 +52,8 @@
         that:
           - verify_dispatch_valid
         fail_msg: >-
-          Verify agent ({{ review_verify_model if agent_family == 'claude' else review_verify_gemini_model }}) never produced a
+          Verify agent ({{ review_verify_model if agent_family == 'claude'
+          else (review_verify_claude_cli_model if agent_family == 'claude_cli' else review_verify_gemini_model) }}) never produced a
           report_verdict tool call on the forced final turn after
           {{ review_structured_output_max_attempts }} attempt(s), despite
           forced tool_choice. This is a confirmed, probabilistic model-

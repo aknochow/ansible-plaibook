@@ -299,6 +299,33 @@ review_verify_model: "claude-haiku-4-5"
 # (a single-shot call, but still logically part of "verify").
 review_verify_gemini_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_VERIFY_GEMINI_MODEL') | default('gemini-3.5-flash', true) }}"
 
+# claude_cli equivalent of review_verify_model/review_verify_gemini_model
+# above, used by dispatch_verify_turn_attempt_claude_cli.yml. No baked-in
+# cheap-model default here, unlike review_verify_model's claude-haiku-4-5:
+# review_claude_cli_model already has no default for the same reason
+# (which models a given claude.ai subscription tier can actually reach
+# varies -- see that var's own comment), and that reasoning applies
+# identically to whatever cheaper model verify might want to use here.
+# Left unset, aknochow.claude.agent falls back to the CLI's own default
+# model, same as review_claude_cli_model.
+review_verify_claude_cli_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_VERIFY_CLAUDE_CLI_MODEL') | default(omit, true) }}"
+
+# NOT the same knob as review_claude_cli_max_turns (2), and deliberately
+# much larger -- see dispatch_verify_turn_attempt_claude_cli.yml's own
+# header for why. That default is sized for lenses.yml's single-shot,
+# no-exploration dispatch; this file's single module call has to fit an
+# entire explore-then-verdict loop (real Read/Grep/Glob tool calls, ANY
+# of the SDK's own retries on non-conforming structured output) inside
+# ONE max_turns budget, since plaibook itself no longer drives per-turn
+# dispatch under this provider (again, see that file's header for why
+# not). Confirmed live (claude-agent-sdk 0.2.144, corpus case 005):
+# max_turns=6 was exhausted (error_max_turns) by 4 real exploration
+# turns plus two failed/retried StructuredOutput attempts, with no
+# verdict ever reached; max_turns=20 succeeded on the first
+# StructuredOutput attempt with turns to spare. 25 leaves headroom above
+# the smallest value observed to work, not a value tuned to be minimal.
+review_verify_claude_cli_max_turns: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_VERIFY_CLAUDE_CLI_MAX_TURNS') | default(25, true) | int }}"
+
 # Under this pipeline's forced tool_choice + structured-output
 # schemas, a lens model can produce genuinely invalid structured
 # output at a non-trivial, probabilistic rate: a different malformed
