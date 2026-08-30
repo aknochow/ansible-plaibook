@@ -13,6 +13,9 @@
     last_run_summary_content: >-
       {{ {
         'run_id': last_run_id,
+        'host': review_run_ledger_host | default(lookup('pipe', 'hostname -s') | lower | regex_replace('[^a-z0-9_.-]', '-')),
+        'commit': review_short_sha | default(''),
+        'branch': review_branch | default(''),
         'targets': pipeline_findings_reports,
         'cost_usd': (pipeline_call_costs | default([]) | map('float') | sum) | round(4),
         'total_input_tokens': pipeline_total_input_tokens | default(0) | int,
@@ -88,13 +91,17 @@
     state: directory
     mode: "0700"
   vars:
-    _ledger_path: "{{ review_run_ledger_path | default(lookup('env', 'HOME') ~ '/.cache/ansible-plaibook/run_ledger.jsonl') }}"
+    _ledger_dir: "{{ review_run_ledger_dir | default(lookup('env', 'HOME') ~ '/.cache/ansible-plaibook/ledger') }}"
+    _ledger_host: "{{ review_run_ledger_host | default(lookup('pipe', 'hostname -s') | lower | regex_replace('[^a-z0-9_.-]', '-')) }}"
+    _ledger_path: "{{ review_run_ledger_path | default(_ledger_dir ~ '/' ~ _ledger_host ~ '.jsonl') }}"
   when: review_run_ledger_enabled | default(true) | bool
 
 - name: Append this run to the ledger
   when: review_run_ledger_enabled | default(true) | bool
   vars:
-    _ledger_path: "{{ review_run_ledger_path | default(lookup('env', 'HOME') ~ '/.cache/ansible-plaibook/run_ledger.jsonl') }}"
+    _ledger_dir: "{{ review_run_ledger_dir | default(lookup('env', 'HOME') ~ '/.cache/ansible-plaibook/ledger') }}"
+    _ledger_host: "{{ review_run_ledger_host | default(lookup('pipe', 'hostname -s') | lower | regex_replace('[^a-z0-9_.-]', '-')) }}"
+    _ledger_path: "{{ review_run_ledger_path | default(_ledger_dir ~ '/' ~ _ledger_host ~ '.jsonl') }}"
   ansible.builtin.lineinfile:
     path: "{{ _ledger_path }}"
     create: true
@@ -119,6 +126,9 @@
       {{ {
         'ts': now(utc=true).isoformat(),
         'run_id': last_run_id,
+        'host': review_run_ledger_host | default(lookup('pipe', 'hostname -s') | lower | regex_replace('[^a-z0-9_.-]', '-')),
+        'commit': review_short_sha | default(''),
+        'branch': review_branch | default(''),
         'agent_family': agent_family | default('unknown'),
         'models': pipeline_agent_calls | default([]) | map(attribute='model') | select | unique | list,
         'review_type': review_type | default(''),
