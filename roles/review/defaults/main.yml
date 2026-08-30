@@ -210,6 +210,14 @@ review_claude_cli_timeout: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_CLA
 
 review_output_base: "{{ lookup('env', 'HOME') }}/reviews"
 
+# Append-only JSONL ledger of every run: one object per line carrying
+# model, tokens, cost, verdict and score. Each last_run.<id>.json is a
+# single-run snapshot, so nothing accumulated across runs until this
+# existed -- making spend-to-date and score-over-time both unanswerable
+# without scraping the cache by hand.
+review_run_ledger_enabled: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_RUN_LEDGER') | default(true, true) | bool }}"
+review_run_ledger_path: "{{ lookup('env', 'HOME') }}/.cache/ansible-plaibook/run_ledger.jsonl"
+
 # Kill switch for briefing.yml's same-commit fast path: set false to
 # force every run through the full lens/merge/explore/verify dispatch
 # regardless of whether a prior review is found matching the current
@@ -492,6 +500,26 @@ agent_pricing: &agent_pricing
   gemini-3.5-flash:
     input_per_million: 1.50
     output_per_million: 9.00
+  # gemini-3.6-flash and 3.7-flash are on PROMOTIONAL pricing through
+  # 2026-12-31 ($0.75/$3.75); both double to $1.50/$7.50 on 2027-01-01.
+  # Recorded at the promotional rate because agent_pricing drives what a
+  # run actually costs today, and under-reporting real spend is the worse
+  # error. Two consequences to remember:
+  #
+  #  - These entries MUST be updated on 2027-01-01 or every cost figure
+  #    silently halves against reality.
+  #  - A Model Benchmark Index entry citing these should record the
+  #    STANDARD rate, not the promotional one -- a value ranking built on
+  #    a promo price starts lying the day it expires.
+  #
+  # Note both are currently cheaper than gemini-3.5-flash above, on both
+  # axes: newer and less expensive, not the usual trade.
+  gemini-3.6-flash:
+    input_per_million: 0.75
+    output_per_million: 3.75
+  gemini-3.7-flash:
+    input_per_million: 0.75
+    output_per_million: 3.75
 
 claude_pricing: *agent_pricing
 
