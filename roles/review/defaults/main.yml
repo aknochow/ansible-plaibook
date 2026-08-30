@@ -54,10 +54,10 @@ agent_family: claude   # claude | gemini | qwen
 # ANTHROPIC_API_KEY env vars) take over unchanged. Override any of
 # these via extra_vars, or set them once in your own gitignored
 # host_vars/localhost.yml if you always use the same provider.
-claude_provider: "{{ lookup('ansible.builtin.env', 'ANSIBLE_CLAUDE_PROVIDER') | default(omit) }}"
+claude_provider: "{{ lookup('ansible.builtin.env', 'ANSIBLE_CLAUDE_PROVIDER') | default(omit, true) }}"
 claude_vertex_region: "{{ lookup('ansible.builtin.env', 'ANTHROPIC_VERTEX_REGION') | default('global', true) }}"
-claude_vertex_project: "{{ lookup('ansible.builtin.env', 'ANTHROPIC_VERTEX_PROJECT_ID') | default(omit) }}"
-claude_api_key: "{{ lookup('ansible.builtin.env', 'ANTHROPIC_API_KEY') | default(omit) }}"
+claude_vertex_project: "{{ lookup('ansible.builtin.env', 'ANTHROPIC_VERTEX_PROJECT_ID') | default(omit, true) }}"
+claude_api_key: "{{ lookup('ansible.builtin.env', 'ANTHROPIC_API_KEY') | default(omit, true) }}"
 
 # aknochow.gemini auth, mirrors claude_provider/claude_api_key above.
 # backend defaults to "api" (aknochow.gemini's own argspec default) so

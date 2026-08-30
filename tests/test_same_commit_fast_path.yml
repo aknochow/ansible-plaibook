@@ -133,6 +133,22 @@
 
           Seeded prior review for test_same_commit_fast_path.yml.
 
+    - name: Write the seeded prior review's summary.json, matching write_review.py's real shape
+      ansible.builtin.copy:
+        dest: "{{ review_output_base }}/{{ review_org_repo }}/{{ review_branch }}/{{ _fixture_date }}-{{ review_short_sha }}/summary.json"
+        mode: "0644"
+        content: |
+          {
+            "target": "{{ review_org_repo }}#{{ review_number | default('1') }}",
+            "commit": "{{ review_short_sha }}",
+            "branch": "{{ review_branch }}",
+            "date": "{{ _fixture_date }}",
+            "verdict": "READY_FOR_HUMAN_REVIEW",
+            "score_overall": 100.0,
+            "findings": [],
+            "findings_path": "{{ review_output_base }}/{{ review_org_repo }}/{{ review_branch }}/{{ _fixture_date }}-{{ review_short_sha }}/findings.md"
+          }
+
     - name: Run the real review engine dispatch -- fast path enabled (default)
       ansible.builtin.include_role:
         name: review
@@ -149,6 +165,26 @@
           matching prior review, with full_review.yml (and its
           persist.yml tail, which sets review_findings_path) never
           running. same_commit_fast_path={{ same_commit_fast_path }}
+
+    - name: Assert the fast path populated pipeline_findings_reports and restored the verdict/score/findings facts
+      ansible.builtin.assert:
+        that:
+          - pipeline_findings_reports | length == 1
+          - pipeline_findings_reports[0].cache_hit == true
+          - pipeline_findings_reports[0].verdict == 'READY_FOR_HUMAN_REVIEW'
+          - pipeline_findings_reports[0].score == 100.0
+          - review_verdict == 'READY_FOR_HUMAN_REVIEW'
+          - score_overall | float == 100.0
+          - findings_critical == []
+          - findings_major == []
+        fail_msg: >-
+          A fast-path cache hit must populate pipeline_findings_reports
+          (so last_run.json's "targets" list isn't empty) and restore
+          review_verdict/score_overall/findings_critical/findings_major
+          (so review_type: commit's fail-on-regression gate still
+          evaluates a cached NEEDS_CHANGES verdict correctly) --
+          otherwise a cache hit silently looks like the pipeline did
+          nothing, and a real cached regression never fails the run.
 
     - name: Run the real review engine dispatch again -- fast path explicitly disabled
       ansible.builtin.include_role:
