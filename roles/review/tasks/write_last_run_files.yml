@@ -75,29 +75,53 @@
 # Deliberately records provider/model/agent_family alongside the numbers:
 # a cost figure without the model that produced it cannot be compared
 # against anything, and this pipeline now dispatches to several.
+# review.yml includes this file BY PATH (review.yml:313 ->
+# write_last_run_summary.yml -> here), not through roles/review, so this
+# role's defaults/main.yml is NOT in scope and every var here must carry
+# its own default. Confirmed the hard way: the first ledger run died on
+# "'review_run_ledger_enabled' is undefined". The give-away in the log is
+# the task name -- tasks that really run inside the role are prefixed
+# "review : ", and these are not.
 - name: Ensure the run-ledger directory exists
   ansible.builtin.file:
-    path: "{{ review_run_ledger_path | dirname }}"
+    path: "{{ _ledger_path | dirname }}"
     state: directory
     mode: "0700"
-  when: review_run_ledger_enabled | bool
+  vars:
+    _ledger_path: "{{ review_run_ledger_path | default(lookup('env', 'HOME') ~ '/.cache/ansible-plaibook/run_ledger.jsonl') }}"
+  when: review_run_ledger_enabled | default(true) | bool
 
 - name: Append this run to the ledger
-  when: review_run_ledger_enabled | bool
+  when: review_run_ledger_enabled | default(true) | bool
+  vars:
+    _ledger_path: "{{ review_run_ledger_path | default(lookup('env', 'HOME') ~ '/.cache/ansible-plaibook/run_ledger.jsonl') }}"
   ansible.builtin.lineinfile:
-    path: "{{ review_run_ledger_path }}"
+    path: "{{ _ledger_path }}"
     create: true
     mode: "0600"
     insertafter: EOF
     # to_json on one line: the file is JSONL, one object per line.
+    #
+    # ts uses now(), not ansible_date_time: review.yml runs
+    # gather_facts: false, so no ansible_* facts exist at all. utc=true
+    # so entries written on different machines sort and compare directly.
+    #
+    # models comes from pipeline_agent_calls, not from the review_*_model
+    # vars: those are role defaults and this file is included by path, so
+    # they are out of scope and silently resolve to ''. The runtime list is
+    # better regardless -- it records what each provider actually resolved,
+    # and a run's lens and verify stages routinely use different models.
+    #
+    # No '#' comments inside the {{ }} below -- Jinja rejects them
+    # ("unexpected char '#'"), which is not obvious when the expression
+    # is a multi-line dict literal that reads like YAML.
     line: >-
       {{ {
-        'ts': ansible_date_time.iso8601,
+        'ts': now(utc=true).isoformat(),
         'run_id': last_run_id,
-        'agent_family': agent_family,
-        'model': review_agent_model if agent_family == 'claude'
-                 else (review_gemini_model if agent_family == 'gemini' else review_claude_cli_model | default('cli-default')),
-        'review_type': review_type,
+        'agent_family': agent_family | default('unknown'),
+        'models': pipeline_agent_calls | default([]) | map(attribute='model') | select | unique | list,
+        'review_type': review_type | default(''),
         'target': review_org_repo | default('') ~ '#' ~ (review_number | default('')),
         'verdict': review_verdict | default(''),
         'score': score_overall | default(0) | float,
