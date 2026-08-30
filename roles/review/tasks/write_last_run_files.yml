@@ -61,3 +61,50 @@
 - name: Show the run-scoped last-run summary path
   ansible.builtin.debug:
     msg: "RESULT_SUMMARY_RUN_SCOPED: {{ lookup('env', 'HOME') }}/.cache/ansible-plaibook/last_run.{{ last_run_id }}.json"
+
+# Append-only spend/quality ledger. Each last_run.<id>.json is a snapshot
+# of ONE run and nothing accumulates across them, so "what have I spent
+# this week" and "did the score move between tags" were both unanswerable
+# without scraping the cache directory by hand.
+#
+# One JSON object per line, appended, never rewritten -- corrections are
+# new lines, not edits. That keeps it safe to append from concurrent runs
+# and makes it directly consumable by ansible-agentbench's scoring, which
+# already reads this shape of data.
+#
+# Deliberately records provider/model/agent_family alongside the numbers:
+# a cost figure without the model that produced it cannot be compared
+# against anything, and this pipeline now dispatches to several.
+- name: Ensure the run-ledger directory exists
+  ansible.builtin.file:
+    path: "{{ review_run_ledger_path | dirname }}"
+    state: directory
+    mode: "0700"
+  when: review_run_ledger_enabled | bool
+
+- name: Append this run to the ledger
+  when: review_run_ledger_enabled | bool
+  ansible.builtin.lineinfile:
+    path: "{{ review_run_ledger_path }}"
+    create: true
+    mode: "0600"
+    insertafter: EOF
+    # to_json on one line: the file is JSONL, one object per line.
+    line: >-
+      {{ {
+        'ts': ansible_date_time.iso8601,
+        'run_id': last_run_id,
+        'agent_family': agent_family,
+        'model': review_agent_model if agent_family == 'claude'
+                 else (review_gemini_model if agent_family == 'gemini' else review_claude_cli_model | default('cli-default')),
+        'review_type': review_type,
+        'target': review_org_repo | default('') ~ '#' ~ (review_number | default('')),
+        'verdict': review_verdict | default(''),
+        'score': score_overall | default(0) | float,
+        'agents_dispatched': pipeline_agent_calls | default([]) | length,
+        'input_tokens': pipeline_total_input_tokens | default(0) | int,
+        'output_tokens': pipeline_total_output_tokens | default(0) | int,
+        'thinking_tokens': pipeline_total_thinking_tokens | default(0) | int,
+        'cost_usd': (pipeline_call_costs | default([]) | map('float') | sum) | round(6),
+        'guardian_scan_available': guardian_scan_available | default(false) | bool
+      } | to_json }}
