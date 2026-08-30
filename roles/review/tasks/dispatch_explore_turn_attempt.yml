@@ -24,12 +24,30 @@
 # Every attempt is a real billed call, not just the one that ends up
 # used -- must be recorded here so pipeline_stats.yml's cost accounting
 # reflects what actually got spent.
+# Normalized usage (input_tokens/output_tokens/cache_write_tokens/
+# cache_read_tokens/total_tokens) -- matches lenses.yml's own
+# pipeline_agent_calls entries; compute_pipeline_cost.py reads exactly
+# these key names from every entry, never Claude's raw usage dict shape
+# (cache_creation_input_tokens/cache_read_input_tokens). Still Claude-only
+# here (explore's multi-turn tool loop has no Gemini dispatch yet --
+# see Phase 2 of this collection's Gemini-lens-dispatch work).
 - name: Record this attempt's usage for the pipeline-wide stats summary
   ansible.builtin.set_fact:
     pipeline_agent_calls: >-
       {{ pipeline_agent_calls + [{
            'target': review_org_repo + '#' + review_number, 'lens': 'explore',
-           'model': explore_turn_result.message.model, 'usage': explore_turn_result.usage,
+           'model': explore_turn_result.message.model,
+           'usage': {
+             'input_tokens': explore_turn_result.usage.input_tokens | default(0) | int,
+             'output_tokens': explore_turn_result.usage.output_tokens | default(0) | int,
+             'cache_write_tokens': explore_turn_result.usage.cache_creation_input_tokens | default(0) | int,
+             'cache_read_tokens': explore_turn_result.usage.cache_read_input_tokens | default(0) | int,
+             'thinking_tokens': 0,
+             'total_tokens': (explore_turn_result.usage.input_tokens | default(0) | int)
+               + (explore_turn_result.usage.output_tokens | default(0) | int)
+               + (explore_turn_result.usage.cache_creation_input_tokens | default(0) | int)
+               + (explore_turn_result.usage.cache_read_input_tokens | default(0) | int)
+           },
            'attempt': explore_attempt_number | default(1)
          }] }}
 

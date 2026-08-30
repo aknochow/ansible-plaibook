@@ -67,8 +67,8 @@ _DATED_SNAPSHOT_SUFFIX = re.compile(r"-\d{8}$")
 _USAGE_RATE_PAIRS = (
     ("input_tokens", "input_per_million"),
     ("output_tokens", "output_per_million"),
-    ("cache_creation_input_tokens", "cache_write_per_million"),
-    ("cache_read_input_tokens", "cache_read_per_million"),
+    ("cache_write_tokens", "cache_write_per_million"),
+    ("cache_read_tokens", "cache_read_per_million"),
 )
 _USAGE_KEYS = tuple(usage_key for usage_key, _ in _USAGE_RATE_PAIRS)
 
@@ -115,6 +115,20 @@ def compute_pipeline_cost(pipeline_agent_calls: list[dict], pipeline_pricing_tab
 
     totals = {key: sum(_usage_value_strict(call, key) for call in pipeline_agent_calls) for key in _USAGE_KEYS}
 
+    # thinking_tokens is lenient (like the per-call cost formula, not the
+    # strict totals above): it's a newer, additive field -- Gemini's
+    # dispatch_lens_gemini.yml sets it from usage.thoughts_token_count,
+    # Claude's producers set it to a literal 0 (extended thinking isn't
+    # enabled on this path), but requiring every historical
+    # pipeline_agent_calls producer to carry it would be the kind of
+    # brittle "one missing field crashes the whole stats summary" failure
+    # the strict/lenient split already exists to avoid for optional data.
+    # Not priced (no _USAGE_RATE_PAIRS entry): visibility into a real,
+    # billable-on-paid-tiers token category, same "surface it, don't
+    # invent a rate" discipline as gemini-3.7-flash's own unpriced_models
+    # handling above.
+    total_thinking_tokens = sum(_usage_value_lenient(call, "thinking_tokens") for call in pipeline_agent_calls)
+
     seen_models = list(dict.fromkeys(call["model"] for call in pipeline_agent_calls))
     unpriced_models = [model for model in seen_models if _model_base(model) not in pipeline_pricing_table]
 
@@ -130,8 +144,9 @@ def compute_pipeline_cost(pipeline_agent_calls: list[dict], pipeline_pricing_tab
     return {
         "total_input_tokens": totals["input_tokens"],
         "total_output_tokens": totals["output_tokens"],
-        "total_cache_write_tokens": totals["cache_creation_input_tokens"],
-        "total_cache_read_tokens": totals["cache_read_input_tokens"],
+        "total_cache_write_tokens": totals["cache_write_tokens"],
+        "total_cache_read_tokens": totals["cache_read_tokens"],
+        "total_thinking_tokens": total_thinking_tokens,
         "unpriced_models": unpriced_models,
         "call_costs": call_costs,
     }

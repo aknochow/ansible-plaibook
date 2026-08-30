@@ -1,0 +1,109 @@
+---
+# Claude lens dispatch (agent_family: claude, the default) -- dispatches
+# the Security and Review agents in parallel via async, exactly as
+# lenses.yml did inline before this file existed. Moved here verbatim
+# (not rewritten) so the default agent_family=claude path is a pure
+# refactor with no behavior change.
+#
+# Sets security_result/review_result as the raw aknochow.claude.message
+# result (tool_calls, message.model, usage, ...) -- validate_lens_dispatch.yml
+# (called from lenses.yml, claude-only) is what layers the normalized
+# .structured/.resolved_model/.usage_normalized fields on top, because
+# validity for Claude can only be established AFTER checking the forced
+# tool call actually happened (the retry-on-malformed-output loop this
+# file's caller runs). Gemini's dispatch_lens_gemini.yml, by contrast,
+# can set those normalized fields directly, since response_schema makes
+# malformed structured output structurally impossible.
+#
+# Forced tool_choice avoids Vertex's 'structured_outputs' allowlist
+# requirement -- see examples/provider_interop_comparison.yml's header.
+
+# Print request config before async dispatch (async shows only job metadata).
+# Omit api_key (secret); show everything else including rendered system prompt.
+- name: "Claude: show the Security agent's request configuration"
+  ansible.builtin.debug:
+    msg: "{{ [
+      'provider: ' + claude_provider,
+      'region: ' + (claude_vertex_region if claude_provider == 'vertex' else 'n/a'),
+      'project_id: ' + (claude_vertex_project if claude_provider == 'vertex' else 'n/a'),
+      'model: ' + review_agent_model,
+      'max_tokens: 8192',
+      'cache_system: true',
+      'tools: [report_findings] (forced via tool_choice)',
+      '',
+      '--- system prompt ---',
+      ] + security_system_prompt.split('\n') }}"
+
+- name: "Claude: dispatch the Security agent (async)"
+  aknochow.claude.message:
+    provider: "{{ claude_provider }}"
+    region: "{{ claude_vertex_region if claude_provider == 'vertex' else omit }}"
+    project_id: "{{ claude_vertex_project if claude_provider == 'vertex' else omit }}"
+    api_key: "{{ claude_api_key if claude_provider == 'anthropic' else omit }}"
+    model: "{{ review_agent_model }}"
+    max_tokens: 8192
+    messages:
+      - role: user
+        content: "Review this diff per your instructions."
+    system: "{{ security_system_prompt }}"
+    cache_system: true
+    tools:
+      - name: report_findings
+        description: Report the review findings and lens scores.
+        input_schema: "{{ security_findings_schema }}"
+    tool_choice: { type: tool, name: report_findings }
+  async: 600
+  poll: 0
+  register: security_job
+
+- name: "Claude: show the Review agent's request configuration"
+  ansible.builtin.debug:
+    msg: "{{ [
+      'provider: ' + claude_provider,
+      'region: ' + (claude_vertex_region if claude_provider == 'vertex' else 'n/a'),
+      'project_id: ' + (claude_vertex_project if claude_provider == 'vertex' else 'n/a'),
+      'model: ' + review_agent_model,
+      'max_tokens: 8192',
+      'cache_system: true',
+      'tools: [report_findings] (forced via tool_choice)',
+      '',
+      '--- system prompt ---',
+      ] + review_system_prompt.split('\n') }}"
+
+- name: "Claude: dispatch the Review agent (async)"
+  aknochow.claude.message:
+    provider: "{{ claude_provider }}"
+    region: "{{ claude_vertex_region if claude_provider == 'vertex' else omit }}"
+    project_id: "{{ claude_vertex_project if claude_provider == 'vertex' else omit }}"
+    api_key: "{{ claude_api_key if claude_provider == 'anthropic' else omit }}"
+    model: "{{ review_agent_model }}"
+    max_tokens: 8192
+    messages:
+      - role: user
+        content: "Review this diff per your instructions."
+    system: "{{ review_system_prompt }}"
+    cache_system: true
+    tools:
+      - name: report_findings
+        description: Report the review findings and lens scores.
+        input_schema: "{{ review_findings_schema }}"
+    tool_choice: { type: tool, name: report_findings }
+  async: 600
+  poll: 0
+  register: review_job
+
+- name: "Claude: wait for both agents to finish"
+  ansible.builtin.async_status:
+    jid: "{{ item.ansible_job_id }}"
+  loop:
+    - "{{ security_job }}"
+    - "{{ review_job }}"
+  register: lens_results
+  until: lens_results.finished
+  retries: 60
+  delay: 5
+
+- name: "Claude: extract lens results"
+  ansible.builtin.set_fact:
+    security_result: "{{ lens_results.results[0] }}"
+    review_result: "{{ lens_results.results[1] }}"

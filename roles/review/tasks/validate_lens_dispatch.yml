@@ -40,13 +40,37 @@
           {{ (lens_raw_result.tool_calls[0].input.scores | default({})) | type_debug }},
           not a mapping
 
+    # resolved_model/usage_normalized: the SAME normalized fields
+    # dispatch_lens_gemini.yml sets directly (no retry loop needed
+    # there) -- added here too so every downstream consumer
+    # (lenses.yml's pipeline_agent_calls entries, debug output,
+    # pipeline_stats.yml) reads one shape regardless of agent_family.
+    # Cache tokens renamed from Claude's own cache_creation_input_tokens/
+    # cache_read_input_tokens to the provider-agnostic cache_write_tokens/
+    # cache_read_tokens -- see compute_pipeline_cost.py's updated
+    # _USAGE_RATE_PAIRS, which now expects these names from every
+    # provider, not just Claude's raw usage dict shape.
     - name: "Store the validated, normalized structured output for lens: {{ lens_label }}"
       ansible.builtin.set_fact:
         "{{ lens_result_var }}": >-
-          {{ lens_raw_result | combine({'structured': {
-                'findings': _lens_coerce_result.findings,
-                'scores': lens_raw_result.tool_calls[0].input.scores | default({})
-              }}) }}
+          {{ lens_raw_result | combine({
+                'structured': {
+                  'findings': _lens_coerce_result.findings,
+                  'scores': lens_raw_result.tool_calls[0].input.scores | default({})
+                },
+                'resolved_model': lens_raw_result.message.model,
+                'usage_normalized': {
+                  'input_tokens': lens_raw_result.usage.input_tokens | default(0) | int,
+                  'output_tokens': lens_raw_result.usage.output_tokens | default(0) | int,
+                  'cache_write_tokens': lens_raw_result.usage.cache_creation_input_tokens | default(0) | int,
+                  'cache_read_tokens': lens_raw_result.usage.cache_read_input_tokens | default(0) | int,
+                  'thinking_tokens': 0,
+                  'total_tokens': (lens_raw_result.usage.input_tokens | default(0) | int)
+                    + (lens_raw_result.usage.output_tokens | default(0) | int)
+                    + (lens_raw_result.usage.cache_creation_input_tokens | default(0) | int)
+                    + (lens_raw_result.usage.cache_read_input_tokens | default(0) | int)
+                }
+              }) }}
         "{{ lens_valid_var }}": true
   rescue:
     - name: "Mark this attempt's output invalid for lens: {{ lens_label }}"
