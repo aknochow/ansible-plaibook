@@ -156,4 +156,11 @@
       - 'umask 077; cat >> "$0"'
       - "{{ _ledger_path }}"
     stdin: "{{ _ledger_line }}"
+    # Explicit, though it is the module default: the ledger is JSONL and a
+    # missing newline would silently concatenate two runs into one
+    # unparseable line. A review of this file flagged exactly that as a
+    # critical bug, reasoning from the `>-` folded-strip scalar and not
+    # knowing about this default -- it was wrong, but only by accident of
+    # a default that could change.
+    stdin_add_newline: true
   changed_when: true
