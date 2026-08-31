@@ -1,0 +1,101 @@
+---
+# One dispatch attempt for current explore turn (first try or retry), claude_cli side.
+#
+# Like dispatch_verify_turn_attempt_claude_cli.yml, this runs the SDK's OWN internal
+# explore-then-report loop in a single aknochow.claude.agent call using its built-in
+# Read/Grep/Glob tools and output_format (explore_findings_schema) for the "call report_findings"
+# role.
+#
+# Normalizes response into the shared explore_turn_result shape consumed by explore_turn.yml,
+# synthesizing a report_findings tool call if .structured is present.
+
+- name: "Claude CLI: show this explore turn's request configuration"
+  ansible.builtin.debug:
+    msg: "{{ [
+      'model: ' + (review_explore_claude_cli_model if review_explore_claude_cli_model is string else '(CLI default)'),
+      'effort: ' + review_claude_cli_effort,
+      'max_turns: ' + (review_explore_claude_cli_max_turns | string),
+      'tools: [Read, Grep, Glob]',
+      'setting_sources: ' + (review_claude_cli_setting_sources | string),
+      'cwd: ' + review_repo_path,
+      'output_format: json_schema (explore_findings_schema)',
+      ] }}"
+
+- name: "Claude CLI: dispatch the explore agent (single call runs its own explore loop)"
+  aknochow.claude.agent:
+    prompt: >-
+      Decide whether this change needs checking against the rest of the repo, using your tools if so, then report any additional findings (or an empty list if none).
+    system_prompt: "{{ explore_system_prompt }}"
+    model: "{{ review_explore_claude_cli_model }}"
+    effort: "{{ review_claude_cli_effort }}"
+    tools: [Read, Grep, Glob]
+    output_format:
+      type: json_schema
+      schema: "{{ explore_findings_schema }}"
+    max_turns: "{{ review_explore_claude_cli_max_turns }}"
+    timeout: "{{ review_claude_cli_timeout }}"
+    setting_sources: "{{ review_claude_cli_setting_sources }}"
+    cwd: "{{ review_repo_path }}"
+  environment:
+    ANTHROPIC_API_KEY: ""
+  register: _claude_cli_explore_raw
+
+- name: "Claude CLI: record this attempt's usage for the pipeline-wide stats summary"
+  ansible.builtin.set_fact:
+    pipeline_agent_calls: >-
+      {{ pipeline_agent_calls + [{
+           'target': review_org_repo + '#' + review_number, 'lens': 'explore',
+           'model': _claude_cli_explore_raw.resolved_model,
+           'usage': _claude_cli_explore_raw.usage_normalized,
+           'attempt': explore_attempt_number | default(1)
+         }] }}
+
+- name: "Claude CLI: find the tool_use id the SDK assigned this attempt's structured findings (if any)"
+  ansible.builtin.set_fact:
+    _claude_cli_explore_structured_calls: >-
+      {{ _claude_cli_explore_raw.tool_calls | default([]) | selectattr('name', 'equalto', 'StructuredOutput') | list }}
+
+- name: "Claude CLI: build this attempt's synthesized report_findings tool_use (if any)"
+  ansible.builtin.set_fact:
+    _claude_cli_explore_report_call: >-
+      {{ [{'id': (_claude_cli_explore_structured_calls[-1].id if _claude_cli_explore_structured_calls | length > 0 else 'claude_cli_report_findings'),
+           'name': 'report_findings',
+           'input': _claude_cli_explore_raw.structured}]
+         if _claude_cli_explore_raw.structured is defined else [] }}
+
+- name: "Claude CLI: normalize this attempt's result into the shared explore_turn_result shape"
+  ansible.builtin.set_fact:
+    explore_turn_result:
+      message:
+        content: >-
+          {{ [{'type': 'text', 'text': _claude_cli_explore_raw.text | default('')}] + _claude_cli_explore_report_call }}
+        model: "{{ _claude_cli_explore_raw.resolved_model }}"
+      tool_calls: "{{ _claude_cli_explore_report_call }}"
+      stop_reason: "{{ 'tool_use' if _claude_cli_explore_raw.structured is defined else _claude_cli_explore_raw.stop_reason }}"
+      usage: "{{ _claude_cli_explore_raw.usage }}"
+
+- name: "Claude CLI: check whether this attempt called report_findings"
+  ansible.builtin.set_fact:
+    _explore_attempt_report_calls: "{{ explore_turn_result.tool_calls | selectattr('name', 'equalto', 'report_findings') | list }}"
+
+- name: "Claude CLI: validate this attempt's report_findings call, if it made one"
+  when: _explore_attempt_report_calls | length > 0
+  block:
+    - name: Coerce this attempt's findings, tolerating a JSON-encoded string
+      coerce_findings_encoding:
+        value: "{{ _explore_attempt_report_calls[0].input.findings }}"
+        label: "Explore agent"
+      register: _explore_attempt_coerce_result
+
+    - name: Mark this attempt valid
+      ansible.builtin.set_fact:
+        explore_dispatch_valid: true
+  rescue:
+    - name: Mark this attempt invalid (malformed report_findings call)
+      ansible.builtin.set_fact:
+        explore_dispatch_valid: false
+
+- name: "Claude CLI: mark this attempt valid unless it is the forced last turn without report_findings"
+  when: _explore_attempt_report_calls | length == 0
+  ansible.builtin.set_fact:
+    explore_dispatch_valid: "{{ not (explore_last_turn | default(false)) }}"

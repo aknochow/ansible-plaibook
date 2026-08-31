@@ -300,6 +300,16 @@ review_explore_model: "{{ review_agent_model }}"
 # review_gemini_model, matching the Claude side's default to
 # review_agent_model.
 review_explore_gemini_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_EXPLORE_GEMINI_MODEL') | default(review_gemini_model, true) }}"
+# claude_cli equivalent of review_explore_model/review_explore_gemini_model
+# above, used by dispatch_explore_turn_attempt_claude_cli.yml. Left unset,
+# aknochow.claude.agent falls back to the CLI's own default model, same as
+# review_claude_cli_model.
+review_explore_claude_cli_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_EXPLORE_CLAUDE_CLI_MODEL') | default(omit, true) }}"
+
+# claude_cli equivalent of review_explore_max_turns (3), sized for a single
+# module call running its own internal Read/Grep/Glob exploration loop, matching
+# review_verify_claude_cli_max_turns's rationale.
+review_explore_claude_cli_max_turns: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_EXPLORE_CLAUDE_CLI_MAX_TURNS') | default(25, true) | int }}"
 
 # tasks/verify.yml: an independent, adversarial re-check of Critical/
 # Major findings' checkable factual claims (SDK signatures, stdlib
