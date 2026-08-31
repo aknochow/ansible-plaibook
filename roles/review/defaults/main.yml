@@ -208,6 +208,10 @@ review_explore_max_turns: 3
 # lighter task than the lenses' full diff review, and a cheaper model
 # may do it just as well.
 review_explore_model: "{{ review_agent_model }}"
+# Gemini equivalent of review_explore_model above. Defaults to
+# review_gemini_model, matching the Claude side's default to
+# review_agent_model.
+review_explore_gemini_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_EXPLORE_GEMINI_MODEL') | default(review_gemini_model, true) }}"
 
 # tasks/verify.yml: an independent, adversarial re-check of Critical/
 # Major findings' checkable factual claims (SDK signatures, stdlib
