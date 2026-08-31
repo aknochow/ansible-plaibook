@@ -45,6 +45,43 @@ def test_unsafe_hostname_or_project_chars_fail_to_parse():
     assert parse_url("https://-evil.example.com/org/repo/-/merge_requests/1") is None
 
 
+def test_fetch_gitlab_mock():
+    mr_data = {
+        "iid": 15,
+        "title": "GitLab MR Title",
+        "author": {"username": "gluser"},
+        "state": "opened",
+        "source_branch": "feature-gl",
+        "target_branch": "main",
+        "web_url": "https://gitlab.example.com/org/repo/-/merge_requests/15",
+        "description": "MR description",
+        "sha": "gl1234567890abcdef",
+    }
+    changes_data = {
+        "changes": [{"new_path": "playbook.yml", "old_path": "playbook.yml"}]
+    }
+
+    def mock_http_get(url, headers=None, timeout=60):
+        if url.endswith("/merge_requests/15"):
+            return 200, mr_data, {}
+        elif url.endswith("/merge_requests/15/changes"):
+            return 200, changes_data, {}
+        elif "/pipelines" in url:
+            return 200, [], {}
+        elif "/discussions" in url:
+            return 200, [], {}
+        return 404, None, {}
+
+    with patch("fetch_pr_context.http_get", side_effect=mock_http_get):
+        result = fetch_gitlab("gitlab.example.com", "org/repo", 15)
+
+    assert result["identifier"] == "MR !15"
+    assert result["author"] == "gluser"
+    assert result["head_sha"] == "gl1234567890abcdef"
+    assert len(result["files_changed"]) == 1
+    assert result["files_changed"][0]["path"] == "playbook.yml"
+
+
 def test_fetch_github_with_pagination():
     pr_data = {
         "number": 42,

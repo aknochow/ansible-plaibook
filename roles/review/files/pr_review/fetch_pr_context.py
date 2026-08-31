@@ -160,6 +160,8 @@ def fetch_gitlab(hostname: str, project: str, mr_iid: int) -> dict:
     if not mr or not isinstance(mr, dict) or status != 200:
         return {"error": f"could not fetch MR !{mr_iid} from {project} (HTTP {status})"}
 
+    head_sha = (mr.get("diff_refs") or {}).get("head_sha") or mr.get("sha", "")
+
     # Fetch changed files
     status, changes, _ = http_get(f"{base_url}/projects/{encoded}/merge_requests/{mr_iid}/changes", headers=headers)
     raw_files = changes.get("changes", []) if isinstance(changes, dict) else []
