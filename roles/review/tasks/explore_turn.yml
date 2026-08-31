@@ -45,7 +45,7 @@
         that:
           - explore_dispatch_valid
         fail_msg: >-
-          Explore agent ({{ review_explore_model if agent_family == 'claude' else (review_explore_claude_cli_model if agent_family == 'claude_cli' else review_explore_gemini_model) }}) produced invalid or
+          Explore agent ({{ review_explore_model if agent_family == 'claude' else ((review_explore_claude_cli_model if review_explore_claude_cli_model is string else '(CLI default)') if agent_family == 'claude_cli' else review_explore_gemini_model) }}) produced invalid or
           incomplete structured output on turn {{ explore_turn_count }}
           after {{ review_structured_output_max_attempts }} attempt(s).
           This is a confirmed, probabilistic model-generation quirk (see

@@ -71,7 +71,7 @@
           {{ [{'type': 'text', 'text': _claude_cli_explore_raw.text | default('')}] + _claude_cli_explore_report_call }}
         model: "{{ _claude_cli_explore_raw.resolved_model }}"
       tool_calls: "{{ _claude_cli_explore_report_call }}"
-      stop_reason: "{{ 'tool_use' if _claude_cli_explore_raw.structured is defined else _claude_cli_explore_raw.stop_reason }}"
+      stop_reason: "{{ 'tool_use' if _claude_cli_explore_raw.structured is defined else (_claude_cli_explore_raw.stop_reason | default('unknown')) }}"
       usage: "{{ _claude_cli_explore_raw.usage }}"
 
 - name: "Claude CLI: check whether this attempt called report_findings"
