@@ -103,17 +103,7 @@
       ansible.builtin.set_fact:
         explore_dispatch_valid: false
 
-- name: Mark a forced-last-turn attempt invalid if no tool was called at all
-  when: >-
-    _explore_attempt_report_calls | length == 0
-    and explore_last_turn
-    and explore_turn_result.stop_reason != 'tool_use'
+- name: Mark this attempt valid unless it is the forced last turn without report_findings
+  when: _explore_attempt_report_calls | length == 0
   ansible.builtin.set_fact:
-    explore_dispatch_valid: false
-
-- name: Mark a non-report_findings attempt valid otherwise (normal mid-exploration behavior)
-  when: >-
-    _explore_attempt_report_calls | length == 0
-    and not (explore_last_turn and explore_turn_result.stop_reason != 'tool_use')
-  ansible.builtin.set_fact:
-    explore_dispatch_valid: true
+    explore_dispatch_valid: "{{ not (explore_last_turn | default(false)) }}"
