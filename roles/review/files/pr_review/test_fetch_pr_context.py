@@ -133,3 +133,50 @@ def test_fetch_gitea_mock():
     assert result["files_changed"][0]["path"] == "ansible.yml"
     assert len(result["unresolved_comments"]) == 1
 
+
+def test_fetch_gitea_file_statuses_and_deletions():
+    pr_data = {
+        "number": 11,
+        "title": "Refactor and remove deprecated files",
+        "user": {"login": "giteauser"},
+        "state": "open",
+        "head": {"ref": "feature-cleanup", "sha": "abc123456789"},
+        "base": {"ref": "main"},
+        "html_url": "https://gitea.example.com/org/repo/pulls/11",
+        "body": "PR description",
+    }
+    files_data = [
+        {"filename": "roles/awx/templates/awx-instance.yaml.j2", "status": "deleted", "additions": 0, "deletions": 45},
+        {"filename": "docs/old_name.md", "status": "renamed", "additions": 2, "deletions": 1},
+        {"filename": "admin/wiki-lint", "status": "added", "additions": 135, "deletions": 0},
+        {"filename": ".gitignore", "status": "modified", "additions": 3, "deletions": 0},
+    ]
+
+    def mock_http_get(url, headers=None, timeout=60):
+        if url.endswith("/pulls/11"):
+            return 200, pr_data, {}
+        elif "files?limit=50&page=1" in url:
+            return 200, files_data, {}
+        elif "/commits/abc123456789/statuses" in url:
+            return 200, [], {}
+        elif "/pulls/11/reviews" in url:
+            return 200, [], {}
+        return 404, None, {}
+
+    with patch("fetch_pr_context.http_get", side_effect=mock_http_get):
+        result = fetch_gitea("gitea.example.com", "org/repo", 11)
+
+    assert len(result["files_changed"]) == 4
+    file_map = {f["path"]: f for f in result["files_changed"]}
+
+    # Verify deleted file is preserved and marked as 'Deleted'
+    assert "roles/awx/templates/awx-instance.yaml.j2" in file_map
+    assert file_map["roles/awx/templates/awx-instance.yaml.j2"]["status"] == "Deleted"
+    assert file_map["roles/awx/templates/awx-instance.yaml.j2"]["deletions"] == 45
+
+    # Verify renamed, added, modified
+    assert file_map["docs/old_name.md"]["status"] == "Renamed"
+    assert file_map["admin/wiki-lint"]["status"] == "Added"
+    assert file_map[".gitignore"]["status"] == "Modified"
+
+
