@@ -104,12 +104,43 @@ def http_get(url: str, headers: dict[str, str] | None = None, timeout: int = 60)
         return 0, None, {}
 
 
+import shutil
+import subprocess
+
+def get_github_token() -> str | None:
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if not token and shutil.which("gh"):
+        try:
+            res = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=5)
+            if res.returncode == 0 and res.stdout.strip():
+                token = res.stdout.strip()
+        except Exception:
+            pass
+    return token
+
+
+def get_gitlab_token() -> str | None:
+    token = os.environ.get("GITLAB_TOKEN") or os.environ.get("GLAB_TOKEN")
+    if not token and shutil.which("glab"):
+        try:
+            res = subprocess.run(["glab", "auth", "token"], capture_output=True, text=True, timeout=5)
+            if res.returncode == 0 and res.stdout.strip():
+                token = res.stdout.strip()
+        except Exception:
+            pass
+    return token
+
+
+def get_gitea_token() -> str | None:
+    return os.environ.get("GITEA_TOKEN") or os.environ.get("TEA_TOKEN")
+
+
 # ---------------------------------------------------------------------------
 # GitLab
 # ---------------------------------------------------------------------------
 
 def fetch_gitlab(hostname: str, project: str, mr_iid: int) -> dict:
-    token = os.environ.get("GITLAB_TOKEN") or os.environ.get("GLAB_TOKEN")
+    token = get_gitlab_token()
     headers = {}
     if token:
         headers["PRIVATE-TOKEN"] = token
@@ -204,7 +235,7 @@ def fetch_gitlab(hostname: str, project: str, mr_iid: int) -> dict:
 # ---------------------------------------------------------------------------
 
 def fetch_github(owner: str, repo: str, number: int) -> dict:
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    token = get_github_token()
     headers = {"Accept": "application/vnd.github+json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"

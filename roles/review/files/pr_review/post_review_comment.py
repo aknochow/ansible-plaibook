@@ -52,8 +52,39 @@ def http_post(url: str, payload: dict, headers: dict[str, str] | None = None, ti
         return 0, str(e)
 
 
-def post_gitlab(project: str, mr_iid: str, findings_file: str, host: str) -> None:
+import shutil
+import subprocess
+
+def get_github_token() -> str | None:
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if not token and shutil.which("gh"):
+        try:
+            res = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=5)
+            if res.returncode == 0 and res.stdout.strip():
+                token = res.stdout.strip()
+        except Exception:
+            pass
+    return token
+
+
+def get_gitlab_token() -> str | None:
     token = os.environ.get("GITLAB_TOKEN") or os.environ.get("GLAB_TOKEN")
+    if not token and shutil.which("glab"):
+        try:
+            res = subprocess.run(["glab", "auth", "token"], capture_output=True, text=True, timeout=5)
+            if res.returncode == 0 and res.stdout.strip():
+                token = res.stdout.strip()
+        except Exception:
+            pass
+    return token
+
+
+def get_gitea_token() -> str | None:
+    return os.environ.get("GITEA_TOKEN") or os.environ.get("TEA_TOKEN")
+
+
+def post_gitlab(project: str, mr_iid: str, findings_file: str, host: str) -> None:
+    token = get_gitlab_token()
     headers = {}
     if token:
         headers["PRIVATE-TOKEN"] = token
@@ -72,7 +103,7 @@ def post_gitlab(project: str, mr_iid: str, findings_file: str, host: str) -> Non
 
 
 def post_github(repo: str, pr_number: str, findings_file: str) -> None:
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    token = get_github_token()
     headers = {"Accept": "application/vnd.github+json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
