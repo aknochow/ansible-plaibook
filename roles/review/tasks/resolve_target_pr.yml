@@ -11,10 +11,12 @@
       {{
         'https://github.com/' + review_org_repo + '/pull/' + review_number
         if review_platform == 'github'
+        else (review_scheme | default('https')) + '://' + (review_hostname or 'gitea.example.com') + '/' + review_org_repo + '/pulls/' + review_number
+        if review_platform == 'gitea'
         else 'https://' + (review_hostname or 'gitlab.com') + '/' + review_org_repo + '/-/merge_requests/' + review_number
       }}
 
-- name: Fetch PR/MR context via fetch_pr_context.py (runs locally — needs gh/glab auth)
+- name: Fetch PR/MR context via fetch_pr_context.py (runs locally — needs token auth)
   ansible.builtin.command:
     argv:
       - python3
@@ -34,8 +36,14 @@
 - name: Determine the repo clone URL
   ansible.builtin.set_fact:
     review_clone_url: >-
-      {{ 'https://github.com/' + review_org_repo + '.git'
+      {{ review_clone_url_override
+         if review_clone_url_override is defined
+         else 'git@' + review_hostname + ':' + review_org_repo + '.git'
+         if (review_platform == 'gitea' and (review_clone_protocol | default('ssh')) == 'ssh')
+         else 'https://github.com/' + review_org_repo + '.git'
          if review_platform == 'github'
+         else 'https://' + (review_hostname or 'gitea.example.com') + '/' + review_org_repo + '.git'
+         if review_platform == 'gitea'
          else 'https://' + (review_hostname or 'gitlab.com') + '/' + review_org_repo + '.git' }}
 
 - name: Create a working checkout directory (controller — the clone always happens here)
@@ -45,27 +53,20 @@
   register: review_clone_dir_controller
 
 # Clones on the controller rather than delegate_to review_delegate_host —
-# the controller has gh/glab's ambient git credential helper configured
-# (~/.gitconfig's credential.https://github.com.helper, set up by `gh
-# auth setup-git`); a fresh sandbox has none of that, so an HTTPS clone
-# of a private repo fails immediately inside one ("could not read
-# Username for 'https://github.com'"). Mirrors review.yml's own
-# harness-checkout pattern exactly: clone/checkout wherever auth
-# actually lives, then COPY into the sandbox for isolated execution —
-# same reasoning as that file's comment on why the harness is copied in
-# rather than cloned directly inside the sandbox. A single git module
-# call here: clone, fetch the PR/MR head ref via refspec (GitHub exposes
-# refs/pull/N/head, GitLab refs/merge-requests/N/head — both fetchable
-# the same way, no special auth/API access beyond a plain clone), and
-# check it out as 'review-source'. The module's own `after` return
-# value is the full checked-out SHA, so no extra rev-parse call is
-# needed either.
+# the controller has ambient git credentials or HTTPS clone access configured.
+# Mirrors review.yml's own harness-checkout pattern exactly: clone/checkout
+# wherever auth actually lives, then COPY into the sandbox for isolated
+# execution. A single git module call here: clone, fetch the PR/MR head ref via
+# refspec (GitHub/Gitea expose refs/pull/N/head, GitLab refs/merge-requests/N/head —
+# all fetchable the same way, no special auth/API access beyond a plain clone), and
+# check it out as 'review-source'. The module's own `after` return value is the
+# full checked-out SHA, so no extra rev-parse call is needed either.
 - name: Clone the target repo and check out the PR/MR head ref
   ansible.builtin.git:
     repo: "{{ review_clone_url }}"
     dest: "{{ review_clone_dir_controller.path }}"
     refspec: >-
-      +refs/{{ 'pull' if review_platform == 'github' else 'merge-requests' }}/{{ review_number }}/head:refs/heads/review-source
+      +refs/{{ 'pull' if review_platform in ['github', 'gitea'] else 'merge-requests' }}/{{ review_number }}/head:refs/heads/review-source
     version: review-source
   register: review_clone_result
   # Real network clone of a potentially large, foreign repo -- see
@@ -105,6 +106,17 @@
     # also have a .path attribute.
     review_checkout_dir: { path: "{{ review_clone_dir_controller.path }}" }
 
+# Compute the merge base between origin/HEAD and the PR/MR head ref.
+# Using the merge base as review_target_ref provides true 3-dot PR diff semantics
+# (git diff merge_base review-source) so the review only analyzes changes introduced
+# by the PR branch, ignoring any subsequent commits that landed on main after branching.
+- name: Compute the merge base between the default branch and the PR/MR head
+  ansible.builtin.command:
+    argv: [git, merge-base, origin/HEAD, review-source]
+    chdir: "{{ review_clone_dir_controller.path }}"
+  changed_when: false
+  register: _review_merge_base_result
+
 # Plain set_fact, not include_role vars: -- target resolution and the
 # review engine are the same role now, so these just need to be ambient
 # facts before run_review_engine.yml is included, same pattern
@@ -112,7 +124,7 @@
 - name: Set outputs for the review engine
   ansible.builtin.set_fact:
     review_repo_path: "{{ review_checkout_dir.path }}"
-    review_target_ref: "origin/HEAD"
+    review_target_ref: "{{ _review_merge_base_result.stdout | trim }}"
     review_source_ref: "review-source"
     review_short_sha: "{{ review_clone_result.after[:7] }}"
     review_branch: "{{ review_platform }}-{{ review_org_repo | regex_replace('/', '-') }}-{{ review_number }}"

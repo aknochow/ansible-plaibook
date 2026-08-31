@@ -1,0 +1,154 @@
+---
+# Regression test verifying that review_type=pr uses git merge-base
+# to compute a true 3-dot diff against the PR's branch point, ensuring
+# that commits landing on the default branch after the PR branched are
+# not incorrectly included in the PR review diff.
+#
+# Usage:
+#   ansible-playbook tests/test_pr_merge_base_diff.yml
+
+- name: Test PR merge-base isolation against subsequent main commits
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Create temporary test directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: "test-pr-merge-base-"
+      register: test_repo_dir
+
+    - name: Run test scenarios with automatic cleanup
+      always:
+        - name: Clean up temporary test repository
+          ansible.builtin.file:
+            path: "{{ test_repo_dir.path }}"
+            state: absent
+      block:
+        - name: Initialize test git repository
+          ansible.builtin.command:
+            argv: [git, init, -b, main]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: Configure test git user
+          ansible.builtin.command:
+            argv: [git, config, user.name, "Test User"]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: Configure test git email
+          ansible.builtin.command:
+            argv: [git, config, user.email, "test@example.com"]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: Create initial file on main (branch point)
+          ansible.builtin.copy:
+            content: "initial base content\n"
+            dest: "{{ test_repo_dir.path }}/base.txt"
+            mode: "0644"
+
+        - name: Commit initial base file on main
+          ansible.builtin.command:
+            argv: [git, add, base.txt]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: Commit base commit
+          ansible.builtin.command:
+            argv: [git, commit, -m, "Initial commit on main"]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: Create and switch to feature PR branch
+          ansible.builtin.command:
+            argv: [git, checkout, -b, review-source]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: Add PR feature file
+          ansible.builtin.copy:
+            content: "feature PR changes\n"
+            dest: "{{ test_repo_dir.path }}/pr_feature.txt"
+            mode: "0644"
+
+        - name: Commit PR feature file
+          ansible.builtin.command:
+            argv: [git, add, pr_feature.txt]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: Commit on PR branch
+          ansible.builtin.command:
+            argv: [git, commit, -m, "Add feature in PR"]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: Switch back to main branch
+          ansible.builtin.command:
+            argv: [git, checkout, main]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: Add subsequent file to main (simulating another PR merged to main after this branch)
+          ansible.builtin.copy:
+            content: "another PR landed on main later\n"
+            dest: "{{ test_repo_dir.path }}/main_later.txt"
+            mode: "0644"
+
+        - name: Commit subsequent change on main
+          ansible.builtin.command:
+            argv: [git, add, main_later.txt]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: Commit on main
+          ansible.builtin.command:
+            argv: [git, commit, -m, "Commit landed on main after PR branched"]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: Compute merge-base between main and review-source
+          ansible.builtin.command:
+            argv: [git, merge-base, main, review-source]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: false
+          register: computed_merge_base
+
+        - name: Compute diff using computed merge-base as target ref (3-dot semantic)
+          ansible.builtin.command:
+            argv: [git, diff, --name-only, "{{ computed_merge_base.stdout | trim }}", review-source, --]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: false
+          register: merge_base_diff_files
+
+        - name: Compute diff using main directly (flawed 2-dot semantic)
+          ansible.builtin.command:
+            argv: [git, diff, --name-only, main, review-source, --]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: false
+          register: direct_main_diff_files
+
+        - name: Assert merge-base diff contains ONLY the PR branch file
+          ansible.builtin.assert:
+            that:
+              - merge_base_diff_files.stdout_lines | length == 1
+              - "'pr_feature.txt' in merge_base_diff_files.stdout_lines"
+              - "'main_later.txt' not in merge_base_diff_files.stdout_lines"
+            fail_msg: >-
+              Merge base diff incorrectly included files outside the PR:
+              {{ merge_base_diff_files.stdout_lines }}
+
+        - name: Assert direct main diff incorrectly captured subsequent main commits
+          ansible.builtin.assert:
+            that:
+              - direct_main_diff_files.stdout_lines | length == 2
+              - "'main_later.txt' in direct_main_diff_files.stdout_lines"
+            fail_msg: >-
+              Direct main diff should have picked up main_later.txt demonstrating the 2-dot regression.
+
+        - name: Show test pass confirmation
+          ansible.builtin.debug:
+            msg: "PASSED: git merge-base diff correctly isolates PR changes and ignores subsequent main commits."
