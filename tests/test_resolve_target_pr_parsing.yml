@@ -195,6 +195,20 @@
           - review_hostname == "gitea.example.com"
         fail_msg: "Gitea shorthand with host: got platform={{ review_platform }} org_repo={{ review_org_repo }} number={{ review_number }} hostname='{{ review_hostname }}'"
 
+    - name: "Scenario: Gitea shorthand without host (gitea:org/repo#N)"
+      vars:
+        review_target: "gitea:aknochow/ansible-plaibook#12"
+      ansible.builtin.include_tasks: "{{ parse_pr_target_path }}"
+
+    - name: Assert Gitea shorthand without host falls back to default hostname
+      ansible.builtin.assert:
+        that:
+          - review_platform == "gitea"
+          - review_org_repo == "aknochow/ansible-plaibook"
+          - review_number == "12"
+          - review_hostname == "gitea.example.com"
+        fail_msg: "Gitea shorthand without host: got platform={{ review_platform }} org_repo={{ review_org_repo }} number={{ review_number }} hostname='{{ review_hostname }}'"
+
     - name: Show the overall pass confirmation message
       ansible.builtin.debug:
         msg: "PASSED: GitHub URL/bare, GitLab URL/bare, Gitea URL/shorthand, and the unparseable-target failure message all resolve correctly."

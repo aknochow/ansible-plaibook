@@ -44,6 +44,7 @@
     review_hostname: >-
       {{ _gt_url_match[0] if _gt_url_match
          else _gt_bare_host_match[0] if _gt_bare_host_match
+         else (lookup('ansible.builtin.env', 'GITEA_HOST') | default('gitea.example.com', true)) if _gt_bare_match
          else _gl_url_match[0] if _gl_url_match
          else _gl_bare_host_match[0] if _gl_bare_host_match
          else '' }}

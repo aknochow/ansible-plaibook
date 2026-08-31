@@ -11,7 +11,7 @@
       {{
         'https://github.com/' + review_org_repo + '/pull/' + review_number
         if review_platform == 'github'
-        else 'https://' + review_hostname + '/' + review_org_repo + '/pulls/' + review_number
+        else 'https://' + (review_hostname or 'gitea.example.com') + '/' + review_org_repo + '/pulls/' + review_number
         if review_platform == 'gitea'
         else 'https://' + (review_hostname or 'gitlab.com') + '/' + review_org_repo + '/-/merge_requests/' + review_number
       }}
@@ -38,6 +38,8 @@
     review_clone_url: >-
       {{ 'https://github.com/' + review_org_repo + '.git'
          if review_platform == 'github'
+         else 'https://' + (review_hostname or 'gitea.example.com') + '/' + review_org_repo + '.git'
+         if review_platform == 'gitea'
          else 'https://' + (review_hostname or 'gitlab.com') + '/' + review_org_repo + '.git' }}
 
 - name: Create a working checkout directory (controller — the clone always happens here)
