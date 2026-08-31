@@ -23,9 +23,9 @@
 - name: "Claude: show the Security agent's request configuration"
   ansible.builtin.debug:
     msg: "{{ [
-      'provider: ' + claude_provider,
-      'region: ' + (claude_vertex_region if claude_provider == 'vertex' else 'n/a'),
-      'project_id: ' + (claude_vertex_project if claude_provider == 'vertex' else 'n/a'),
+      'provider: ' + (claude_provider | string),
+      'region: ' + (claude_vertex_region if (claude_provider | string) == 'vertex' else 'n/a'),
+      'project_id: ' + (claude_vertex_project if (claude_provider | string) == 'vertex' else 'n/a'),
       'model: ' + review_agent_model,
       'max_tokens: 8192',
       'cache_system: true',
@@ -59,9 +59,9 @@
 - name: "Claude: show the Review agent's request configuration"
   ansible.builtin.debug:
     msg: "{{ [
-      'provider: ' + claude_provider,
-      'region: ' + (claude_vertex_region if claude_provider == 'vertex' else 'n/a'),
-      'project_id: ' + (claude_vertex_project if claude_provider == 'vertex' else 'n/a'),
+      'provider: ' + (claude_provider | string),
+      'region: ' + (claude_vertex_region if (claude_provider | string) == 'vertex' else 'n/a'),
+      'project_id: ' + (claude_vertex_project if (claude_provider | string) == 'vertex' else 'n/a'),
       'model: ' + review_agent_model,
       'max_tokens: 8192',
       'cache_system: true',

@@ -51,6 +51,21 @@
   ansible.builtin.set_fact:
     review_prior_review_md: "{{ (_prior_review_raw.content | b64decode) if _latest_prior_review.found else '' }}"
 
+# Needed by the same-commit fast path to populate pipeline_findings_reports
+# with the prior run's real verdict/score/paths -- without this, a fast-path
+# hit silently produces an empty last_run.json targets entry, making a
+# legitimate cache hit (including a real NEEDS_CHANGES verdict) look like
+# the pipeline did nothing.
+- name: Read the latest prior review's summary.json if one was found
+  ansible.builtin.slurp:
+    path: "{{ review_output_base }}/{{ review_org_repo }}/{{ review_branch }}/{{ _latest_prior_review.latest_dir }}/summary.json"
+  register: _prior_review_summary_raw
+  when: _latest_prior_review.found
+
+- name: Decode the prior review's summary
+  ansible.builtin.set_fact:
+    review_prior_summary: "{{ (_prior_review_summary_raw.content | b64decode | from_json) if _latest_prior_review.found else {} }}"
+
 - name: Set report-header identity facts from already-resolved Ansible facts
   ansible.builtin.set_fact:
     briefing_project: "{{ review_org_repo }}"

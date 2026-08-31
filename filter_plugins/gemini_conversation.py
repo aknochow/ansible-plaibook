@@ -39,6 +39,10 @@ comment for the live-call evidence):
 """
 from __future__ import annotations
 
+from ansible.utils.display import Display
+
+display = Display()
+
 
 def to_gemini_contents(messages: list) -> list:
     """Translate a Claude-shaped message list into Gemini contents[]."""
@@ -72,6 +76,28 @@ def to_gemini_contents(messages: list) -> list:
                     parts.append(part)
                 elif block_type == "tool_result":
                     tool_use_id = block.get("tool_use_id")
+                    # Gemini's function_response requires the function NAME,
+                    # while Claude's tool_result carries only the tool_use_id
+                    # -- so the name is recovered from the tool_use block
+                    # earlier in this same conversation.
+                    #
+                    # A miss means the pairing broke: a truncated or
+                    # reordered history, or a tool_result whose tool_use was
+                    # dropped. Falling back to the raw id keeps the turn
+                    # well-formed rather than crashing, but Gemini then sees
+                    # a function name that matches no declared function, so
+                    # the result is silently useless to the model. Warn, or
+                    # this failure mode is invisible in a verify loop that
+                    # simply reaches a weaker conclusion.
+                    if tool_use_id not in tool_names_by_id:
+                        display.warning(
+                            "gemini_conversation: no tool_use block found for "
+                            "tool_use_id %r; falling back to the raw id as the "
+                            "function_response name. Gemini will not match it to "
+                            "a declared function. This usually means the "
+                            "conversation history was truncated or reordered."
+                            % (tool_use_id,)
+                        )
                     name = tool_names_by_id.get(tool_use_id, tool_use_id)
                     if block.get("is_error"):
                         response = {"error": block.get("content")}

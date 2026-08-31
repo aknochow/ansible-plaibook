@@ -19,3 +19,39 @@
 - name: Skip lens dispatch, merge, and persist
   ansible.builtin.debug:
     msg: "Same-commit fast path — findings not re-persisted, no new review directory created."
+
+# Without this, pipeline_findings_reports (last_run.json's own "targets"
+# list) stays empty on a fast-path hit -- a legitimate cache hit (which
+# can carry a real NEEDS_CHANGES verdict) then looks identical to the
+# pipeline having done nothing at all. No new run-scoped copy exists
+# since nothing new was persisted this run, so summary/findings paths
+# fall back to the prior review's own fixed paths rather than a
+# nonexistent run-scoped pair.
+- name: Accumulate the cached prior review for the final summary
+  ansible.builtin.set_fact:
+    pipeline_findings_reports: >-
+      {{ pipeline_findings_reports + [{
+        'target': review_org_repo + '#' + review_number,
+        'report': review_final_report,
+        'verdict': review_prior_summary.verdict,
+        'score': review_prior_summary.score_overall | float,
+        'summary_path': review_output_base + '/' + review_org_repo + '/' + review_branch + '/' + _latest_prior_review.latest_dir + '/summary.json',
+        'findings_path': review_prior_summary.findings_path | default(review_output_base + '/' + review_org_repo + '/' + review_branch + '/' + _latest_prior_review.latest_dir + '/findings.md'),
+        'summary_run_scoped_path': review_output_base + '/' + review_org_repo + '/' + review_branch + '/' + _latest_prior_review.latest_dir + '/summary.json',
+        'findings_run_scoped_path': review_prior_summary.findings_path | default(review_output_base + '/' + review_org_repo + '/' + review_branch + '/' + _latest_prior_review.latest_dir + '/findings.md'),
+        'cache_hit': true
+      }] }}
+
+# review_type: commit's own fail-on-regression gate (review.yml) checks
+# review_verdict/score_overall/findings_critical/findings_major -- none
+# of which the fast path previously set. Without this, a cached
+# NEEDS_CHANGES verdict with real Critical/Major findings silently
+# never failed the playbook run, defeating the entire point of a
+# git-hook-style gate (review_type: commit is documented specifically
+# for that use case).
+- name: Restore verdict/score/findings facts from the cached review, for the fail-on-regression gate
+  ansible.builtin.set_fact:
+    review_verdict: "{{ review_prior_summary.verdict }}"
+    score_overall: "{{ review_prior_summary.score_overall | float }}"
+    findings_critical: "{{ review_prior_summary.findings | selectattr('severity', 'equalto', 'Critical') | list }}"
+    findings_major: "{{ review_prior_summary.findings | selectattr('severity', 'equalto', 'Major') | list }}"

@@ -59,10 +59,10 @@ agent_family: claude   # claude | gemini | claude_cli | qwen
 # ANTHROPIC_API_KEY env vars) take over unchanged. Override any of
 # these via extra_vars, or set them once in your own gitignored
 # host_vars/localhost.yml if you always use the same provider.
-claude_provider: "{{ lookup('ansible.builtin.env', 'ANSIBLE_CLAUDE_PROVIDER') | default(omit) }}"
+claude_provider: "{{ lookup('ansible.builtin.env', 'ANSIBLE_CLAUDE_PROVIDER') | default(omit, true) }}"
 claude_vertex_region: "{{ lookup('ansible.builtin.env', 'ANTHROPIC_VERTEX_REGION') | default('global', true) }}"
-claude_vertex_project: "{{ lookup('ansible.builtin.env', 'ANTHROPIC_VERTEX_PROJECT_ID') | default(omit) }}"
-claude_api_key: "{{ lookup('ansible.builtin.env', 'ANTHROPIC_API_KEY') | default(omit) }}"
+claude_vertex_project: "{{ lookup('ansible.builtin.env', 'ANTHROPIC_VERTEX_PROJECT_ID') | default(omit, true) }}"
+claude_api_key: "{{ lookup('ansible.builtin.env', 'ANTHROPIC_API_KEY') | default(omit, true) }}"
 
 # aknochow.gemini auth, mirrors claude_provider/claude_api_key above.
 # backend defaults to "api" (aknochow.gemini's own argspec default) so
@@ -216,7 +216,21 @@ review_output_base: "{{ lookup('env', 'HOME') }}/reviews"
 # existed -- making spend-to-date and score-over-time both unanswerable
 # without scraping the cache by hand.
 review_run_ledger_enabled: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_RUN_LEDGER') | default(true, true) | bool }}"
-review_run_ledger_path: "{{ lookup('env', 'HOME') }}/.cache/ansible-plaibook/run_ledger.jsonl"
+# Per-HOST ledger file, not one shared file. Two machines appending to
+# the same path would conflict on every merge; appending to their own
+# never conflicts at all, and reading is just `cat ledger/*.jsonl`.
+# Attribution comes free from the filename.
+#
+# Default stays machine-local so a fresh clone works with no setup.
+# Point it at a git-backed directory to combine machines, e.g.:
+#   -e review_run_ledger_dir=/path/to/ansible-agentbench-data/ledger
+# Git rather than object storage on purpose: the data is tiny, `gh` auth
+# already works everywhere, it is diffable and versioned, and object
+# stores have no append operation -- a read-modify-write from two
+# machines silently loses entries.
+review_run_ledger_dir: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_RUN_LEDGER_DIR') | default(lookup('env', 'HOME') ~ '/.cache/ansible-plaibook/ledger', true) }}"
+review_run_ledger_host: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_RUN_LEDGER_HOST') | default(lookup('pipe', 'hostname -s'), true) | lower | regex_replace('[^a-z0-9_.-]', '-') }}"
+review_run_ledger_path: "{{ review_run_ledger_dir }}/{{ review_run_ledger_host }}.jsonl"
 
 # Kill switch for briefing.yml's same-commit fast path: set false to
 # force every run through the full lens/merge/explore/verify dispatch
@@ -282,6 +296,10 @@ review_explore_max_turns: 3
 # lighter task than the lenses' full diff review, and a cheaper model
 # may do it just as well.
 review_explore_model: "{{ review_agent_model }}"
+# Gemini equivalent of review_explore_model above. Defaults to
+# review_gemini_model, matching the Claude side's default to
+# review_agent_model.
+review_explore_gemini_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_EXPLORE_GEMINI_MODEL') | default(review_gemini_model, true) }}"
 
 # tasks/verify.yml: an independent, adversarial re-check of Critical/
 # Major findings' checkable factual claims (SDK signatures, stdlib

@@ -41,6 +41,21 @@ def test_unknown_block_type_passed_through_unchanged():
     assert sanitize_response_content_for_request(content) == content
 
 
+def test_unknown_block_type_warns(monkeypatch):
+    warnings = []
+    monkeypatch.setattr("sanitize_response_content_for_request.display.warning", warnings.append)
+    sanitize_response_content_for_request([{"type": "thinking", "thinking": "..."}])
+    assert len(warnings) == 1
+    assert "thinking" in warnings[0]
+
+
+def test_known_block_type_does_not_warn(monkeypatch):
+    warnings = []
+    monkeypatch.setattr("sanitize_response_content_for_request.display.warning", warnings.append)
+    sanitize_response_content_for_request(FIXTURE_CONTENT)
+    assert warnings == []
+
+
 def test_empty_list_returns_empty_list():
     assert sanitize_response_content_for_request([]) == []
 

@@ -5,8 +5,11 @@
 - name: Parse the review target identifier
   ansible.builtin.set_fact:
     _gh_url_match: "{{ review_target | regex_search('^https?://github\\.com/([^/]+/[^/]+)/pull/(\\d+)', '\\1', '\\2') }}"
+    _gt_url_match: "{{ review_target | regex_search('^(https?)://(?!github\\.com)([^/]+)/([^/]+/[^/]+)/pulls?/(\\d+)', '\\1', '\\2', '\\3', '\\4') }}"
     _gl_url_match: "{{ review_target | regex_search('^https?://([^/]+)/(.+)/-/merge_requests/(\\d+)', '\\1', '\\2', '\\3') }}"
-    _gh_bare_match: "{{ review_target | regex_search('^([^/]+/[^/]+)#(\\d+)$', '\\1', '\\2') }}"
+    _gh_bare_match: "{{ review_target | regex_search('^([A-Za-z0-9_.~-]+/[A-Za-z0-9_.~-]+)#(\\d+)$', '\\1', '\\2') }}"
+    _gt_bare_host_match: "{{ review_target | regex_search('^gitea:([A-Za-z0-9._-]+):([^/]+/[^/]+)#(\\d+)$', '\\1', '\\2', '\\3') }}"
+    _gt_bare_match: "{{ review_target | regex_search('^gitea:([^/]+/[^/]+)#(\\d+)$', '\\1', '\\2') }}"
     _gl_bare_match: "{{ review_target | regex_search('^([^/]+/[^/]+)!(\\d+)$', '\\1', '\\2') }}"
     # Self-hosted GitLab form: 'host:org/repo!N'. Separate regex (not optional group)
     # to avoid None handling in ternaries. Restrict hostname capture to valid charset.
@@ -15,20 +18,18 @@
 - name: Resolve platform, org/repo, number, hostname
   ansible.builtin.set_fact:
     review_platform: >-
-      {{ 'github' if (_gh_url_match or _gh_bare_match) else 'gitlab' }}
-    # regex_search returns '' (not None) when nothing matches; guard indexing.
-    # _gl_bare_host_match checked before _gl_bare_match (priority + correctness).
-    # own [^/]+ doesn't exclude ':', so it ALSO matches a host-prefixed
-    # target (e.g. 'gitlab.example.com:aknochow/ansible-plaibook!29' would
-    # match _gl_bare_match with org_repo captured as
-    # 'gitlab.example.com:aknochow/ansible-plaibook', hostname and colon
-    # mashed together with the real org). Checking _gl_bare_host_match
-    # first means a host-prefixed target's own actual host/org/repo win
-    # instead. Covered directly by
-    # tests/test_resolve_target_pr_parsing.yml's host-prefix scenario.
+      {{ 'github' if (_gh_url_match or _gh_bare_match)
+         else 'gitea' if (_gt_url_match or _gt_bare_host_match or _gt_bare_match)
+         else 'gitlab' }}
+    review_scheme: >-
+      {{ _gt_url_match[0] if _gt_url_match
+         else 'https' }}
     review_org_repo: >-
       {{ (_gh_url_match[0] if _gh_url_match
           else _gh_bare_match[0] if _gh_bare_match
+          else _gt_url_match[2] if _gt_url_match
+          else _gt_bare_host_match[1] if _gt_bare_host_match
+          else _gt_bare_match[0] if _gt_bare_match
           else _gl_url_match[1] if _gl_url_match
           else _gl_bare_host_match[1] if _gl_bare_host_match
           else _gl_bare_match[0] if _gl_bare_match
@@ -36,12 +37,18 @@
     review_number: >-
       {{ (_gh_url_match[1] if _gh_url_match
           else _gh_bare_match[1] if _gh_bare_match
+          else _gt_url_match[3] if _gt_url_match
+          else _gt_bare_host_match[2] if _gt_bare_host_match
+          else _gt_bare_match[1] if _gt_bare_match
           else _gl_url_match[2] if _gl_url_match
           else _gl_bare_host_match[2] if _gl_bare_host_match
           else _gl_bare_match[1] if _gl_bare_match
           else '') }}
     review_hostname: >-
-      {{ _gl_url_match[0] if _gl_url_match
+      {{ _gt_url_match[1] if _gt_url_match
+         else _gt_bare_host_match[0] if _gt_bare_host_match
+         else (lookup('ansible.builtin.env', 'GITEA_HOST') | default('gitea.example.com', true)) if _gt_bare_match
+         else _gl_url_match[0] if _gl_url_match
          else _gl_bare_host_match[0] if _gl_bare_host_match
          else '' }}
 
@@ -49,8 +56,8 @@
   ansible.builtin.fail:
     msg: >-
       Could not parse review_target '{{ review_target }}'. Expected a GitHub
-      PR URL, GitLab MR URL, 'org/repo#N' (GitHub), 'org/repo!N' (GitLab), or
-      'host:org/repo!N' (self-hosted GitLab).
+      PR URL, Gitea PR URL, GitLab MR URL, 'org/repo#N' (GitHub), 'gitea:host:org/repo#N' (Gitea),
+      'org/repo!N' (GitLab), or 'host:org/repo!N' (self-hosted GitLab).
   when: not review_org_repo or not review_number
 
 # review_number is already digit-only by construction (every capturing
@@ -86,7 +93,7 @@
       # otherwise safe.
       - review_org_repo is regex('^[A-Za-z0-9_~][A-Za-z0-9._~/-]*$')
       - review_number is regex('^[0-9]+$')
-      - review_hostname == '' or review_hostname is regex('^[A-Za-z0-9_][A-Za-z0-9._-]*$')
+      - review_hostname == '' or review_hostname is regex('^[A-Za-z0-9_][A-Za-z0-9._-]*(?::[0-9]+)?$')
     fail_msg: >-
       review_target '{{ review_target }}' resolved to an org/repo, number, or
       hostname containing characters unsafe to embed directly in a platform
