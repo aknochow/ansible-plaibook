@@ -13,12 +13,16 @@
     last_run_summary_content: >-
       {{ {
         'run_id': last_run_id,
+        'host': review_run_ledger_host | default(lookup('pipe', 'hostname -s') | lower | regex_replace('[^a-z0-9_.-]', '-')),
+        'commit': review_short_sha | default(''),
+        'branch': review_branch | default(''),
         'targets': pipeline_findings_reports,
         'cost_usd': (pipeline_call_costs | default([]) | map('float') | sum) | round(4),
         'total_input_tokens': pipeline_total_input_tokens | default(0) | int,
         'total_output_tokens': pipeline_total_output_tokens | default(0) | int,
         'total_thinking_tokens': pipeline_total_thinking_tokens | default(0) | int,
-        'agents_dispatched': pipeline_agent_calls | default([]) | length
+        'agents_dispatched': pipeline_agent_calls | default([]) | length,
+        'guardian_scan_available': guardian_scan_available | default(false) | bool
       } | to_nice_json }}
 
 # A stable, predictable path (NOT date/sha-based like findings.md/
@@ -60,3 +64,103 @@
 - name: Show the run-scoped last-run summary path
   ansible.builtin.debug:
     msg: "RESULT_SUMMARY_RUN_SCOPED: {{ lookup('env', 'HOME') }}/.cache/ansible-plaibook/last_run.{{ last_run_id }}.json"
+
+# Append-only spend/quality ledger. Each last_run.<id>.json is a snapshot
+# of ONE run and nothing accumulates across them, so "what have I spent
+# this week" and "did the score move between tags" were both unanswerable
+# without scraping the cache directory by hand.
+#
+# One JSON object per line, appended, never rewritten -- corrections are
+# new lines, not edits. That keeps it safe to append from concurrent runs
+# and makes it directly consumable by ansible-agentbench's scoring, which
+# already reads this shape of data.
+#
+# Deliberately records provider/model/agent_family alongside the numbers:
+# a cost figure without the model that produced it cannot be compared
+# against anything, and this pipeline now dispatches to several.
+# review.yml includes this file BY PATH (review.yml:313 ->
+# write_last_run_summary.yml -> here), not through roles/review, so this
+# role's defaults/main.yml is NOT in scope and every var here must carry
+# its own default. Confirmed the hard way: the first ledger run died on
+# "'review_run_ledger_enabled' is undefined". The give-away in the log is
+# the task name -- tasks that really run inside the role are prefixed
+# "review : ", and these are not.
+- name: Ensure the run-ledger directory exists
+  ansible.builtin.file:
+    path: "{{ _ledger_path | dirname }}"
+    state: directory
+    mode: "0700"
+  vars:
+    _ledger_dir: "{{ review_run_ledger_dir | default(lookup('env', 'HOME') ~ '/.cache/ansible-plaibook/ledger') }}"
+    _ledger_host: "{{ review_run_ledger_host | default(lookup('pipe', 'hostname -s') | lower | regex_replace('[^a-z0-9_.-]', '-')) }}"
+    _ledger_path: "{{ review_run_ledger_path | default(_ledger_dir ~ '/' ~ _ledger_host ~ '.jsonl') }}"
+  when: review_run_ledger_enabled | default(true) | bool
+
+- name: Append this run to the ledger
+  when: review_run_ledger_enabled | default(true) | bool
+  vars:
+    _ledger_dir: "{{ review_run_ledger_dir | default(lookup('env', 'HOME') ~ '/.cache/ansible-plaibook/ledger') }}"
+    _ledger_host: "{{ review_run_ledger_host | default(lookup('pipe', 'hostname -s') | lower | regex_replace('[^a-z0-9_.-]', '-')) }}"
+    _ledger_path: "{{ review_run_ledger_path | default(_ledger_dir ~ '/' ~ _ledger_host ~ '.jsonl') }}"
+    # to_json on one line: the file is JSONL, one object per line.
+    #
+    # ts uses now(), not ansible_date_time: review.yml runs
+    # gather_facts: false, so no ansible_* facts exist at all. utc=true
+    # so entries written on different machines sort and compare directly.
+    #
+    # models comes from pipeline_agent_calls, not from the review_*_model
+    # vars: those are role defaults and this file is included by path, so
+    # they are out of scope and silently resolve to ''. The runtime list is
+    # better regardless -- it records what each provider actually resolved,
+    # and a run's lens and verify stages routinely use different models.
+    #
+    # No '#' comments inside the {{ }} below -- Jinja rejects them
+    # ("unexpected char '#'"), which is not obvious when the expression
+    # is a multi-line dict literal that reads like YAML.
+    _ledger_line: >-
+      {{ {
+        'ts': now(utc=true).isoformat(),
+        'run_id': last_run_id,
+        'host': review_run_ledger_host | default(lookup('pipe', 'hostname -s') | lower | regex_replace('[^a-z0-9_.-]', '-')),
+        'commit': review_short_sha | default(''),
+        'branch': review_branch | default(''),
+        'agent_family': agent_family | default('unknown'),
+        'models': pipeline_agent_calls | default([]) | map(attribute='model') | select | unique | list,
+        'review_type': review_type | default(''),
+        'target': review_org_repo | default('') ~ '#' ~ (review_number | default('')),
+        'verdict': review_verdict | default(''),
+        'score': score_overall | default(0) | float,
+        'agents_dispatched': pipeline_agent_calls | default([]) | length,
+        'input_tokens': pipeline_total_input_tokens | default(0) | int,
+        'output_tokens': pipeline_total_output_tokens | default(0) | int,
+        'thinking_tokens': pipeline_total_thinking_tokens | default(0) | int,
+        'cost_usd': (pipeline_call_costs | default([]) | map('float') | sum) | round(6),
+        'guardian_scan_available': guardian_scan_available | default(false) | bool
+      } | to_json }}
+  # A real O_APPEND write, NOT lineinfile. lineinfile reads the file,
+  # writes a temp copy and moves it into place, so two reviews finishing
+  # at once lose one entry outright -- and this family runs concurrent
+  # agents by design, which is the whole reason the ledger is per-host
+  # and append-only in the first place. It also rescans the entire file
+  # every run, and silently skips a line that already exists byte for
+  # byte.
+  #
+  # The line arrives on stdin rather than inside the command string, so
+  # no quoting in a commit message, branch name or verdict can break the
+  # shell or inject into it. umask keeps the 0600 that lineinfile's mode:
+  # used to provide.
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - 'umask 077; cat >> "$0"'
+      - "{{ _ledger_path }}"
+    stdin: "{{ _ledger_line }}"
+    # Explicit, though it is the module default: the ledger is JSONL and a
+    # missing newline would silently concatenate two runs into one
+    # unparseable line. A review of this file flagged exactly that as a
+    # critical bug, reasoning from the `>-` folded-strip scalar and not
+    # knowing about this default -- it was wrong, but only by accident of
+    # a default that could change.
+    stdin_add_newline: true
+  changed_when: true

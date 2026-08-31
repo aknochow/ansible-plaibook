@@ -166,7 +166,13 @@
         'diff_categories': review_diff_categories,
         'completeness_checks': review_completeness_checks,
         'neutralization_check': review_neutralization_check,
-        'checklist': review_checklist
+        'checklist': review_checklist,
+        'guardian_scan': {
+          'available': guardian_scan_available | default(false) | bool,
+          'skip_reason': guardian_scan_skip_reason | default(''),
+          'findings_count': guardian_findings | default([]) | length,
+          'blocking_findings_count': guardian_blocking_findings | default([]) | length
+        }
       } | to_nice_json }}
 
 - name: Write the structured summary artifact
