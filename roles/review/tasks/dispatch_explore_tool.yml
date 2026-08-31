@@ -216,13 +216,38 @@
         # needed even with -F) stops a pattern like `--include=...`
         # from being parsed as a grep flag instead of a literal search
         # string.
-        argv: [grep, -Frn, --, "{{ tool_call.input.pattern }}", "{{ tool_call.input.path | default('.') }}"]
+        # -I skips binary files and --exclude-dir keeps the walk inside
+        # the source tree. Without them a plain `grep -rn .` descends into
+        # .venv, which is 399MB in this very repo -- a single search then
+        # runs for tens of minutes and every review appears to hang. The
+        # dirs listed are build/dependency output that no reviewer wants
+        # searched and no diff ever touches.
+        argv:
+          - grep
+          - -IFrn
+          - --exclude-dir=.git
+          - --exclude-dir=.venv
+          - --exclude-dir=venv
+          - --exclude-dir=node_modules
+          - --exclude-dir=__pycache__
+          - --exclude-dir=.mypy_cache
+          - --exclude-dir=.pytest_cache
+          - --exclude-dir=.tox
+          - --
+          - "{{ tool_call.input.pattern }}"
+          - "{{ tool_call.input.path | default('.', true) }}"
         chdir: "{{ review_repo_path }}"
       delegate_to: "{{ review_delegate_host | default(omit, true) }}"
       ignore_unreachable: true
       register: _explore_search_result
       changed_when: false
       failed_when: false
+      # A hard ceiling as well as the exclusions: the exclusion list is
+      # what is known to be big today, and the next repo will have
+      # something else. A search that cannot finish in two minutes is
+      # not going to produce a useful result for a reviewer either.
+      async: 120
+      poll: 2
       when: not _explore_search_path_rejected
 
     - name: Fail loudly if the sandbox connection was unreachable
