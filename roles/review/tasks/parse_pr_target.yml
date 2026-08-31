@@ -5,7 +5,7 @@
 - name: Parse the review target identifier
   ansible.builtin.set_fact:
     _gh_url_match: "{{ review_target | regex_search('^https?://github\\.com/([^/]+/[^/]+)/pull/(\\d+)', '\\1', '\\2') }}"
-    _gt_url_match: "{{ review_target | regex_search('^https?://(?!github\\.com)([^/]+)/([^/]+/[^/]+)/pulls?/(\\d+)', '\\1', '\\2', '\\3') }}"
+    _gt_url_match: "{{ review_target | regex_search('^(https?)://(?!github\\.com)([^/]+)/([^/]+/[^/]+)/pulls?/(\\d+)', '\\1', '\\2', '\\3', '\\4') }}"
     _gl_url_match: "{{ review_target | regex_search('^https?://([^/]+)/(.+)/-/merge_requests/(\\d+)', '\\1', '\\2', '\\3') }}"
     _gh_bare_match: "{{ review_target | regex_search('^([A-Za-z0-9_.~-]+/[A-Za-z0-9_.~-]+)#(\\d+)$', '\\1', '\\2') }}"
     _gt_bare_host_match: "{{ review_target | regex_search('^gitea:([A-Za-z0-9._-]+):([^/]+/[^/]+)#(\\d+)$', '\\1', '\\2', '\\3') }}"
@@ -21,10 +21,13 @@
       {{ 'github' if (_gh_url_match or _gh_bare_match)
          else 'gitea' if (_gt_url_match or _gt_bare_host_match or _gt_bare_match)
          else 'gitlab' }}
+    review_scheme: >-
+      {{ _gt_url_match[0] if _gt_url_match
+         else 'https' }}
     review_org_repo: >-
       {{ (_gh_url_match[0] if _gh_url_match
           else _gh_bare_match[0] if _gh_bare_match
-          else _gt_url_match[1] if _gt_url_match
+          else _gt_url_match[2] if _gt_url_match
           else _gt_bare_host_match[1] if _gt_bare_host_match
           else _gt_bare_match[0] if _gt_bare_match
           else _gl_url_match[1] if _gl_url_match
@@ -34,7 +37,7 @@
     review_number: >-
       {{ (_gh_url_match[1] if _gh_url_match
           else _gh_bare_match[1] if _gh_bare_match
-          else _gt_url_match[2] if _gt_url_match
+          else _gt_url_match[3] if _gt_url_match
           else _gt_bare_host_match[2] if _gt_bare_host_match
           else _gt_bare_match[1] if _gt_bare_match
           else _gl_url_match[2] if _gl_url_match
@@ -42,7 +45,7 @@
           else _gl_bare_match[1] if _gl_bare_match
           else '') }}
     review_hostname: >-
-      {{ _gt_url_match[0] if _gt_url_match
+      {{ _gt_url_match[1] if _gt_url_match
          else _gt_bare_host_match[0] if _gt_bare_host_match
          else (lookup('ansible.builtin.env', 'GITEA_HOST') | default('gitea.example.com', true)) if _gt_bare_match
          else _gl_url_match[0] if _gl_url_match
@@ -90,7 +93,7 @@
       # otherwise safe.
       - review_org_repo is regex('^[A-Za-z0-9_~][A-Za-z0-9._~/-]*$')
       - review_number is regex('^[0-9]+$')
-      - review_hostname == '' or review_hostname is regex('^[A-Za-z0-9_][A-Za-z0-9._-]*$')
+      - review_hostname == '' or review_hostname is regex('^[A-Za-z0-9_][A-Za-z0-9._-]*(?::[0-9]+)?$')
     fail_msg: >-
       review_target '{{ review_target }}' resolved to an org/repo, number, or
       hostname containing characters unsafe to embed directly in a platform

@@ -11,7 +11,7 @@
       {{
         'https://github.com/' + review_org_repo + '/pull/' + review_number
         if review_platform == 'github'
-        else 'https://' + (review_hostname or 'gitea.example.com') + '/' + review_org_repo + '/pulls/' + review_number
+        else (review_scheme | default('https')) + '://' + (review_hostname or 'gitea.example.com') + '/' + review_org_repo + '/pulls/' + review_number
         if review_platform == 'gitea'
         else 'https://' + (review_hostname or 'gitlab.com') + '/' + review_org_repo + '/-/merge_requests/' + review_number
       }}
@@ -36,7 +36,11 @@
 - name: Determine the repo clone URL
   ansible.builtin.set_fact:
     review_clone_url: >-
-      {{ 'https://github.com/' + review_org_repo + '.git'
+      {{ review_clone_url_override
+         if review_clone_url_override is defined
+         else 'git@' + review_hostname + ':' + review_org_repo + '.git'
+         if (review_platform == 'gitea' and (review_clone_protocol | default('ssh')) == 'ssh')
+         else 'https://github.com/' + review_org_repo + '.git'
          if review_platform == 'github'
          else 'https://' + (review_hostname or 'gitea.example.com') + '/' + review_org_repo + '.git'
          if review_platform == 'gitea'
@@ -102,6 +106,17 @@
     # also have a .path attribute.
     review_checkout_dir: { path: "{{ review_clone_dir_controller.path }}" }
 
+# Compute the merge base between origin/HEAD and the PR/MR head ref.
+# Using the merge base as review_target_ref provides true 3-dot PR diff semantics
+# (git diff merge_base review-source) so the review only analyzes changes introduced
+# by the PR branch, ignoring any subsequent commits that landed on main after branching.
+- name: Compute the merge base between the default branch and the PR/MR head
+  ansible.builtin.command:
+    argv: [git, merge-base, origin/HEAD, review-source]
+    chdir: "{{ review_clone_dir_controller.path }}"
+  changed_when: false
+  register: _review_merge_base_result
+
 # Plain set_fact, not include_role vars: -- target resolution and the
 # review engine are the same role now, so these just need to be ambient
 # facts before run_review_engine.yml is included, same pattern
@@ -109,7 +124,7 @@
 - name: Set outputs for the review engine
   ansible.builtin.set_fact:
     review_repo_path: "{{ review_checkout_dir.path }}"
-    review_target_ref: "origin/HEAD"
+    review_target_ref: "{{ _review_merge_base_result.stdout | trim }}"
     review_source_ref: "review-source"
     review_short_sha: "{{ review_clone_result.after[:7] }}"
     review_branch: "{{ review_platform }}-{{ review_org_repo | regex_replace('/', '-') }}-{{ review_number }}"

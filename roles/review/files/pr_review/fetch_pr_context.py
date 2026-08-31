@@ -79,6 +79,12 @@ def http_get(url: str, headers: dict[str, str] | None = None, timeout: int = 60)
         "User-Agent": "ansible-plaibook",
         "Accept": "application/json",
     }
+    cf_id = os.environ.get("CF_ACCESS_CLIENT_ID") or os.environ.get("CLOUDFLARE_ACCESS_CLIENT_ID")
+    cf_secret = os.environ.get("CF_ACCESS_CLIENT_SECRET") or os.environ.get("CLOUDFLARE_ACCESS_CLIENT_SECRET")
+    if cf_id and cf_secret:
+        req_headers["CF-Access-Client-Id"] = cf_id
+        req_headers["CF-Access-Client-Secret"] = cf_secret
+
     if headers:
         req_headers.update(headers)
 
@@ -225,6 +231,7 @@ def fetch_gitlab(hostname: str, project: str, mr_iid: int) -> dict:
         "target_branch": mr.get("target_branch", "unknown"),
         "url": mr.get("web_url", ""),
         "description": mr.get("description", "") or "",
+        "head_sha": head_sha,
         "ci_status": ci_status,
         "failing_checks": failing_checks,
         "files_changed": files_changed,
@@ -328,6 +335,7 @@ def fetch_github(owner: str, repo: str, number: int) -> dict:
         "target_branch": (pr.get("base") or {}).get("ref", "unknown"),
         "url": pr.get("html_url", ""),
         "description": pr.get("body", "") or "",
+        "head_sha": head_sha,
         "ci_status": ci_status,
         "failing_checks": failing_checks,
         "files_changed": files_changed,
@@ -423,6 +431,7 @@ def fetch_gitea(hostname: str, project: str, number: int) -> dict:
         "target_branch": (pr.get("base") or {}).get("ref", "unknown"),
         "url": pr.get("html_url", ""),
         "description": pr.get("body", "") or "",
+        "head_sha": head_sha,
         "ci_status": ci_status,
         "failing_checks": failing_checks,
         "files_changed": files_changed,

@@ -27,7 +27,7 @@ import urllib.request
 # can be invoked standalone outside the pipeline, so the same
 # safe-to-embed guarantee needs to hold here independently.
 _SAFE_PROJECT_RE = re.compile(r"^[A-Za-z0-9_~][A-Za-z0-9_.~/-]*$")
-_SAFE_HOST_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
+_SAFE_HOST_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]*(?::\d+)?$")
 
 
 def http_post(url: str, payload: dict, headers: dict[str, str] | None = None, timeout: int = 60) -> tuple[int, str]:
@@ -37,6 +37,12 @@ def http_post(url: str, payload: dict, headers: dict[str, str] | None = None, ti
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
+    cf_id = os.environ.get("CF_ACCESS_CLIENT_ID") or os.environ.get("CLOUDFLARE_ACCESS_CLIENT_ID")
+    cf_secret = os.environ.get("CF_ACCESS_CLIENT_SECRET") or os.environ.get("CLOUDFLARE_ACCESS_CLIENT_SECRET")
+    if cf_id and cf_secret:
+        req_headers["CF-Access-Client-Id"] = cf_id
+        req_headers["CF-Access-Client-Secret"] = cf_secret
+
     if headers:
         req_headers.update(headers)
 
