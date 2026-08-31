@@ -102,11 +102,6 @@
     _ledger_dir: "{{ review_run_ledger_dir | default(lookup('env', 'HOME') ~ '/.cache/ansible-plaibook/ledger') }}"
     _ledger_host: "{{ review_run_ledger_host | default(lookup('pipe', 'hostname -s') | lower | regex_replace('[^a-z0-9_.-]', '-')) }}"
     _ledger_path: "{{ review_run_ledger_path | default(_ledger_dir ~ '/' ~ _ledger_host ~ '.jsonl') }}"
-  ansible.builtin.lineinfile:
-    path: "{{ _ledger_path }}"
-    create: true
-    mode: "0600"
-    insertafter: EOF
     # to_json on one line: the file is JSONL, one object per line.
     #
     # ts uses now(), not ansible_date_time: review.yml runs
@@ -122,7 +117,7 @@
     # No '#' comments inside the {{ }} below -- Jinja rejects them
     # ("unexpected char '#'"), which is not obvious when the expression
     # is a multi-line dict literal that reads like YAML.
-    line: >-
+    _ledger_line: >-
       {{ {
         'ts': now(utc=true).isoformat(),
         'run_id': last_run_id,
@@ -142,3 +137,23 @@
         'cost_usd': (pipeline_call_costs | default([]) | map('float') | sum) | round(6),
         'guardian_scan_available': guardian_scan_available | default(false) | bool
       } | to_json }}
+  # A real O_APPEND write, NOT lineinfile. lineinfile reads the file,
+  # writes a temp copy and moves it into place, so two reviews finishing
+  # at once lose one entry outright -- and this family runs concurrent
+  # agents by design, which is the whole reason the ledger is per-host
+  # and append-only in the first place. It also rescans the entire file
+  # every run, and silently skips a line that already exists byte for
+  # byte.
+  #
+  # The line arrives on stdin rather than inside the command string, so
+  # no quoting in a commit message, branch name or verdict can break the
+  # shell or inject into it. umask keeps the 0600 that lineinfile's mode:
+  # used to provide.
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - 'umask 077; cat >> "$0"'
+      - "{{ _ledger_path }}"
+    stdin: "{{ _ledger_line }}"
+  changed_when: true
