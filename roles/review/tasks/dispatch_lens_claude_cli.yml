@@ -140,6 +140,18 @@
     ANTHROPIC_API_KEY: ""
   register: _claude_cli_review_raw
 
+# Declining the structured-output tool call is a documented, expected
+# outcome (see this file's header), so this assert fires in normal
+# operation -- not only in a crash. Its message is therefore a routine
+# output path, and it must not carry the model's full draft.
+#
+# That draft can quote secrets: the lens prompts instruct the model to
+# quote exact evidence, so a run that finds a hardcoded credential and
+# then declines the tool call would print that credential into Ansible's
+# failure output -- console, CI logs, playbook capture. None of those
+# carry the access controls of the repository under review, so this is a
+# second exposure path for precisely the data this pipeline exists to
+# find. Truncated to enough to debug with, and no more.
 - name: "Claude CLI: fail loudly if the Security agent produced no structured output"
   ansible.builtin.assert:
     that:
@@ -149,7 +161,9 @@
       output despite output_format being set -- Claude declined the
       structured-output tool call even after its internal retry turn
       (stop_reason={{ _claude_cli_security_raw.stop_reason | default('unknown') }}).
-      Raw text: {{ _claude_cli_security_raw.text | default('') }}
+      Raw text (first 200 chars; the full text stays in the registered
+      fact _claude_cli_security_raw and is deliberately NOT printed):
+      {{ _claude_cli_security_raw.text | default('') | truncate(200, True, ' ...[truncated]') }}
 
 - name: "Claude CLI: fail loudly if the Review agent produced no structured output"
   ansible.builtin.assert:
@@ -160,7 +174,9 @@
       output despite output_format being set -- Claude declined the
       structured-output tool call even after its internal retry turn
       (stop_reason={{ _claude_cli_review_raw.stop_reason | default('unknown') }}).
-      Raw text: {{ _claude_cli_review_raw.text | default('') }}
+      Raw text (first 200 chars; the full text stays in the registered
+      fact _claude_cli_review_raw and is deliberately NOT printed):
+      {{ _claude_cli_review_raw.text | default('') | truncate(200, True, ' ...[truncated]') }}
 
 - name: "Claude CLI: build the normalized Security result"
   ansible.builtin.set_fact:
