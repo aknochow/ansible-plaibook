@@ -41,11 +41,16 @@ review_agent_model: "claude-opus-4-6"
 # audit_{{ agent_family }}.yml" -- one hand-written, provider-native
 # task file per family, never a shared abstraction. claude is default
 # so existing behavior/callers are unchanged. qwen isn't implemented
-# yet (only claude/gemini dispatch files exist) -- named here so it
-# slots in later without a rename, per
+# yet (only claude/gemini/claude_cli dispatch files exist) -- named
+# here so it slots in later without a rename, per
 # ansible-agentbench/harness/tier1_lens_dispatch.yml's own precedent
 # (that harness already proves a Qwen path via aknochow.openai.chat).
-agent_family: claude   # claude | gemini | qwen
+# claude_cli dispatches via aknochow.claude.agent (claude-agent-sdk,
+# the library behind the `claude` CLI) instead of dispatch_lens_claude.yml's
+# raw Messages API call -- draws on a claude.ai Pro/Max subscription's
+# own OAuth session rather than per-token API credits. See
+# dispatch_lens_claude_cli.yml's own header for the full rationale.
+agent_family: claude   # claude | gemini | claude_cli | qwen
 
 # aknochow.claude auth: no provider or project baked in on purpose --
 # this role doesn't get to assume which backend you use. Falls back to
@@ -119,6 +124,89 @@ review_gemini_thinking_level: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_
 # max_tokens: 8192 because its extended thinking is not enabled on this
 # path, so nothing competes with visible output there.
 review_gemini_max_output_tokens: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_GEMINI_MAX_OUTPUT_TOKENS') | default(16384, true) | int }}"
+
+# Wall-clock ceiling for a single Gemini call, passed to
+# aknochow.gemini.generate's own `timeout`.
+#
+# The collection defaults to 120s with max_retries: 2, so a slow call
+# burns 3 x 120s and fails at ~6 minutes. That was enough for
+# corpus-sized cases but not for a real pull request: reviewing a live
+# PR timed out on verify turn 3 at exactly 6:02, having spent the whole
+# budget on retries that were never going to be faster than the first
+# attempt.
+#
+# 300 rather than the module's 120 because a verify turn runs at
+# review_gemini_thinking_level (high by default) over a full diff, and
+# a timeout here discards every prior stage of the run.
+review_gemini_timeout: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_GEMINI_TIMEOUT') | default(300, true) | float }}"
+
+# aknochow.claude.agent auth for agent_family=claude_cli: no
+# ANTHROPIC_API_KEY/provider config here on purpose, mirroring
+# claude_provider/claude_api_key above -- dispatch_lens_claude_cli.yml
+# clears ANTHROPIC_API_KEY on its own module tasks instead (see that
+# file's header) so the underlying `claude` CLI subprocess falls back
+# to whatever subscription OAuth session is already set up on the
+# host, which is the entire point of this dispatch path.
+#
+# No model baked in on purpose, same reasoning as claude_provider
+# above (AGENTS.md: "Never bake in a default choice that assumes a
+# specific backend/provider/environment"): which models a given
+# claude.ai subscription tier can actually reach varies (confirmed
+# live, agent.py's own notes: the account used to build this module
+# reported subscriptionType "Claude Pro"), so this role doesn't get to
+# assume claude-opus-4-6 (review_agent_model's own default, priced for
+# API billing) is even reachable. Left unset, aknochow.claude.agent
+# falls back to the CLI's own default model. Override with
+# -e review_claude_cli_model=<model> once you know what your
+# subscription can reach.
+review_claude_cli_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_CLAUDE_CLI_MODEL') | default(omit, true) }}"
+
+# high by default, same "review quality is the point of this pipeline"
+# reasoning as review_gemini_thinking_level above. Unlike Gemini's
+# thinking_level, this rides on subscription usage rather than
+# per-token billing, so there is no direct dollar cost to weigh against
+# quality here -- only subscription rate-limit headroom, which the
+# operator is better placed to judge than a baked-in default.
+review_claude_cli_effort: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_CLAUDE_CLI_EFFORT') | default('high', true) }}"
+
+# [] is the module's own default too, but set explicitly here rather
+# than left to inherit it -- this is a review-integrity setting, not
+# just a token-cost one, so it belongs in this role's own defaults
+# where it is visible and reviewable, not just in agent.py's argspec.
+# Confirmed live (agent.py's own setting_sources docs): leaving this
+# unset loads the reviewed repo's own CLAUDE.md/skills into the
+# reviewing session's context -- ~234 input tokens with [] vs. ~2,485
+# with everything loaded on the same call. Beyond the token cost, a
+# repo being reviewed should never get to steer its own review by
+# shipping instructions in its own CLAUDE.md. Not env-lookup-backed
+# like the vars above: this is a security-relevant default, not a
+# per-host preference, so changing it is a deliberate -e override, not
+# something to leave sitting in an environment variable.
+review_claude_cli_setting_sources: []
+
+# >= 2 whenever output_format is set (which every dispatch_lens_claude_cli.yml
+# call does) -- confirmed live (agent.py's own max_turns/output_format
+# docs): Claude can decline the structured-output tool call on its
+# first turn and needs a retry turn to try again; with max_turns: 1 the
+# SDK raises error_max_turns instead of failing cleanly. 2 is the
+# floor, not a generous budget -- raise it if declines are still
+# common after that.
+review_claude_cli_max_turns: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_CLAUDE_CLI_MAX_TURNS') | default(2, true) | int }}"
+
+# Wall-clock ceiling for a single claude_cli lens call, passed to
+# aknochow.claude.agent's own `timeout`.
+#
+# The module defaults to 300s, which is half what this pipeline already
+# allows the Messages API path (dispatch_lens_claude.yml uses async:
+# 600) -- and the CLI path is the slower of the two: it spawns a
+# subprocess, and runs with thinking enabled at review_claude_cli_effort
+# (high by default). Reviewing a ~1200-line diff exceeded 300s and the
+# module correctly aborted rather than hanging the play, so the default
+# was simply too tight for a real PR rather than a corpus-sized case.
+#
+# 900 not 600: the CLI has subprocess startup on top of the same model
+# work, and a timeout here wastes the whole run's prior stages.
+review_claude_cli_timeout: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_CLAUDE_CLI_TIMEOUT') | default(900, true) | float }}"
 
 review_output_base: "{{ lookup('env', 'HOME') }}/reviews"
 
@@ -212,6 +300,16 @@ review_explore_model: "{{ review_agent_model }}"
 # review_gemini_model, matching the Claude side's default to
 # review_agent_model.
 review_explore_gemini_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_EXPLORE_GEMINI_MODEL') | default(review_gemini_model, true) }}"
+# claude_cli equivalent of review_explore_model/review_explore_gemini_model
+# above, used by dispatch_explore_turn_attempt_claude_cli.yml. Left unset,
+# aknochow.claude.agent falls back to the CLI's own default model, same as
+# review_claude_cli_model.
+review_explore_claude_cli_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_EXPLORE_CLAUDE_CLI_MODEL') | default(omit, true) }}"
+
+# claude_cli equivalent of review_explore_max_turns (3), sized for a single
+# module call running its own internal Read/Grep/Glob exploration loop, matching
+# review_verify_claude_cli_max_turns's rationale.
+review_explore_claude_cli_max_turns: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_EXPLORE_CLAUDE_CLI_MAX_TURNS') | default(25, true) | int }}"
 
 # tasks/verify.yml: an independent, adversarial re-check of Critical/
 # Major findings' checkable factual claims (SDK signatures, stdlib
@@ -251,6 +349,33 @@ review_verify_model: "claude-haiku-4-5"
 # tool-calling loop) and verify_continuity_audit.yml's Gemini branch
 # (a single-shot call, but still logically part of "verify").
 review_verify_gemini_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_VERIFY_GEMINI_MODEL') | default('gemini-3.5-flash', true) }}"
+
+# claude_cli equivalent of review_verify_model/review_verify_gemini_model
+# above, used by dispatch_verify_turn_attempt_claude_cli.yml. No baked-in
+# cheap-model default here, unlike review_verify_model's claude-haiku-4-5:
+# review_claude_cli_model already has no default for the same reason
+# (which models a given claude.ai subscription tier can actually reach
+# varies -- see that var's own comment), and that reasoning applies
+# identically to whatever cheaper model verify might want to use here.
+# Left unset, aknochow.claude.agent falls back to the CLI's own default
+# model, same as review_claude_cli_model.
+review_verify_claude_cli_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_VERIFY_CLAUDE_CLI_MODEL') | default(omit, true) }}"
+
+# NOT the same knob as review_claude_cli_max_turns (2), and deliberately
+# much larger -- see dispatch_verify_turn_attempt_claude_cli.yml's own
+# header for why. That default is sized for lenses.yml's single-shot,
+# no-exploration dispatch; this file's single module call has to fit an
+# entire explore-then-verdict loop (real Read/Grep/Glob tool calls, ANY
+# of the SDK's own retries on non-conforming structured output) inside
+# ONE max_turns budget, since plaibook itself no longer drives per-turn
+# dispatch under this provider (again, see that file's header for why
+# not). Confirmed live (claude-agent-sdk 0.2.144, corpus case 005):
+# max_turns=6 was exhausted (error_max_turns) by 4 real exploration
+# turns plus two failed/retried StructuredOutput attempts, with no
+# verdict ever reached; max_turns=20 succeeded on the first
+# StructuredOutput attempt with turns to spare. 25 leaves headroom above
+# the smallest value observed to work, not a value tuned to be minimal.
+review_verify_claude_cli_max_turns: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_VERIFY_CLAUDE_CLI_MAX_TURNS') | default(25, true) | int }}"
 
 # Under this pipeline's forced tool_choice + structured-output
 # schemas, a lens model can produce genuinely invalid structured

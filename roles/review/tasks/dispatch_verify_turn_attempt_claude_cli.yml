@@ -1,0 +1,170 @@
+---
+# One dispatch attempt for current verify turn (first try or retry), claude_cli side.
+#
+# This is NOT a per-turn dispatch in the same sense as
+# dispatch_verify_turn_attempt_{claude,gemini}.yml: those two hand
+# plaibook exactly one model turn at a time and expect it to execute
+# any non-report_verdict tool_use blocks itself via
+# dispatch_explore_tool.yml, threading the conversation back in on the
+# next turn. That shape assumes the provider accepts arbitrary custom
+# tool schemas (read_file/search/trace_reachability's own
+# input_schema, see vars/main.yml) with unexecuted tool_use blocks
+# handed back to the caller -- true of the raw Messages API
+# (dispatch_verify_turn_attempt_claude.yml) and of Gemini's function
+# declarations (dispatch_verify_turn_attempt_gemini.yml).
+#
+# The Claude Agent SDK (aknochow.claude.agent, what agent_family=
+# claude_cli calls) does not offer that route. Confirmed by reading
+# claude_agent_sdk's own ClaudeAgentOptions: O(tools) is typed
+# `list[str] | ToolsPreset | None` -- built-in tool NAMES (Read, Grep,
+# Glob, Bash, ...) or a preset, never a custom input_schema. The SDK's
+# actual mechanism for custom tools is `mcp_servers` (SDK MCP tools),
+# but agent.py (the aknochow.claude.agent module, as of the version
+# this was written against) exposes no `mcp_servers` parameter at all
+# -- build_options() only ever forwards tools/max_turns/
+# setting_sources/system_prompt/model/fallback_model/effort/thinking/
+# output_format/allowed_tools/disallowed_tools/max_budget_usd/cwd/
+# add_dirs/settings to ClaudeAgentOptions. So plaibook's external
+# read_file/search/trace_reachability trio genuinely cannot be handed
+# to this provider through the module as it exists today; that would
+# require changing agent.py itself (a different repo/submodule), out
+# of scope here.
+#
+# What this file does instead: let the SDK run its OWN internal
+# explore-then-answer loop in a single module call, using its built-in
+# Read/Grep/Glob tools for the "read_file"/"search" role, and
+# output_format (verify_verdict_schema) for the "call report_verdict"
+# role -- confirmed live against the real SDK (claude-agent-sdk
+# 0.2.144, claude-sonnet-5, corpus case 005) to actually work: a single
+# query with tools: [Read, Grep, Glob] + output_format ran 4 real
+# exploration tool calls (Read/Grep/Grep/Glob) followed by a
+# schema-conforming StructuredOutput call, landing evidence_status:
+# verified for the real Critical pickle.loads finding, all within one
+# aknochow.claude.agent invocation. Cost ~$0.02, ~9 SDK-internal turns
+# for that one finding.
+#
+# Real, confirmed-live gotcha this surfaces: a LOW max_turns budget
+# (module default effectively too small; review_claude_cli_max_turns's
+# own default of 2 is nowhere near enough here) starves this out.
+# review_claude_cli_max_turns=2 is sized for lenses.yml's own
+# single-shot-plus-one-retry dispatch, which does no exploration at
+# all. Verify's exploration turns AND the SDK's own retry-on-
+# malformed-structured-output turns (see agent.py's own output_format
+# docs) share the SAME max_turns budget here -- a live run with
+# max_turns=6 exhausted it (error_max_turns) after 4 real exploration
+# turns plus two failed/retried StructuredOutput attempts, never
+# reaching a verdict; max_turns=20 succeeded on the first
+# StructuredOutput attempt with turns to spare. Hence
+# review_verify_claude_cli_max_turns's own much larger default (see
+# defaults/main.yml) -- do not reuse review_claude_cli_max_turns here.
+#
+# Real, acknowledged capability GAP versus the other two providers:
+# trace_reachability (action_plugins/trace_reachability.py's
+# deterministic, AST-based guard-clause enumeration) is a custom tool
+# too, so it is unavailable here for the exact same mcp_servers-support
+# reason as read_file/search above. A reachability claim under
+# agent_family=claude_cli is checked by the model reading the code
+# itself via Read/Grep, not by the deterministic static trace the other
+# two providers can force via verify_first_turn/verify_is_reachability_
+# claim's tool_choice. verify_agent_prompt_claude_cli.j2 says so
+# explicitly rather than silently degrading. verify_result_used_static_
+# reachability_trace (sourced from verify_reachability_tool_used, only
+# ever set true by dispatch_explore_tool.yml's trace_reachability
+# branch) will therefore always read false for claude_cli verdicts --
+# that is correct and expected, not a bug to chase.
+#
+# Because the whole explore-then-verdict loop happens inside ONE module
+# call, this file sets verify_turn_result.tool_calls to, at most, a
+# single synthesized report_verdict-named entry (never the real
+# Read/Grep/Glob calls the SDK already executed and resolved
+# internally -- surfacing those would make verify_turn.yml's "dispatch
+# any other tool calls" step below try to run them through
+# dispatch_explore_tool.yml under tool names/argument shapes
+# (file_path vs. path, etc.) that step was never written to
+# understand). That step and the rest of verify_turn.yml's contract
+# work unmodified: verify_other_tool_calls naturally comes back empty,
+# review_verify_done flips true on the very first outer turn once a
+# verdict lands, and the assert/retry machinery for a stalled forced
+# final turn applies exactly as written for the other two providers.
+
+- name: "Claude CLI: show this verify turn's request configuration"
+  ansible.builtin.debug:
+    msg: "{{ [
+      'model: ' + (review_verify_claude_cli_model if review_verify_claude_cli_model is string else '(CLI default)'),
+      'effort: ' + review_claude_cli_effort,
+      'max_turns: ' + (review_verify_claude_cli_max_turns | string),
+      'tools: [Read, Grep, Glob]',
+      'setting_sources: ' + (review_claude_cli_setting_sources | string),
+      'cwd: ' + review_repo_path,
+      'output_format: json_schema (verify_verdict_schema)',
+      ] }}"
+
+- name: "Claude CLI: dispatch the verify agent (single call runs its own explore-then-verdict loop)"
+  aknochow.claude.agent:
+    prompt: >-
+      Try to refute the finding described in your system prompt using
+      your available tools, then give your final verdict.
+    system_prompt: "{{ verify_system_prompt }}"
+    model: "{{ review_verify_claude_cli_model }}"
+    effort: "{{ review_claude_cli_effort }}"
+    tools: [Read, Grep, Glob]
+    output_format:
+      type: json_schema
+      schema: "{{ verify_verdict_schema }}"
+    max_turns: "{{ review_verify_claude_cli_max_turns }}"
+    timeout: "{{ review_claude_cli_timeout }}"
+    setting_sources: "{{ review_claude_cli_setting_sources }}"
+    cwd: "{{ review_repo_path }}"
+  environment:
+    ANTHROPIC_API_KEY: ""
+  register: _claude_cli_verify_raw
+
+- name: "Claude CLI: record this attempt's usage for the pipeline-wide stats summary"
+  ansible.builtin.set_fact:
+    pipeline_agent_calls: >-
+      {{ pipeline_agent_calls + [{
+           'target': review_org_repo + '#' + review_number, 'lens': 'verify',
+           'model': _claude_cli_verify_raw.resolved_model,
+           'usage': _claude_cli_verify_raw.usage_normalized,
+           'attempt': verify_attempt_number | default(1)
+         }] }}
+
+- name: "Claude CLI: find the tool_use id the SDK assigned this attempt's structured verdict (if any)"
+  ansible.builtin.set_fact:
+    _claude_cli_verify_structured_calls: >-
+      {{ _claude_cli_verify_raw.tool_calls | default([]) | selectattr('name', 'equalto', 'StructuredOutput') | list }}
+
+# Single report_verdict-shaped tool_use dict, built once and reused for
+# both .message.content and .tool_calls below -- empty list when the SDK
+# never produced a conforming structured output this attempt.
+- name: "Claude CLI: build this attempt's synthesized report_verdict tool_use (if any)"
+  ansible.builtin.set_fact:
+    _claude_cli_verify_report_call: >-
+      {{ [{'id': (_claude_cli_verify_structured_calls[-1].id if _claude_cli_verify_structured_calls | length > 0 else 'claude_cli_report_verdict'),
+           'name': 'report_verdict',
+           'input': _claude_cli_verify_raw.structured}]
+         if _claude_cli_verify_raw.structured is defined else [] }}
+
+# Normalizes into the SAME shape verify_turn.yml already consumes from
+# the Claude-native/Gemini dispatch files (.message.content, .tool_calls,
+# .stop_reason) -- see this file's header for why tool_calls is
+# deliberately narrowed to just report_verdict (or empty), never the
+# real Read/Grep/Glob calls already resolved inside this one module call.
+- name: "Claude CLI: normalize this attempt's result into the shared verify_turn_result shape"
+  ansible.builtin.set_fact:
+    verify_turn_result:
+      message:
+        content: >-
+          {{ [{'type': 'text', 'text': _claude_cli_verify_raw.text | default('')}] + _claude_cli_verify_report_call }}
+        model: "{{ _claude_cli_verify_raw.resolved_model }}"
+      tool_calls: "{{ _claude_cli_verify_report_call }}"
+      stop_reason: "{{ 'tool_use' if _claude_cli_verify_raw.structured is defined else (_claude_cli_verify_raw.stop_reason | default('unknown')) }}"
+      usage: "{{ _claude_cli_verify_raw.usage }}"
+
+- name: "Claude CLI: check whether this attempt produced a structured verdict"
+  ansible.builtin.set_fact:
+    _verify_claude_cli_structured_present: "{{ _claude_cli_verify_raw.structured is defined }}"
+
+- name: "Claude CLI: mark this attempt valid unless it's the forced last turn with no verdict at all"
+  ansible.builtin.set_fact:
+    verify_dispatch_valid: "{{ (not verify_last_turn) or (_verify_claude_cli_structured_present | bool) }}"

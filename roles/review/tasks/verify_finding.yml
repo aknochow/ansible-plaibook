@@ -2,9 +2,20 @@
 # One scoped finding per iteration with fresh conversation (independently adversarial).
 # Reset verify_done/messages/turn_count at TOP of loop since facts persist across iterations.
 
+# claude_cli has no custom-tool route (see dispatch_verify_turn_attempt_claude_cli.yml's
+# own header): it runs the whole explore-then-verdict loop through the
+# Claude Agent SDK's built-in Read/Grep/Glob tools and output_format,
+# not the read_file/search/trace_reachability tool trio the other
+# providers get. verify_agent_prompt.j2's tool references (including
+# "call report_verdict") don't apply there, so it gets its own prompt
+# template rather than an in-template agent_family branch -- same
+# per-provider-file precedent as dispatch_verify_turn_attempt_{claude,
+# gemini}.yml themselves.
 - name: Render the verify agent system prompt for this finding
   ansible.builtin.set_fact:
-    verify_system_prompt: "{{ lookup('template', role_path + '/templates/verify_agent_prompt.j2') }}"
+    verify_system_prompt: >-
+      {{ lookup('template', role_path + '/templates/verify_agent_prompt'
+         + ('_claude_cli' if agent_family == 'claude_cli' else '') + '.j2') }}
   vars:
     finding: "{{ verify_target_finding }}"
 

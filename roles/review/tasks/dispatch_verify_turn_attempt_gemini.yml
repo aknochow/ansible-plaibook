@@ -64,6 +64,7 @@
     location: "{{ gemini_vertex_location if gemini_backend == 'vertex' else omit }}"
     api_key: "{{ gemini_api_key if gemini_backend == 'api' else omit }}"
     model: "{{ review_verify_gemini_model }}"
+    timeout: "{{ review_gemini_timeout }}"
     max_output_tokens: 4096
     thinking_level: "{{ review_gemini_thinking_level }}"
     system_instruction: "{{ verify_system_prompt }}"

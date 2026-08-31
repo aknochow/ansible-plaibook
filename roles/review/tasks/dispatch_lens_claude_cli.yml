@@ -1,0 +1,197 @@
+---
+# Claude-via-CLI lens dispatch (agent_family: claude_cli). Uses
+# aknochow.claude.agent, backed by the claude-agent-sdk Python package
+# (the same library that powers the `claude` CLI), instead of
+# dispatch_lens_claude.yml's raw Messages API call -- calls draw on a
+# claude.ai Pro/Max subscription's own OAuth session rather than
+# per-token API credits. This is the whole point of agent_family=
+# claude_cli: a working review run that doesn't spend API budget.
+#
+# Sets security_result/review_result in the SAME normalized shape
+# dispatch_lens_gemini.yml produces (this file's template): every
+# downstream consumer in lenses.yml/pipeline_stats.yml/
+# write_last_run_files.yml only ever reads .structured.{findings,
+# scores}, .resolved_model, and .usage_normalized -- never a
+# provider-specific field. Unlike Gemini's hand-mapped usage dict,
+# aknochow.claude.agent already returns usage_normalized in exactly
+# this collection's fixed shape (input_tokens/output_tokens/
+# cache_read_tokens/cache_write_tokens/thinking_tokens/total_tokens),
+# so it is passed through verbatim rather than re-mapped field by field.
+#
+# usage_normalized.input_tokens will look surprisingly small (single
+# digits) on a real review call -- this is real and correct, not a
+# dropped-data bug. Confirmed live by dumping the SDK's raw usage dict
+# (including its own per-call `iterations` breakdown) for both agents
+# on a real corpus-case run: each call used exactly one iteration/turn
+# (stop_reason: tool_use, no decline/retry), and the top-level usage
+# fields matched that single iteration's own numbers exactly -- so
+# nothing from an earlier turn is being lost. What actually happens:
+# on a cold cache (a fresh session every run), the ~800-line
+# security/review system prompt is written to the prompt cache on
+# this first use, so the SDK reports the bulk of it under
+# cache_creation_input_tokens (-> usage_normalized.cache_write_tokens),
+# not input_tokens -- input_tokens is genuinely just the small
+# uncached remainder. This is the same categorization
+# dispatch_lens_claude.yml's own cache_system: true path already
+# produces (validate_lens_dispatch.yml maps
+# usage.cache_creation_input_tokens the same way); it isn't new here.
+# pipeline_stats.yml already reports cache-write/cache-read as their
+# own separate totals alongside input tokens for exactly this reason --
+# read all three together for a call's real prompt volume, not
+# total_input_tokens alone (Gemini's dispatch has no equivalent split:
+# it has no request-side caching control, so its own input-token total
+# already includes everything -- comparing raw total_input_tokens
+# across agent_family values is not apples to apples).
+#
+# No retry-on-malformed-output loop here, same as Gemini's dispatch:
+# output_format is native schema enforcement (a forced StructuredOutput
+# tool call the SDK itself parses), not best-effort text parsing on
+# this module's side -- see agent.py's own output_format docs. lenses.yml
+# only runs its retry_lens_dispatch.yml loop for agent_family == 'claude'
+# (that file is hardcoded to aknochow.claude.message, the raw Messages
+# API); every other family, this one included, is marked valid directly
+# once its own assert below passes. What CAN happen here -- confirmed by
+# agent.py's own documentation -- is Claude declining the structured-
+# output tool call entirely, which completes the query successfully but
+# leaves .structured simply absent. That is exactly what the asserts
+# below catch and fail loudly on, rather than letting it surface as a
+# confusing Jinja "no attribute structured" error further down the
+# pipeline. review_claude_cli_max_turns (>= 2, enforced by its own
+# default) gives the SDK one internal retry turn for this before it
+# ever reaches us -- see agent.py's max_turns/output_format docs for
+# why 1 turn is not enough and raises error_max_turns instead of
+# failing cleanly.
+#
+# cwd is set explicitly to review_repo_path (the checkout under review)
+# rather than left to the calling process's own working directory:
+# confirmed live, claude-agent-sdk's initialize handshake can stall
+# when the CLI subprocess inherits a working directory that carries
+# Claude Code project config (this very repo's own .claude/ tree) --
+# passing the path via the module's cwd option instead does not
+# reproduce that stall. review_claude_cli_setting_sources stays at the
+# module's own safe default ([]) regardless of cwd, so pointing cwd at
+# review_repo_path does NOT pull that repo's own CLAUDE.md/skills into
+# the reviewing session -- see the setting_sources default's own
+# comment for the token-cost and review-integrity reasons that matters.
+#
+# ANTHROPIC_API_KEY is explicitly cleared on both dispatch tasks below.
+# If present in the environment, the underlying `claude` CLI silently
+# prefers it over subscription OAuth -- see agent.py's own notes,
+# confirmed live -- which would defeat the entire reason to use this
+# dispatch path over dispatch_lens_claude.yml.
+
+- name: "Claude CLI: show the Security agent's request configuration"
+  ansible.builtin.debug:
+    msg: "{{ [
+      'model: ' + (review_claude_cli_model if review_claude_cli_model is string else '(CLI default)'),
+      'effort: ' + review_claude_cli_effort,
+      'max_turns: ' + (review_claude_cli_max_turns | string),
+      'setting_sources: ' + (review_claude_cli_setting_sources | string),
+      'cwd: ' + review_repo_path,
+      'output_format: json_schema (security_findings_schema)',
+      '',
+      '--- system prompt ---',
+      ] + security_system_prompt.split('\n') }}"
+
+- name: "Claude CLI: dispatch the Security agent"
+  aknochow.claude.agent:
+    prompt: "Review this diff per your instructions."
+    system_prompt: "{{ security_system_prompt }}"
+    model: "{{ review_claude_cli_model }}"
+    effort: "{{ review_claude_cli_effort }}"
+    output_format:
+      type: json_schema
+      schema: "{{ security_findings_schema }}"
+    max_turns: "{{ review_claude_cli_max_turns }}"
+    timeout: "{{ review_claude_cli_timeout }}"
+    setting_sources: "{{ review_claude_cli_setting_sources }}"
+    cwd: "{{ review_repo_path }}"
+  environment:
+    ANTHROPIC_API_KEY: ""
+  register: _claude_cli_security_raw
+
+- name: "Claude CLI: show the Review agent's request configuration"
+  ansible.builtin.debug:
+    msg: "{{ [
+      'model: ' + (review_claude_cli_model if review_claude_cli_model is string else '(CLI default)'),
+      'effort: ' + review_claude_cli_effort,
+      'max_turns: ' + (review_claude_cli_max_turns | string),
+      'setting_sources: ' + (review_claude_cli_setting_sources | string),
+      'cwd: ' + review_repo_path,
+      'output_format: json_schema (review_findings_schema)',
+      '',
+      '--- system prompt ---',
+      ] + review_system_prompt.split('\n') }}"
+
+- name: "Claude CLI: dispatch the Review agent"
+  aknochow.claude.agent:
+    prompt: "Review this diff per your instructions."
+    system_prompt: "{{ review_system_prompt }}"
+    model: "{{ review_claude_cli_model }}"
+    effort: "{{ review_claude_cli_effort }}"
+    output_format:
+      type: json_schema
+      schema: "{{ review_findings_schema }}"
+    max_turns: "{{ review_claude_cli_max_turns }}"
+    timeout: "{{ review_claude_cli_timeout }}"
+    setting_sources: "{{ review_claude_cli_setting_sources }}"
+    cwd: "{{ review_repo_path }}"
+  environment:
+    ANTHROPIC_API_KEY: ""
+  register: _claude_cli_review_raw
+
+- name: "Claude CLI: fail loudly if the Security agent produced no structured output"
+  ansible.builtin.assert:
+    that:
+      - _claude_cli_security_raw.structured is defined
+    fail_msg: >-
+      Security lens (agent_family=claude_cli) produced no .structured
+      output despite output_format being set -- Claude declined the
+      structured-output tool call even after its internal retry turn
+      (stop_reason={{ _claude_cli_security_raw.stop_reason | default('unknown') }}).
+      Raw text: {{ _claude_cli_security_raw.text | default('') }}
+
+- name: "Claude CLI: fail loudly if the Review agent produced no structured output"
+  ansible.builtin.assert:
+    that:
+      - _claude_cli_review_raw.structured is defined
+    fail_msg: >-
+      Review lens (agent_family=claude_cli) produced no .structured
+      output despite output_format being set -- Claude declined the
+      structured-output tool call even after its internal retry turn
+      (stop_reason={{ _claude_cli_review_raw.stop_reason | default('unknown') }}).
+      Raw text: {{ _claude_cli_review_raw.text | default('') }}
+
+- name: "Claude CLI: build the normalized Security result"
+  ansible.builtin.set_fact:
+    security_result:
+      structured:
+        findings: "{{ _claude_cli_security_raw.structured.findings | default([]) }}"
+        scores: "{{ _claude_cli_security_raw.structured.scores | default({}) }}"
+      resolved_model: "{{ _claude_cli_security_raw.resolved_model }}"
+      usage_normalized: "{{ _claude_cli_security_raw.usage_normalized }}"
+      # The SDK's own observed cost for this call, verbatim -- distinct
+      # from agent_pricing-table-derived cost_usd elsewhere in this
+      # pipeline (compute_pipeline_cost.py), which is unpriced ($0) for
+      # any model without a sourced per-million-token rate on file (see
+      # review_claude_cli_model's own comment: no rate is guessed for
+      # claude-sonnet-5). This is a real figure measured by the provider
+      # for THIS call, not a computed estimate -- confirmed live
+      # non-zero (agent.py's cost_usd RETURN field, sourced from the
+      # SDK's own ResultMessage.total_cost_usd). Carried on the
+      # normalized result itself rather than wired into
+      # pipeline_agent_calls/compute_pipeline_cost.py's own totals in
+      # this change -- that touches shared cost-computation logic used
+      # by every agent_family and deserves its own pass, not a
+      # last-minute addition riding on this dispatch file.
+      observed_cost_usd: "{{ _claude_cli_security_raw.cost_usd }}"
+
+- name: "Claude CLI: build the normalized Review result"
+  ansible.builtin.set_fact:
+    review_result:
+      structured:
+        findings: "{{ _claude_cli_review_raw.structured.findings | default([]) }}"
+        scores: "{{ _claude_cli_review_raw.structured.scores | default({}) }}"
+      resolved_model: "{{ _claude_cli_review_raw.resolved_model }}"
+      usage_normalized: "{{ _claude_cli_review_raw.usage_normalized }}"
+      observed_cost_usd: "{{ _claude_cli_review_raw.cost_usd }}"

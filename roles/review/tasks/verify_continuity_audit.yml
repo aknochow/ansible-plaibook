@@ -110,6 +110,56 @@
     _continuity_audit_verdict: "{{ (_continuity_audit_gemini_result.structured | default({})).verdict | default('') }}"
     _continuity_audit_rationale: "{{ (_continuity_audit_gemini_result.structured | default({})).rationale | default('') }}"
 
+- name: "Claude CLI: call Claude via the Agent SDK to independently audit the continuity claim"
+  when: agent_family == 'claude_cli'
+  aknochow.claude.agent:
+    model: "{{ review_verify_claude_cli_model | default(omit) }}"
+    prompt: "Assess the continuity claim described in your system prompt."
+    system_prompt: "{{ _continuity_audit_prompt }}"
+    effort: "{{ review_claude_cli_effort }}"
+    setting_sources: "{{ review_claude_cli_setting_sources }}"
+    # >= 2: the SDK can decline the structured-output tool call on the
+    # first turn and needs a retry turn; at 1 it raises error_max_turns
+    # instead of failing cleanly. Same reason dispatch_lens_claude_cli.yml
+    # sets it.
+    max_turns: "{{ review_claude_cli_max_turns }}"
+    timeout: "{{ review_claude_cli_timeout }}"
+    output_format: "{{ {'type': 'json_schema', 'schema': continuity_audit_schema} }}"
+  environment:
+    # An API key in the environment silently overrides subscription auth,
+    # which defeats the point of agent_family=claude_cli entirely.
+    ANTHROPIC_API_KEY: ""
+  register: _continuity_audit_claude_cli_result
+
+- name: "Claude CLI: normalize the continuity audit result"
+  when: agent_family == 'claude_cli'
+  ansible.builtin.set_fact:
+    _continuity_audit_resolved_model: "{{ _continuity_audit_claude_cli_result.resolved_model }}"
+    _continuity_audit_usage_normalized: "{{ _continuity_audit_claude_cli_result.usage_normalized }}"
+    # Same `| default({})` on .structured itself, not just the final
+    # attribute, as the Gemini branch above -- structured is absent
+    # entirely when the model declines the tool call.
+    _continuity_audit_answered: "{{ _continuity_audit_claude_cli_result.structured is defined }}"
+    _continuity_audit_verdict: "{{ (_continuity_audit_claude_cli_result.structured | default({})).verdict | default('') }}"
+    _continuity_audit_rationale: "{{ (_continuity_audit_claude_cli_result.structured | default({})).rationale | default('') }}"
+
+# Fail clearly rather than with an undefined-variable error. This file
+# branches per agent_family inline (rather than via
+# include_tasks "..._{{ agent_family }}.yml" like the lens and verify
+# dispatches), so an unhandled family sets none of the _continuity_audit_*
+# facts and the usage record below dies on
+# `'_continuity_audit_resolved_model' is undefined` -- a real crash hit
+# on 2026-08-29 when claude_cli had no branch here. Whoever adds the next
+# provider should see this message, not that one.
+- name: Fail loudly if this agent_family has no continuity-audit branch
+  ansible.builtin.assert:
+    that:
+      - _continuity_audit_resolved_model is defined
+    fail_msg: >-
+      No continuity-audit branch for agent_family={{ agent_family }}.
+      Add one to verify_continuity_audit.yml, or disable the audit for
+      this family -- do not leave it silently unset.
+
 - name: Record this audit call's usage for the pipeline-wide stats summary
   ansible.builtin.set_fact:
     pipeline_agent_calls: >-
