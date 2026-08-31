@@ -62,12 +62,14 @@ def parse_url(url: str) -> tuple[str, str, str, int] | None:
     m = re.match(r"^https?://github\.com/([A-Za-z0-9_.~-]+/[A-Za-z0-9_.~-]+)/pull/(\d+)$", url)
     if m:
         return "github", "github.com", m.group(1), int(m.group(2))
-    m = re.match(r"^https?://([A-Za-z0-9_][A-Za-z0-9_.-]*)/([A-Za-z0-9_~][A-Za-z0-9_.~/-]*)/-/merge_requests/(\d+)$", url)
+    m = re.match(r"^(https?)://([A-Za-z0-9_][A-Za-z0-9_.-]*(?::\d+)?)/([A-Za-z0-9_~][A-Za-z0-9_.~/-]*)/-/merge_requests/(\d+)$", url)
     if m:
-        return "gitlab", m.group(1), m.group(2), int(m.group(3))
-    m = re.match(r"^https?://([A-Za-z0-9_][A-Za-z0-9_.-]*)/([A-Za-z0-9_.~-]+/[A-Za-z0-9_.~-]+)/pulls?/(\d+)$", url)
+        host = f"{m.group(1)}://{m.group(2)}" if m.group(1) == "http" else m.group(2)
+        return "gitlab", host, m.group(3), int(m.group(4))
+    m = re.match(r"^(https?)://([A-Za-z0-9_][A-Za-z0-9_.-]*(?::\d+)?)/([A-Za-z0-9_.~-]+/[A-Za-z0-9_.~-]+)/pulls?/(\d+)$", url)
     if m:
-        return "gitea", m.group(1), m.group(2), int(m.group(3))
+        host = f"{m.group(1)}://{m.group(2)}" if m.group(1) == "http" else m.group(2)
+        return "gitea", host, m.group(3), int(m.group(4))
     return None
 
 
@@ -338,12 +340,13 @@ def fetch_github(owner: str, repo: str, number: int) -> dict:
 # ---------------------------------------------------------------------------
 
 def fetch_gitea(hostname: str, project: str, number: int) -> dict:
-    token = os.environ.get("GITEA_TOKEN") or os.environ.get("TEA_TOKEN")
+    token = get_gitea_token()
     headers = {"Accept": "application/json"}
     if token:
         headers["Authorization"] = f"token {token}"
 
-    base_url = f"https://{hostname}/api/v1/repos/{project}"
+    scheme_host = hostname if (hostname.startswith("http://") or hostname.startswith("https://")) else f"https://{hostname}"
+    base_url = f"{scheme_host}/api/v1/repos/{project}"
 
     status, pr, _ = http_get(f"{base_url}/pulls/{number}", headers=headers)
     if not pr or not isinstance(pr, dict) or status != 200:
