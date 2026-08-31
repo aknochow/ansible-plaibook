@@ -20,13 +20,21 @@
       ansible.builtin.set_fact:
         explore_dispatch_valid: false
 
-    - name: "Call Claude with the current conversation, attempt 1, explore turn {{ explore_turn_count }}"
-      ansible.builtin.include_tasks: dispatch_explore_turn_attempt.yml
+    # dispatch_lens_{{ agent_family }}.yml's own idiom (tasks/lenses.yml)
+    # -- see dispatch_explore_turn_attempt_gemini.yml's header for why a
+    # multi-turn tool-calling loop needs its own provider-native file
+    # rather than the single generic aknochow.claude.message call this
+    # replaced. A missing dispatch_explore_turn_attempt_<agent_family>.yml
+    # (e.g. agent_family=qwen) fails loudly here with Ansible's own
+    # "could not find included file" rather than silently falling
+    # through to Claude -- the same guarantee lenses.yml already gives.
+    - name: "Call {{ agent_family }} with the current conversation, attempt 1, explore turn {{ explore_turn_count }}"
+      ansible.builtin.include_tasks: "dispatch_explore_turn_attempt_{{ agent_family }}.yml"
       vars:
         explore_attempt_number: 1
 
     - name: Retry this turn's dispatch if attempt 1's structured output was invalid
-      ansible.builtin.include_tasks: dispatch_explore_turn_attempt.yml
+      ansible.builtin.include_tasks: "dispatch_explore_turn_attempt_{{ agent_family }}.yml"
       loop: "{{ range(2, review_structured_output_max_attempts | int + 1) | list }}"
       loop_control:
         loop_var: explore_attempt_number
@@ -37,7 +45,7 @@
         that:
           - explore_dispatch_valid
         fail_msg: >-
-          Explore agent ({{ review_explore_model }}) produced invalid or
+          Explore agent ({{ review_explore_model if agent_family == 'claude' else review_explore_gemini_model }}) produced invalid or
           incomplete structured output on turn {{ explore_turn_count }}
           after {{ review_structured_output_max_attempts }} attempt(s).
           This is a confirmed, probabilistic model-generation quirk (see

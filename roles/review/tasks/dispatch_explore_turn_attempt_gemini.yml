@@ -1,0 +1,109 @@
+---
+# One dispatch attempt for current explore turn (first try or retry), Gemini side.
+#
+# Follows dispatch_verify_turn_attempt_gemini.yml's multi-turn tool-calling
+# pattern:
+#   1. Uses to_gemini_contents filter to preserve thought_signature and function_response names.
+#   2. Synthesizes stop_reason from tool_calls presence (Gemini finish_reason is STOP even on tool turns).
+#   3. Normalizes response into the shared explore_turn_result shape consumed by explore_turn.yml.
+#   4. On forced last turn (explore_last_turn), sets function_calling_config to force report_findings.
+
+- name: "Gemini: translate the current conversation into contents[]"
+  ansible.builtin.set_fact:
+    _explore_gemini_contents: "{{ explore_messages | to_gemini_contents }}"
+
+- name: "Gemini: build this turn's tool_config"
+  ansible.builtin.set_fact:
+    # `omit` is a sentinel for module parameters, not a settable
+    # set_fact value. Use `{}` for "no forced tool" instead, and let the
+    # module call below turn that into a real omit via `| default(omit, true)`.
+    _explore_gemini_tool_config: >-
+      {{ {'function_calling_config': {'mode': 'ANY', 'allowed_function_names': ['report_findings']}} if explore_last_turn else {} }}
+
+- name: "Call Gemini with the current conversation, explore turn {{ explore_turn_count ~ ', attempt ' ~ (explore_attempt_number | default(1)) }}"
+  aknochow.gemini.generate:
+    backend: "{{ gemini_backend }}"
+    project_id: "{{ gemini_vertex_project if gemini_backend == 'vertex' else omit }}"
+    location: "{{ gemini_vertex_location if gemini_backend == 'vertex' else omit }}"
+    api_key: "{{ gemini_api_key if gemini_backend == 'api' else omit }}"
+    model: "{{ review_explore_gemini_model }}"
+    max_output_tokens: 4096
+    thinking_level: "{{ review_gemini_thinking_level }}"
+    system_instruction: "{{ explore_system_prompt }}"
+    contents: "{{ _explore_gemini_contents }}"
+    tools: >-
+      {{ [{'function_declarations': (explore_tools + [{
+             'name': 'report_findings',
+             'description': 'Report any additional findings discovered via exploration (empty list if none).',
+             'input_schema': explore_findings_schema
+           }]) | to_gemini_function_declarations }] }}
+    tool_config: "{{ _explore_gemini_tool_config | default(omit, true) }}"
+  register: _explore_gemini_raw
+
+- name: "Gemini: extract this turn's response candidate parts"
+  ansible.builtin.set_fact:
+    _explore_gemini_parts: >-
+      {{ (_explore_gemini_raw.response.candidates[0].content.parts | default([]))
+         if (_explore_gemini_raw.response.candidates | default([]) | length > 0) else [] }}
+
+- name: "Gemini: normalize this turn's result into the shared explore_turn_result shape"
+  ansible.builtin.set_fact:
+    explore_turn_result:
+      message:
+        content: "{{ _explore_gemini_parts | gemini_parts_to_message_content }}"
+        model: "{{ review_explore_gemini_model }}"
+      tool_calls: "{{ _explore_gemini_parts | gemini_parts_to_tool_calls }}"
+      # Synthesized, not read from Gemini's own finish_reason -- finish_reason
+      # is STOP even on a tool-call-only turn, unlike Claude's stop_reason=='tool_use'.
+      stop_reason: >-
+        {{ 'tool_use' if (_explore_gemini_parts | gemini_parts_to_tool_calls | length > 0) else 'end_turn' }}
+      usage:
+        input_tokens: "{{ _explore_gemini_raw.usage.prompt_token_count | default(0) | int }}"
+        output_tokens: "{{ _explore_gemini_raw.usage.candidates_token_count | default(0) | int }}"
+        cache_creation_input_tokens: 0
+        cache_read_input_tokens: 0
+
+- name: Record this attempt's usage for the pipeline-wide stats summary
+  ansible.builtin.set_fact:
+    pipeline_agent_calls: >-
+      {{ pipeline_agent_calls + [{
+           'target': review_org_repo + '#' + review_number, 'lens': 'explore',
+           'model': review_explore_gemini_model,
+           'usage': {
+             'input_tokens': _explore_gemini_raw.usage.prompt_token_count | default(0) | int,
+             'output_tokens': _explore_gemini_raw.usage.candidates_token_count | default(0) | int,
+             'cache_write_tokens': 0,
+             'cache_read_tokens': 0,
+             'thinking_tokens': _explore_gemini_raw.usage.thoughts_token_count | default(0) | int,
+             'total_tokens': (_explore_gemini_raw.usage.prompt_token_count | default(0) | int)
+               + (_explore_gemini_raw.usage.candidates_token_count | default(0) | int)
+               + (_explore_gemini_raw.usage.thoughts_token_count | default(0) | int)
+           },
+           'attempt': explore_attempt_number | default(1)
+         }] }}
+
+- name: Check whether this attempt called report_findings
+  ansible.builtin.set_fact:
+    _explore_attempt_report_calls: "{{ explore_turn_result.tool_calls | selectattr('name', 'equalto', 'report_findings') | list }}"
+
+- name: Validate this attempt's report_findings call, if it made one
+  when: _explore_attempt_report_calls | length > 0
+  block:
+    - name: Coerce this attempt's findings, tolerating a JSON-encoded string
+      coerce_findings_encoding:
+        value: "{{ _explore_attempt_report_calls[0].input.findings }}"
+        label: "Explore agent"
+      register: _explore_attempt_coerce_result
+
+    - name: Mark this attempt valid
+      ansible.builtin.set_fact:
+        explore_dispatch_valid: true
+  rescue:
+    - name: Mark this attempt invalid (malformed report_findings call)
+      ansible.builtin.set_fact:
+        explore_dispatch_valid: false
+
+- name: Mark this attempt valid unless it is the forced last turn without report_findings
+  when: _explore_attempt_report_calls | length == 0
+  ansible.builtin.set_fact:
+    explore_dispatch_valid: "{{ not (explore_last_turn | default(false)) }}"
