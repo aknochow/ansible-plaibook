@@ -3,6 +3,9 @@ __pycache__/
 *.pyc
 .ansible/
 *.retry
+.pytest_cache/
+.coverage
+*.egg-info/
 
 # Local-only, machine-specific Python interpreter override — points at
 # this machine's .venv via an absolute path (Homebrew's Ansible runs

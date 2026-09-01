@@ -53,7 +53,7 @@
     # "no prior round" rather than failing the whole review over a
     # continuity nice-to-have.
     - name: Read the immediately-preceding round's identity-tracked findings, if any
-      when: _latest_prior_review.found
+      when: (_latest_prior_review.found | default(false)) | bool
       block:
         - name: Slurp the prior round's structured summary
           ansible.builtin.slurp:
@@ -71,7 +71,7 @@
             prior_round_findings: []
 
     - name: Default prior_round_findings to empty when no prior review exists
-      when: not _latest_prior_review.found
+      when: not ((_latest_prior_review.found | default(false)) | bool)
       ansible.builtin.set_fact:
         prior_round_findings: []
 

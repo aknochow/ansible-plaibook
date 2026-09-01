@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ansible-plaibook"
+version = "0.1.0"
+description = "Ansible-native AI code-review and bug-fix pipeline"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+    "ansible-core>=2.16.0,<2.19.0",
+    "pyyaml>=6.0.0",
+    "jinja2>=3.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0,<10.0.0",
+    "pytest-cov>=4.0.0,<7.0.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["action_plugins*", "filter_plugins*", "library*", "roles*", "scripts*"]
+
+[tool.pytest.ini_options]
+testpaths = ["action_plugins", "library", "roles/review/files/pr_review", "scripts"]
+python_files = ["test_*.py"]
+addopts = "-v"

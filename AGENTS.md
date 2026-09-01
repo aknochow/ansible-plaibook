@@ -67,12 +67,6 @@ re-deriving a claim from scratch.
 
 ## Known Gaps: Critical
 
-- **No `pyproject.toml`/lockfile.** `ansible-core`/`jinja2` versions
-  can drift across git worktrees, causing identical code to pass in
-  one checkout and fail in another (confirmed real incident, not
-  hypothetical). If a test result looks inconsistent with another
-  checkout of the same commit, check dependency versions before
-  assuming a logic bug.
 - **`~/.cache/ansible-plaibook/last_run.json` is a single global path.**
   It races across concurrent sessions on the same machine. Always
   read the run-scoped file (`last_run.<run_id>.json`, printed via
@@ -126,9 +120,10 @@ re-deriving a claim from scratch.
 ## Build & Test
 
 ```bash
-uv run pytest action_plugins/                     # full Python unit suite
-uv run pytest action_plugins/test_foo.py          # single file
-ansible-playbook review.yml --syntax-check
-ansible-playbook review.yml -e review_type=commit                       # fast, cheap, local
-ansible-playbook review.yml -e review_targets_raw="org/repo!N"          # full PR/MR review
+uv run pytest                                             # full Python unit suite
+uv run pytest action_plugins/test_foo.py                  # single file
+uv run ./scripts/run_playbook_tests.sh                    # offline Ansible playbook test suite
+uv run ansible-playbook review.yml --syntax-check
+ansible-playbook review.yml -e review_type=commit         # fast, cheap, local
+ansible-playbook review.yml -e review_targets_raw="org/repo!N" # full PR/MR review
 ```
