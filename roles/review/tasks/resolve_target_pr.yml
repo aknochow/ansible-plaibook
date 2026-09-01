@@ -29,6 +29,17 @@
   ansible.builtin.set_fact:
     _pr_context: "{{ pr_summary.stdout | from_json }}"
 
+- name: Extract target branch from PR/MR context
+  ansible.builtin.set_fact:
+    # If the forge reports a valid target branch, capture it.
+    # When no target branch is reported (empty/null/unknown/error), fall back to empty string so origin/HEAD is used downstream.
+    review_pr_target_branch: >-
+      {{
+        _pr_context.target_branch
+        if (_pr_context is mapping and _pr_context.target_branch is defined and _pr_context.target_branch not in ['', 'unknown', 'None', none])
+        else ''
+      }}
+
 - name: Render review_context from the parsed PR/MR context
   ansible.builtin.set_fact:
     review_context: "{{ lookup('template', role_path + '/templates/pr_context.j2') }}"
@@ -77,6 +88,32 @@
   async: 120
   poll: 2
 
+# When the forge identifies a specific target branch (e.g., a release branch or stacked PR base),
+# fetch it explicitly into refs/remotes/origin/<target_branch> so git merge-base can compute against it.
+- name: Fetch the PR/MR target branch
+  when: review_pr_target_branch | default('') | length > 0
+  ansible.builtin.command:
+    argv:
+      - git
+      - fetch
+      - origin
+      - "+refs/heads/{{ review_pr_target_branch }}:refs/remotes/origin/{{ review_pr_target_branch }}"
+    chdir: "{{ review_clone_dir_controller.path }}"
+  changed_when: false
+  failed_when: false
+  register: _review_target_branch_fetch
+
+- name: Determine base ref for merge-base calculation
+  ansible.builtin.set_fact:
+    # Use origin/<target_branch> when the target branch was reported and fetched successfully;
+    # fall back to origin/HEAD only when the forge reports no target branch (or if fetching it fails).
+    review_base_ref: >-
+      {{
+        'origin/' + review_pr_target_branch
+        if (review_pr_target_branch | default('') | length > 0 and (_review_target_branch_fetch is not defined or _review_target_branch_fetch.rc == 0))
+        else 'origin/HEAD'
+      }}
+
 # See verify_target_freshness.yml's own header comment for why this
 # check exists and runs here, immediately after the clone and before
 # anything (sandbox copy, the review engine) reads the checkout.
@@ -106,13 +143,14 @@
     # also have a .path attribute.
     review_checkout_dir: { path: "{{ review_clone_dir_controller.path }}" }
 
-# Compute the merge base between origin/HEAD and the PR/MR head ref.
-# Using the merge base as review_target_ref provides true 3-dot PR diff semantics
-# (git diff merge_base review-source) so the review only analyzes changes introduced
-# by the PR branch, ignoring any subsequent commits that landed on main after branching.
-- name: Compute the merge base between the default branch and the PR/MR head
+# Compute the merge base between the target branch and the PR/MR head ref.
+# Using the merge base against the actual target branch (falling back to origin/HEAD only when
+# the forge does not report a target branch) provides true 3-dot PR diff semantics
+# (git diff $(git merge-base <target> <head>) <head>) so the review only analyzes changes
+# introduced by the PR branch relative to its intended target branch, ignoring commits on other branches.
+- name: Compute the merge base between the target branch and the PR/MR head
   ansible.builtin.command:
-    argv: [git, merge-base, origin/HEAD, review-source]
+    argv: [git, merge-base, "{{ review_base_ref }}", review-source]
     chdir: "{{ review_clone_dir_controller.path }}"
   changed_when: false
   register: _review_merge_base_result
