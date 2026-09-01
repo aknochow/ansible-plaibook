@@ -19,7 +19,12 @@ warn_list:
   - var-naming[no-role-prefix]
 
 mock_modules:
+  - aknochow.claude.agent
+  - aknochow.claude.message
+  - aknochow.gemini.generate
+  - aknochow.openai.chat
   - aknochow.openshell.sandbox
+  - aknochow.openshell.sandbox_upload
 
 exclude_paths:
   - .venv/
