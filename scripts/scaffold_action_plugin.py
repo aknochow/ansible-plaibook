@@ -31,6 +31,7 @@ clobbers hand-written plugin code would be worse than no generator.
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import re
 import sys
