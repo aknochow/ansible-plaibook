@@ -19,7 +19,13 @@ from __future__ import annotations
 
 import pytest
 from ansible.parsing.dataloader import DataLoader
-from ansible.template import Templar, trust_as_template
+from ansible.template import Templar
+
+try:
+    from ansible.template import trust_as_template
+except ImportError:
+    def trust_as_template(data: str) -> str:
+        return data
 
 from compute_review_scores import ActionModule, InvalidFindingError, compute_scores_and_verdict
 

@@ -16,3 +16,5 @@ collections:
   # kubernetes.core.k8s_info — roles/review/tasks/fetch_k8s_secret_tls.yml's
   # sandbox_tls_source: k8s_secret path (AAP unattended automation).
   - name: kubernetes.core
+  # ansible.posix.profile_tasks and ansible.posix.timer callbacks in ansible.cfg.
+  - name: ansible.posix
