@@ -22,7 +22,6 @@ change from the legacy behavior).
 from __future__ import annotations
 
 import pytest
-
 from dedupe_findings import ActionModule, InvalidFindingError, _collapse_whitespace, dedupe_findings
 
 SEVERITY_POINTS = {"Critical": 20, "Major": 10, "Minor": 5, "Nit": 0}

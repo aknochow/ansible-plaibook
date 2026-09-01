@@ -24,7 +24,6 @@ equivalent to match against.
 from __future__ import annotations
 
 import pytest
-
 from merge_verify_result import ActionModule, FindingNotFoundError, merge_verify_result
 
 BASELINE_FIXTURE_FINDINGS = [

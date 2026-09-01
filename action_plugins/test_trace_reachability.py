@@ -13,7 +13,6 @@ does and doesn't cover.
 from __future__ import annotations
 
 import pytest
-
 from trace_reachability import ActionModule, NotPythonSourceError, trace_reachability
 
 # Shape of the confirmed false positive: a finding claimed

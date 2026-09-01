@@ -15,7 +15,6 @@ from __future__ import annotations
 import py_compile
 
 import pytest
-
 import scaffold_action_plugin as scaffold
 
 
@@ -95,7 +94,9 @@ def test_rejects_multiline_description(tmp_path, monkeypatch):
 
 def test_main_cli_end_to_end(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(scaffold, "ACTION_PLUGINS_DIR", tmp_path)
-    exit_code = scaffold.main(["compute_something", "--args", "findings,threshold", "--description", "compute something"])
+    exit_code = scaffold.main(
+        ["compute_something", "--args", "findings,threshold", "--description", "compute something"]
+    )
     assert exit_code == 0
     assert (tmp_path / "compute_something.py").exists()
     assert (tmp_path / "test_compute_something.py").exists()

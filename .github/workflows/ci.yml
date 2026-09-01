@@ -33,8 +33,11 @@ jobs:
       - name: Install dependencies with lockfile
         run: uv sync --locked --extra dev --python ${{ matrix.python-version }}
 
-      - name: Install ansible.posix collection
-        run: uv run --python ${{ matrix.python-version }} ansible-galaxy collection install ansible.posix
+      - name: Install required collections
+        run: uv run --python ${{ matrix.python-version }} ansible-galaxy collection install -r collections-requirements.yml
+
+      - name: Run ruff lint check
+        run: uv run --python ${{ matrix.python-version }} ruff check .
 
       - name: Check playbook syntax
         run: uv run --python ${{ matrix.python-version }} ansible-playbook review.yml --syntax-check

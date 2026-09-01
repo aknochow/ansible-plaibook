@@ -33,7 +33,6 @@ import json
 import os
 import sys
 
-
 DEFAULT_LAST_RUN_PATH = os.path.join(
     os.path.expanduser("~"), ".cache", "ansible-plaibook", "last_run.json"
 )

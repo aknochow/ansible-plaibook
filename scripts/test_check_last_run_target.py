@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from check_last_run_target import check_last_run_target
 
 
@@ -21,7 +19,10 @@ def _write(tmp_path, content):
 def test_matching_target_found(tmp_path):
     path = _write(
         tmp_path,
-        {"run_id": "abc123", "targets": [{"target": "org/repo#1", "verdict": "READY_FOR_HUMAN_REVIEW", "score": 100.0}]},
+        {
+            "run_id": "abc123",
+            "targets": [{"target": "org/repo#1", "verdict": "READY_FOR_HUMAN_REVIEW", "score": 100.0}],
+        },
     )
     ok, message, match = check_last_run_target("org/repo#1", path)
     assert ok is True
@@ -34,7 +35,10 @@ def test_mismatched_target_refused_loudly(tmp_path):
     # shared path with a DIFFERENT target's result.
     path = _write(
         tmp_path,
-        {"run_id": "xyz789", "targets": [{"target": "aknochow/ansible-plaibook#7a0f849", "verdict": "READY_FOR_HUMAN_REVIEW"}]},
+        {
+            "run_id": "xyz789",
+            "targets": [{"target": "aknochow/ansible-plaibook#7a0f849", "verdict": "READY_FOR_HUMAN_REVIEW"}],
+        },
     )
     ok, message, match = check_last_run_target("other-org/other-repo#771bc27", path)
     assert ok is False
@@ -87,7 +91,10 @@ def test_empty_targets_list(tmp_path):
 def test_cli_exit_code_success(tmp_path, capsys):
     from check_last_run_target import main
 
-    path = _write(tmp_path, {"run_id": "abc123", "targets": [{"target": "org/repo#1", "verdict": "READY_FOR_HUMAN_REVIEW"}]})
+    path = _write(
+        tmp_path,
+        {"run_id": "abc123", "targets": [{"target": "org/repo#1", "verdict": "READY_FOR_HUMAN_REVIEW"}]},
+    )
     rc = main(["org/repo#1", "--file", path])
     assert rc == 0
     out = capsys.readouterr().out
@@ -97,7 +104,10 @@ def test_cli_exit_code_success(tmp_path, capsys):
 def test_cli_exit_code_mismatch(tmp_path, capsys):
     from check_last_run_target import main
 
-    path = _write(tmp_path, {"run_id": "abc123", "targets": [{"target": "org/repo#1", "verdict": "READY_FOR_HUMAN_REVIEW"}]})
+    path = _write(
+        tmp_path,
+        {"run_id": "abc123", "targets": [{"target": "org/repo#1", "verdict": "READY_FOR_HUMAN_REVIEW"}]},
+    )
     rc = main(["org/repo#2", "--file", path])
     assert rc == 1
     captured = capsys.readouterr()

@@ -19,7 +19,6 @@ for the underlying reasoning. Three kinds of coverage:
 from __future__ import annotations
 
 import pytest
-
 from detect_boolean_stringification_hallucination import ActionModule, is_boolean_stringification_hallucination
 
 # A confirmed-shipped occurrence that got past verify.yml's own LLM

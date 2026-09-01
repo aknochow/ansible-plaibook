@@ -16,7 +16,6 @@ range.
 from __future__ import annotations
 
 import pytest
-
 from compute_suggested_severity import ActionModule, InvalidSeverityInputsError, compute_suggested_severity
 
 
