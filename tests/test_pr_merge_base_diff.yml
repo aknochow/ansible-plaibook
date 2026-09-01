@@ -20,11 +20,6 @@
       register: test_repo_dir
 
     - name: Run test scenarios with automatic cleanup
-      always:
-        - name: Clean up temporary test repository
-          ansible.builtin.file:
-            path: "{{ test_repo_dir.path }}"
-            state: absent
       block:
         - name: Initialize test git repository
           ansible.builtin.command:
@@ -152,3 +147,8 @@
         - name: Show test pass confirmation
           ansible.builtin.debug:
             msg: "PASSED: git merge-base diff correctly isolates PR changes and ignores subsequent main commits."
+      always:
+        - name: Clean up temporary test repository
+          ansible.builtin.file:
+            path: "{{ test_repo_dir.path }}"
+            state: absent

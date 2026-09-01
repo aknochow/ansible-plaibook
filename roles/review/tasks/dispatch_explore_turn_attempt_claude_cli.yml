@@ -11,15 +11,14 @@
 
 - name: "Claude CLI: show this explore turn's request configuration"
   ansible.builtin.debug:
-    msg: "{{ [
-      'model: ' + (review_explore_claude_cli_model if review_explore_claude_cli_model is string else '(CLI default)'),
-      'effort: ' + review_claude_cli_effort,
-      'max_turns: ' + (review_explore_claude_cli_max_turns | string),
-      'tools: [Read, Grep, Glob]',
-      'setting_sources: ' + (review_claude_cli_setting_sources | string),
-      'cwd: ' + review_repo_path,
-      'output_format: json_schema (explore_findings_schema)',
-      ] }}"
+    msg:
+      - "model: {{ review_explore_claude_cli_model if review_explore_claude_cli_model is string else '(CLI default)' }}"
+      - "effort: {{ review_claude_cli_effort }}"
+      - "max_turns: {{ review_explore_claude_cli_max_turns | string }}"
+      - "tools: [Read, Grep, Glob]"
+      - "setting_sources: {{ review_claude_cli_setting_sources | string }}"
+      - "cwd: {{ review_repo_path }}"
+      - "output_format: json_schema (explore_findings_schema)"
 
 - name: "Claude CLI: dispatch the explore agent (single call runs its own explore loop)"
   aknochow.claude.agent:

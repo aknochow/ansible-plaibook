@@ -28,7 +28,7 @@
     # (e.g. agent_family=qwen) fails loudly here with Ansible's own
     # "could not find included file" rather than silently falling
     # through to Claude -- the same guarantee lenses.yml already gives.
-    - name: "Call {{ agent_family }} with the current conversation, attempt 1, explore turn {{ explore_turn_count }}"
+    - name: "Call the provider dispatch with the current conversation, attempt 1, explore turn {{ explore_turn_count }}"
       ansible.builtin.include_tasks: "dispatch_explore_turn_attempt_{{ agent_family }}.yml"
       vars:
         explore_attempt_number: 1
@@ -45,8 +45,11 @@
         that:
           - explore_dispatch_valid
         fail_msg: >-
-          Explore agent ({{ review_explore_model if agent_family == 'claude' else ((review_explore_claude_cli_model if review_explore_claude_cli_model is string else '(CLI default)') if agent_family == 'claude_cli' else review_explore_gemini_model) }}) produced invalid or
-          incomplete structured output on turn {{ explore_turn_count }}
+          Explore agent
+          ({{ review_explore_model if agent_family == 'claude' else
+          ((review_explore_claude_cli_model if review_explore_claude_cli_model is string else '(CLI default)')
+          if agent_family == 'claude_cli' else review_explore_gemini_model) }})
+          produced invalid or incomplete structured output on turn {{ explore_turn_count }}
           after {{ review_structured_output_max_attempts }} attempt(s).
           This is a confirmed, probabilistic model-generation quirk (see
           handoff.ansible-plaibook-merge-findings-string-vs-list-crash.yaml) --

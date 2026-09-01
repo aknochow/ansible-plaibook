@@ -19,6 +19,9 @@ warn_list:
   # not a blind find-and-replace.
   - var-naming[no-role-prefix]
 
+mock_modules:
+  - aknochow.openshell.sandbox
+
 exclude_paths:
   - .venv/
   - public/
