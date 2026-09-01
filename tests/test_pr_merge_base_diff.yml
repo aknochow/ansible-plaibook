@@ -144,9 +144,113 @@
             fail_msg: >-
               Direct main diff should have picked up main_later.txt demonstrating the 2-dot regression.
 
-        - name: Show test pass confirmation
+        - name: Show Scenario 1 pass confirmation
           ansible.builtin.debug:
-            msg: "PASSED: git merge-base diff correctly isolates PR changes and ignores subsequent main commits."
+            msg: "PASSED: Scenario 1 - git merge-base diff against main correctly isolates PR changes from subsequent main commits."
+
+        # Scenario 2: PR targeting a non-default branch (e.g. release-1.0)
+        # Verifies that merge-base against the actual target branch (release-1.0)
+        # isolates the PR changes, whereas merge-base against main (origin/HEAD)
+        # would wrongly include release branch commits in the diff.
+        - name: "Scenario 2: Create non-default target branch release-1.0 from base commit"
+          ansible.builtin.command:
+            argv: [git, checkout, -b, release-1.0, main~1]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: "Scenario 2: Add commit to target branch (simulates fixes landed on release-1.0)"
+          ansible.builtin.copy:
+            content: "release fix on release-1.0\n"
+            dest: "{{ test_repo_dir.path }}/release_fix.txt"
+            mode: "0644"
+
+        - name: "Scenario 2: Commit target branch change"
+          ansible.builtin.command:
+            argv: [git, add, release_fix.txt]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: "Scenario 2: Commit release-1.0 change"
+          ansible.builtin.command:
+            argv: [git, commit, -m, "Fix on release-1.0"]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: "Scenario 2: Create PR branch from release-1.0 target"
+          ansible.builtin.command:
+            argv: [git, checkout, -b, pr-on-release]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: "Scenario 2: Add PR commit on release-1.0"
+          ansible.builtin.copy:
+            content: "feature for release-1.0\n"
+            dest: "{{ test_repo_dir.path }}/pr_release_feature.txt"
+            mode: "0644"
+
+        - name: "Scenario 2: Stage PR change"
+          ansible.builtin.command:
+            argv: [git, add, pr_release_feature.txt]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: "Scenario 2: Commit PR change"
+          ansible.builtin.command:
+            argv: [git, commit, -m, "PR feature targeting release-1.0"]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: "Scenario 2: Compute merge-base against actual TARGET branch (release-1.0)"
+          ansible.builtin.command:
+            argv: [git, merge-base, release-1.0, pr-on-release]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: false
+          register: release_target_merge_base
+
+        - name: "Scenario 2: Compute merge-base against DEFAULT branch (main / origin/HEAD - flawed)"
+          ansible.builtin.command:
+            argv: [git, merge-base, main, pr-on-release]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: false
+          register: flawed_main_merge_base
+
+        - name: "Scenario 2: Compute diff using actual target branch merge-base"
+          ansible.builtin.command:
+            argv: [git, diff, --name-only, "{{ release_target_merge_base.stdout | trim }}", pr-on-release, --]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: false
+          register: release_target_diff_files
+
+        - name: "Scenario 2: Compute diff using flawed main merge-base"
+          ansible.builtin.command:
+            argv: [git, diff, --name-only, "{{ flawed_main_merge_base.stdout | trim }}", pr-on-release, --]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: false
+          register: flawed_main_diff_files
+
+        - name: "Scenario 2: Assert target branch merge-base diff contains ONLY the PR file"
+          ansible.builtin.assert:
+            that:
+              - release_target_diff_files.stdout_lines | length == 1
+              - "'pr_release_feature.txt' in release_target_diff_files.stdout_lines"
+              - "'release_fix.txt' not in release_target_diff_files.stdout_lines"
+              - "'main_later.txt' not in release_target_diff_files.stdout_lines"
+            fail_msg: >-
+              Target branch diff incorrectly included files outside the PR:
+              {{ release_target_diff_files.stdout_lines }}
+
+        - name: "Scenario 2: Assert flawed main merge-base diff wrongly included release branch commits"
+          ansible.builtin.assert:
+            that:
+              - flawed_main_diff_files.stdout_lines | length == 2
+              - "'release_fix.txt' in flawed_main_diff_files.stdout_lines"
+              - "'pr_release_feature.txt' in flawed_main_diff_files.stdout_lines"
+            fail_msg: >-
+              Flawed main merge-base should have captured release_fix.txt demonstrating issue #12 bug.
+
+        - name: Show overall pass confirmation
+          ansible.builtin.debug:
+            msg: "PASSED: Both default-branch and non-default-branch target merge-base resolution verified."
       always:
         - name: Clean up temporary test repository
           ansible.builtin.file:
