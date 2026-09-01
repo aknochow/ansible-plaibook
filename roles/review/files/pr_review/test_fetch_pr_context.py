@@ -77,6 +77,7 @@ def test_fetch_gitlab_mock():
 
     assert result["identifier"] == "MR !15"
     assert result["author"] == "gluser"
+    assert result["target_branch"] == "main"
     assert result["head_sha"] == "gl1234567890abcdef"
     assert len(result["files_changed"]) == 1
     assert result["files_changed"][0]["path"] == "playbook.yml"
@@ -123,6 +124,7 @@ def test_fetch_github_with_pagination():
     assert result["identifier"] == "PR #42"
     assert result["title"] == "Fix bug in parser"
     assert result["author"] == "octocat"
+    assert result["target_branch"] == "main"
     assert result["ci_status"] == "passing"
     assert len(result["files_changed"]) == 125
     assert result["files_changed"][0]["path"] == "file_0.py"
@@ -165,6 +167,7 @@ def test_fetch_gitea_mock():
 
     assert result["identifier"] == "PR #10"
     assert result["author"] == "giteauser"
+    assert result["target_branch"] == "main"
     assert result["ci_status"] == "passing"
     assert len(result["files_changed"]) == 1
     assert result["files_changed"][0]["path"] == "ansible.yml"
