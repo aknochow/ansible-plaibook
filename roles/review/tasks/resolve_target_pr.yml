@@ -33,10 +33,27 @@
   ansible.builtin.set_fact:
     # If the forge reports a valid target branch, capture it.
     # When no target branch is reported (empty/null/unknown/error), fall back to empty string so origin/HEAD is used downstream.
-    review_pr_target_branch: >-
+    _raw_target_branch: >-
       {{
         _pr_context.target_branch
         if (_pr_context is mapping and _pr_context.target_branch is defined and _pr_context.target_branch not in ['', 'unknown', 'None', none])
+        else ''
+      }}
+
+- name: Validate target branch name to prevent refspec and option injection
+  ansible.builtin.set_fact:
+    # Defense against option injection (leading '-'), ref traversal ('..'), globs, or invalid ref characters.
+    # Matches briefing.yml:88 defense: ref values starting with '-' would be parsed by git as a flag.
+    # If the forge reports an unsafe or malformed branch name, discard it and fall back to origin/HEAD.
+    review_pr_target_branch: >-
+      {{
+        _raw_target_branch | trim
+        if (_raw_target_branch | trim | length > 0
+            and not (_raw_target_branch | trim).startswith('-')
+            and not '..' in (_raw_target_branch | trim)
+            and (_raw_target_branch | trim) is match('^[a-zA-Z0-9._/-]+$')
+            and not (_raw_target_branch | trim).endswith('/')
+            and not (_raw_target_branch | trim).endswith('.lock'))
         else ''
       }}
 
@@ -90,6 +107,14 @@
 
 # When the forge identifies a specific target branch (e.g., a release branch or stacked PR base),
 # fetch it explicitly into refs/remotes/origin/<target_branch> so git merge-base can compute against it.
+- name: Validate target branch ref does not look like a git option
+  when: review_pr_target_branch | default('') | length > 0
+  ansible.builtin.assert:
+    that:
+      - not (review_pr_target_branch | trim).startswith('-')
+      - not '..' in (review_pr_target_branch | trim)
+    fail_msg: "review_pr_target_branch must not start with '-' or contain '..' (possible git option injection)"
+
 - name: Fetch the PR/MR target branch
   when: review_pr_target_branch | default('') | length > 0
   ansible.builtin.command:
