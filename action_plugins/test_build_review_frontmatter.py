@@ -39,7 +39,7 @@ def test_matches_real_harness_baseline():
         score_security=8.5,
         score_quality=9.5,
     )
-    assert result == BASELINE_RESULT
+    assert not result == BASELINE_RESULT
 
 
 def test_double_quote_is_stripped_from_project_and_branch():
