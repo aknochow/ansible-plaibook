@@ -151,7 +151,14 @@
 # failure output -- console, CI logs, playbook capture. None of those
 # carry the access controls of the repository under review, so this is a
 # second exposure path for precisely the data this pipeline exists to
-# find. Truncated to enough to debug with, and no more.
+# find.
+#
+# Truncating is not enough. A model quoting evidence leads with it, so
+# the credential is in the first 200 characters -- verified byrunning
+# the filter against a realistic draft. Nothing of the draft is printed;
+# stop_reason already says WHY it declined, which is what this message is
+# for, and the full text stays in the registered fact for anyone
+# debugging deliberately.
 - name: "Claude CLI: fail loudly if the Security agent produced no structured output"
   ansible.builtin.assert:
     that:
@@ -161,9 +168,8 @@
       output despite output_format being set -- Claude declined the
       structured-output tool call even after its internal retry turn
       (stop_reason={{ _claude_cli_security_raw.stop_reason | default('unknown') }}).
-      Raw text (first 200 chars; the full text stays in the registered
-      fact _claude_cli_security_raw and is deliberately NOT printed):
-      {{ _claude_cli_security_raw.text | default('') | truncate(200, True, ' ...[truncated]') }}
+      The model's draft is NOT printed here -- see _claude_cli_security_raw.text
+      if you need it ({{ _claude_cli_security_raw.text | default('') | length }} chars).
 
 - name: "Claude CLI: fail loudly if the Review agent produced no structured output"
   ansible.builtin.assert:
@@ -174,9 +180,8 @@
       output despite output_format being set -- Claude declined the
       structured-output tool call even after its internal retry turn
       (stop_reason={{ _claude_cli_review_raw.stop_reason | default('unknown') }}).
-      Raw text (first 200 chars; the full text stays in the registered
-      fact _claude_cli_review_raw and is deliberately NOT printed):
-      {{ _claude_cli_review_raw.text | default('') | truncate(200, True, ' ...[truncated]') }}
+      The model's draft is NOT printed here -- see _claude_cli_review_raw.text
+      if you need it ({{ _claude_cli_review_raw.text | default('') | length }} chars).
 
 - name: "Claude CLI: build the normalized Security result"
   ansible.builtin.set_fact:
