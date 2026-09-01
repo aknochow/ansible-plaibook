@@ -21,9 +21,6 @@ dev = [
     "pytest-cov>=4.0.0,<7.0.0",
 ]
 
-[tool.setuptools.packages.find]
-include = ["action_plugins*", "filter_plugins*", "library*", "roles*", "scripts*"]
-
 [tool.pytest.ini_options]
 testpaths = ["action_plugins", "library", "roles/review/files/pr_review", "scripts"]
 python_files = ["test_*.py"]
