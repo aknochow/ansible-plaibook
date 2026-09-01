@@ -282,8 +282,10 @@ def main(argv: list[str] | None = None) -> int:
     # plugin_path/test_path aren't under REPO_ROOT, which is only true
     # when ACTION_PLUGINS_DIR hasn't been overridden (e.g. in tests).
     print(f"Generated {os.path.relpath(plugin_path, REPO_ROOT)}")
-    print(f"Generated {os.path.relpath(test_path, REPO_ROOT)}")
-    print("Both files are TODO-scaffolded, not working code -- fill in the pure function, ActionModule result shape, and real tests before use.")
+    print(
+        "Both files are TODO-scaffolded, not working code -- fill in the "
+        "pure function, ActionModule result shape, and real tests before use."
+    )
     return 0
 
 

@@ -61,6 +61,7 @@ def http_post(url: str, payload: dict, headers: dict[str, str] | None = None, ti
 import shutil
 import subprocess
 
+
 def get_github_token() -> str | None:
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     if not token and shutil.which("gh"):

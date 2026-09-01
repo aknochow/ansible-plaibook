@@ -17,18 +17,17 @@ import os
 import subprocess
 
 import pytest
-
 from run_checklist import (
+    _ALLOWED_BINARIES,
+    _DANGEROUS_FLAGS,
+    _GIT_ALLOWED_SUBCOMMANDS,
+    _run_cmd,
+    find_all_symlinks,
     is_safe_checklist_cmd,
     parse_checklist_blocks,
-    find_all_symlinks,
-    remove_all_symlinks,
     read_checklist_content,
+    remove_all_symlinks,
     run_checklist,
-    _ALLOWED_BINARIES,
-    _GIT_ALLOWED_SUBCOMMANDS,
-    _DANGEROUS_FLAGS,
-    _run_cmd,
 )
 
 

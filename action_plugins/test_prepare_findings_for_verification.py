@@ -17,7 +17,6 @@ equivalent to match against.
 from __future__ import annotations
 
 import pytest
-
 from prepare_findings_for_verification import (
     ActionModule,
     InvalidSecurityPatternError,

@@ -13,7 +13,6 @@ already-correct native-list case (must remain a no-op).
 from __future__ import annotations
 
 import pytest
-
 from coerce_findings_encoding import ActionModule, InvalidFindingsEncodingError, coerce_findings_encoding
 
 # A findings array double-encoded as a single JSON string value, the

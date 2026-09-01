@@ -11,7 +11,6 @@ tolerates it. See compute_pipeline_cost.py's own module docstring.
 from __future__ import annotations
 
 import pytest
-
 from compute_pipeline_cost import (
     ActionModule,
     MissingModelError,
