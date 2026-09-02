@@ -1,4 +1,17 @@
 ---
+# Every run written here carries a `status` of 'ok' or 'failed', and the
+# error text when it failed.
+#
+# Before that, a failed run wrote a summary and a ledger line that were
+# wrong only by OMISSION: no verdict, no score, targets: []. Nothing
+# asserted that it had failed, so a failure was indistinguishable from a
+# thin success, and a consumer had to infer it from a missing field. Ten
+# of twenty-four runs in the ledger never finished and nobody noticed,
+# because the ledger had no way to say so.
+#
+# review_pipeline_failed and review_pipeline_error already existed -- set
+# by the rescue block in review.yml, then recorded nowhere.
+#
 # Included with `when:` at include site for single skip notice (not per-task).
 # Cache directory not guaranteed to exist; created by hook script or here.
 - name: Ensure the last-run summary cache directory exists
@@ -13,6 +26,8 @@
     last_run_summary_content: >-
       {{ {
         'run_id': last_run_id,
+        'status': 'failed' if (review_pipeline_failed | default(false) | bool) else 'ok',
+        'error': review_pipeline_error | default(''),
         'host': review_run_ledger_host | default(lookup('pipe', 'hostname -s') | lower | regex_replace('[^a-z0-9_.-]', '-')),
         'commit': review_short_sha | default(''),
         'branch': review_branch | default(''),
@@ -121,6 +136,8 @@
       {{ {
         'ts': now(utc=true).isoformat(),
         'run_id': last_run_id,
+        'status': 'failed' if (review_pipeline_failed | default(false) | bool) else 'ok',
+        'error': review_pipeline_error | default(''),
         'host': review_run_ledger_host | default(lookup('pipe', 'hostname -s') | lower | regex_replace('[^a-z0-9_.-]', '-')),
         'commit': review_short_sha | default(''),
         'branch': review_branch | default(''),
