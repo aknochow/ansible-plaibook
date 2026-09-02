@@ -50,7 +50,18 @@ review_agent_model: "claude-opus-4-6"
 # raw Messages API call -- draws on a claude.ai Pro/Max subscription's
 # own OAuth session rather than per-token API credits. See
 # dispatch_lens_claude_cli.yml's own header for the full rationale.
-agent_family: claude   # claude | gemini | claude_cli | qwen
+# Env-overridable so a machine with no ANTHROPIC_API_KEY can set its own
+# default once (ANSIBLE_REVIEW_AGENT_FAMILY, or agent_family in a
+# gitignored host_vars/localhost.yml) instead of remembering -e on every
+# invocation. The `true` second argument matters: an unset env lookup
+# returns the empty string, not undefined, and bare default() only
+# triggers on undefined.
+#
+# 'claude' stays the fallback rather than becoming a considered choice --
+# changing it is a separate decision, not a side effect of making the
+# var overridable.
+# claude | gemini | claude_cli | qwen
+agent_family: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_AGENT_FAMILY') | default('claude', true) }}"
 
 # aknochow.claude auth: no provider or project baked in on purpose --
 # this role doesn't get to assume which backend you use. Falls back to
