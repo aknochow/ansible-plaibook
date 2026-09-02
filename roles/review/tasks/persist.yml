@@ -216,6 +216,33 @@
         'findings_run_scoped_path': review_findings_run_scoped_path
       }] }}
 
+- name: Append this review execution to the directory runs ledger
+  vars:
+    _run_entry: >-
+      {{ {
+        'ts': now(utc=true).isoformat(),
+        'persist_run_id': review_persist_run_id,
+        'target': review_org_repo + '#' + review_number,
+        'commit': review_short_sha,
+        'branch': review_branch,
+        'date': review_today_date,
+        'verdict': review_verdict,
+        'score_overall': score_overall | float,
+        'findings_path': review_findings_path,
+        'summary_path': review_summary_path,
+        'findings_run_scoped_path': review_findings_run_scoped_path,
+        'summary_run_scoped_path': review_summary_run_scoped_path
+      } | to_json }}
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - 'umask 077; cat >> "$0"'
+      - "{{ review_findings_path | dirname }}/runs.jsonl"
+    stdin: "{{ _run_entry }}"
+    stdin_add_newline: true
+  changed_when: true
+
 - name: Show where the review was persisted
   ansible.builtin.debug:
     msg: >-
@@ -225,4 +252,5 @@
       against this same target/branch/commit (last-write-wins, same as
       last_run.json); for a copy guaranteed to be this run's own,
       unaffected by a concurrent run: {{ review_findings_run_scoped_path }}
-      / {{ review_summary_run_scoped_path }}
+      / {{ review_summary_run_scoped_path }}. Full run history for this commit
+      is appended to {{ review_findings_path | dirname }}/runs.jsonl.

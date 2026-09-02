@@ -153,9 +153,30 @@
           - pipeline_findings_reports[0].summary_run_scoped_path != pipeline_findings_reports[1].summary_run_scoped_path
         fail_msg: "pipeline_findings_reports (what last_run.json is built from) should carry each run's own distinct run-scoped path"
 
+    - name: Read the directory runs.jsonl ledger
+      ansible.builtin.slurp:
+        path: "{{ review_findings_path | dirname }}/runs.jsonl"
+      register: _runs_jsonl_raw
+
+    - name: Assert runs.jsonl recorded both runs in chronological sequence
+      vars:
+        _lines: "{{ _runs_jsonl_raw.content | b64decode | trim | split('\n') }}"
+        _entry1: "{{ _lines[0] | from_json }}"
+        _entry2: "{{ _lines[1] | from_json }}"
+      ansible.builtin.assert:
+        that:
+          - _lines | length == 2
+          - _entry1.verdict == "NEEDS_CHANGES"
+          - _entry1.score_overall == 66.7
+          - _entry1.summary_run_scoped_path == run1_summary_run_scoped_path
+          - _entry2.verdict == "READY_FOR_HUMAN_REVIEW"
+          - _entry2.score_overall == 98.3
+          - _entry2.summary_run_scoped_path == review_summary_run_scoped_path
+        fail_msg: "runs.jsonl failed to record both collision runs accurately: {{ _lines }}"
+
     - name: Show the collision-survival confirmation message
       ansible.builtin.debug:
-        msg: "PASSED: both runs' real results survive intact via their own run-scoped copies, despite colliding on the canonical path"
+        msg: "PASSED: both runs' real results survive intact via run-scoped copies and directory runs.jsonl ledger, despite colliding on the canonical path"
 
     - name: Clean up the fixture output directory
       ansible.builtin.file:

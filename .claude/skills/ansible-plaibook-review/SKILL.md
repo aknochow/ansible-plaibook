@@ -111,7 +111,9 @@ Every run prints two clean debug lines at the end:
   verify it first: `python3 scripts/check_last_run_target.py "org/repo#123"`
   loudly refuses (exit 1, clear stderr message) if the file currently
   describes a different target than the one you asked about, instead of
-  silently handing back whatever's there.
+  silently handing back whatever's there. It also supports verifying
+  `summary.json` files directly via `--file /path/to/summary.json`, with
+  optional `--commit`, `--branch`, and `--run-id` constraint flags.
 
 Extract the run-scoped path from your own invocation's stdout — don't
 guess it, don't reuse one from a previous run. Shape (identical for both
