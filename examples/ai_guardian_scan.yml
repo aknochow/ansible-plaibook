@@ -348,7 +348,7 @@
       ignore_unreachable: true
       register: _guardian_findings_raw
 
-    - name: Fail loudly if the sandbox connection was unreachable
+    - name: Fail loudly if the sandbox connection was unreachable when reading findings
       ansible.builtin.include_tasks: ../roles/review/tasks/fail_if_sandbox_unreachable.yml
       vars:
         fail_if_unreachable_result_var: _guardian_findings_raw

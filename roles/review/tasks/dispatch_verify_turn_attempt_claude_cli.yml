@@ -89,15 +89,14 @@
 
 - name: "Claude CLI: show this verify turn's request configuration"
   ansible.builtin.debug:
-    msg: "{{ [
-      'model: ' + (review_verify_claude_cli_model if review_verify_claude_cli_model is string else '(CLI default)'),
-      'effort: ' + review_claude_cli_effort,
-      'max_turns: ' + (review_verify_claude_cli_max_turns | string),
-      'tools: [Read, Grep, Glob]',
-      'setting_sources: ' + (review_claude_cli_setting_sources | string),
-      'cwd: ' + review_repo_path,
-      'output_format: json_schema (verify_verdict_schema)',
-      ] }}"
+    msg:
+      - "model: {{ review_verify_claude_cli_model if review_verify_claude_cli_model is string else '(CLI default)' }}"
+      - "effort: {{ review_claude_cli_effort }}"
+      - "max_turns: {{ review_verify_claude_cli_max_turns | string }}"
+      - "tools: [Read, Grep, Glob]"
+      - "setting_sources: {{ review_claude_cli_setting_sources | string }}"
+      - "cwd: {{ review_repo_path }}"
+      - "output_format: json_schema (verify_verdict_schema)"
 
 - name: "Claude CLI: dispatch the verify agent (single call runs its own explore-then-verdict loop)"
   aknochow.claude.agent:

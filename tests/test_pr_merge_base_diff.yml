@@ -20,11 +20,6 @@
       register: test_repo_dir
 
     - name: Run test scenarios with automatic cleanup
-      always:
-        - name: Clean up temporary test repository
-          ansible.builtin.file:
-            path: "{{ test_repo_dir.path }}"
-            state: absent
       block:
         - name: Initialize test git repository
           ansible.builtin.command:
@@ -163,37 +158,37 @@
             chdir: "{{ test_repo_dir.path }}"
           changed_when: true
 
-        - name: "Scenario 2: Add release branch commit"
+        - name: "Scenario 2: Add commit to target branch (simulates fixes landed on release-1.0)"
           ansible.builtin.copy:
-            content: "release maintenance fix\n"
+            content: "release fix on release-1.0\n"
             dest: "{{ test_repo_dir.path }}/release_fix.txt"
             mode: "0644"
 
-        - name: "Scenario 2: Commit on release-1.0"
+        - name: "Scenario 2: Commit target branch change"
           ansible.builtin.command:
             argv: [git, add, release_fix.txt]
             chdir: "{{ test_repo_dir.path }}"
           changed_when: true
 
-        - name: "Scenario 2: Commit release fix on release-1.0"
+        - name: "Scenario 2: Commit release-1.0 change"
           ansible.builtin.command:
-            argv: [git, commit, -m, "Release fix on release-1.0"]
+            argv: [git, commit, -m, "Fix on release-1.0"]
             chdir: "{{ test_repo_dir.path }}"
           changed_when: true
 
-        - name: "Scenario 2: Create PR branch targeting release-1.0"
+        - name: "Scenario 2: Create PR branch from release-1.0 target"
           ansible.builtin.command:
             argv: [git, checkout, -b, pr-on-release]
             chdir: "{{ test_repo_dir.path }}"
           changed_when: true
 
-        - name: "Scenario 2: Add PR feature for release"
+        - name: "Scenario 2: Add PR commit on release-1.0"
           ansible.builtin.copy:
-            content: "PR feature destined for release-1.0\n"
+            content: "feature for release-1.0\n"
             dest: "{{ test_repo_dir.path }}/pr_release_feature.txt"
             mode: "0644"
 
-        - name: "Scenario 2: Commit on PR branch"
+        - name: "Scenario 2: Stage PR change"
           ansible.builtin.command:
             argv: [git, add, pr_release_feature.txt]
             chdir: "{{ test_repo_dir.path }}"
@@ -256,3 +251,8 @@
         - name: Show overall pass confirmation
           ansible.builtin.debug:
             msg: "PASSED: Both default-branch and non-default-branch target merge-base resolution verified."
+      always:
+        - name: Clean up temporary test repository
+          ansible.builtin.file:
+            path: "{{ test_repo_dir.path }}"
+            state: absent
