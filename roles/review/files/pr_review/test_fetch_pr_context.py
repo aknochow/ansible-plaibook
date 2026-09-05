@@ -220,3 +220,117 @@ def test_fetch_gitea_file_statuses_and_deletions():
     assert file_map[".gitignore"]["status"] == "Modified"
 
 
+def test_fetch_github_failing_ci_check_runs():
+    pr_data = {
+        "number": 55,
+        "title": "Broken PR",
+        "user": {"login": "dev"},
+        "state": "open",
+        "head": {"ref": "fix-broken", "sha": "deadbeef1234"},
+        "base": {"ref": "main"},
+        "html_url": "https://github.com/org/repo/pull/55",
+        "body": "PR description",
+    }
+    check_runs_data = {
+        "check_runs": [
+            {"name": "lint", "status": "completed", "conclusion": "success", "html_url": "https://ci/lint"},
+            {"name": "test", "status": "completed", "conclusion": "failure", "html_url": "https://ci/test"},
+        ]
+    }
+
+    def mock_http_get(url, headers=None, timeout=60):
+        if url.endswith("/pulls/55"):
+            return 200, pr_data, {}
+        elif "files?per_page=100&page=1" in url:
+            return 200, [], {}
+        elif "/commits/deadbeef1234/status" in url:
+            return 200, {"statuses": []}, {}
+        elif "/commits/deadbeef1234/check-runs" in url:
+            return 200, check_runs_data, {}
+        elif "/pulls/55/comments" in url:
+            return 200, [], {}
+        return 404, None, {}
+
+    with patch("fetch_pr_context.http_get", side_effect=mock_http_get):
+        result = fetch_github("org", "repo", 55)
+
+    assert result["ci_status"] == "failing"
+    assert len(result["failing_checks"]) == 1
+    assert result["failing_checks"][0]["name"] == "test"
+    assert result["failing_checks"][0]["url"] == "https://ci/test"
+
+
+def test_fetch_github_failing_commit_status():
+    pr_data = {
+        "number": 56,
+        "title": "PR with failing status",
+        "user": {"login": "dev"},
+        "state": "open",
+        "head": {"ref": "status-fail", "sha": "feedface5678"},
+        "base": {"ref": "main"},
+        "html_url": "https://github.com/org/repo/pull/56",
+        "body": "",
+    }
+    statuses_data = {
+        "statuses": [
+            {"state": "failure", "context": "continuous-integration/travis-ci", "target_url": "https://travis/1"},
+        ]
+    }
+
+    def mock_http_get(url, headers=None, timeout=60):
+        if url.endswith("/pulls/56"):
+            return 200, pr_data, {}
+        elif "files?per_page=100&page=1" in url:
+            return 200, [], {}
+        elif "/commits/feedface5678/status" in url:
+            return 200, statuses_data, {}
+        elif "/commits/feedface5678/check-runs" in url:
+            return 200, {"check_runs": []}, {}
+        elif "/pulls/56/comments" in url:
+            return 200, [], {}
+        return 404, None, {}
+
+    with patch("fetch_pr_context.http_get", side_effect=mock_http_get):
+        result = fetch_github("org", "repo", 56)
+
+    assert result["ci_status"] == "failing"
+    assert len(result["failing_checks"]) == 1
+    assert result["failing_checks"][0]["name"] == "continuous-integration/travis-ci"
+    assert result["failing_checks"][0]["url"] == "https://travis/1"
+
+
+def test_fetch_github_ci_api_inaccessible_degrades_gracefully():
+    pr_data = {
+        "number": 57,
+        "title": "Inaccessible CI",
+        "user": {"login": "dev"},
+        "state": "open",
+        "head": {"ref": "feat-ci", "sha": "cafebabe9999"},
+        "base": {"ref": "main"},
+        "html_url": "https://github.com/org/repo/pull/57",
+        "body": "",
+    }
+
+    def mock_http_get(url, headers=None, timeout=60):
+        if url.endswith("/pulls/57"):
+            return 200, pr_data, {}
+        elif "files?per_page=100&page=1" in url:
+            return 200, [], {}
+        elif "/commits/cafebabe9999/status" in url:
+            # 404 or 403 error on status API
+            return 404, {"message": "Not Found"}, {}
+        elif "/commits/cafebabe9999/check-runs" in url:
+            # 500 or error on check-runs API
+            return 500, None, {}
+        elif "/pulls/57/comments" in url:
+            return 200, [], {}
+        return 404, None, {}
+
+    with patch("fetch_pr_context.http_get", side_effect=mock_http_get):
+        result = fetch_github("org", "repo", 57)
+
+    assert result["ci_status"] == "none"
+    assert result["failing_checks"] == []
+
+
+

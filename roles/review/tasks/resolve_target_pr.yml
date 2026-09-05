@@ -17,6 +17,7 @@
       }}
 
 - name: Fetch PR/MR context via fetch_pr_context.py (runs locally — needs token auth)
+  when: _pr_context is not defined
   ansible.builtin.command:
     argv:
       - python3
@@ -26,188 +27,195 @@
   register: pr_summary
 
 - name: Parse fetch_pr_context.py's JSON output
+  when: _pr_context is not defined
   ansible.builtin.set_fact:
     _pr_context: "{{ pr_summary.stdout | from_json }}"
 
-- name: Extract target branch from PR/MR context
-  ansible.builtin.set_fact:
-    # If the forge reports a valid target branch, capture it.
-    # When no target branch is reported (empty/null/unknown/error), fall back to empty string so origin/HEAD is used downstream.
-    review_pr_target_branch: >-
-      {{
-        _pr_context.target_branch | trim
-        if (_pr_context is mapping and _pr_context.target_branch is defined and _pr_context.target_branch not in ['', 'unknown', 'None', none])
-        else ''
-      }}
+- name: Check CI preflight status
+  ansible.builtin.include_tasks: check_pr_ci_preflight.yml
 
-# Validate the target branch name right after extraction before interpolating into git refspecs or commands.
-# Protects against option injection (leading '-'), ref traversal ('..'), globs ('*'), or invalid ref characters.
-# Matches briefing.yml:88 defense against git option and ref injection.
-- name: Validate target branch ref does not look like a git option or unsafe ref
-  when: review_pr_target_branch | default('') | length > 0
-  ansible.builtin.assert:
-    that:
-      - not (review_pr_target_branch | trim).startswith('-')
-      - not '..' in (review_pr_target_branch | trim)
-      - not '*' in (review_pr_target_branch | trim)
-      - (review_pr_target_branch | trim) is match('^[a-zA-Z0-9._/-]+$')
-    fail_msg: "review_pr_target_branch must not start with '-', contain '..', or include invalid ref characters (possible git option or ref injection)"
+- name: Proceed with PR checkout and review
+  when: not (review_ci_preflight_failed | default(false) | bool)
+  block:
+    - name: Extract target branch from PR/MR context
+      ansible.builtin.set_fact:
+        # If the forge reports a valid target branch, capture it.
+        # When no target branch is reported (empty/null/unknown/error), fall back to empty string so origin/HEAD is used downstream.
+        review_pr_target_branch: >-
+          {{
+            _pr_context.target_branch | trim
+            if (_pr_context is mapping and _pr_context.target_branch is defined and _pr_context.target_branch not in ['', 'unknown', 'None', none])
+            else ''
+          }}
 
-- name: Render review_context from the parsed PR/MR context
-  ansible.builtin.set_fact:
-    review_context: "{{ lookup('template', role_path + '/templates/pr_context.j2') }}"
+    # Validate the target branch name right after extraction before interpolating into git refspecs or commands.
+    # Protects against option injection (leading '-'), ref traversal ('..'), globs ('*'), or invalid ref characters.
+    # Matches briefing.yml:88 defense against git option and ref injection.
+    - name: Validate target branch ref does not look like a git option or unsafe ref
+      when: review_pr_target_branch | default('') | length > 0
+      ansible.builtin.assert:
+        that:
+          - not (review_pr_target_branch | trim).startswith('-')
+          - not '..' in (review_pr_target_branch | trim)
+          - not '*' in (review_pr_target_branch | trim)
+          - (review_pr_target_branch | trim) is match('^[a-zA-Z0-9._/-]+$')
+        fail_msg: "review_pr_target_branch must not start with '-', contain '..', or include invalid ref characters (possible git option or ref injection)"
 
-- name: Determine the repo clone URL
-  ansible.builtin.set_fact:
-    review_clone_url: >-
-      {{ review_clone_url_override
-         if review_clone_url_override is defined
-         else 'git@' + review_hostname + ':' + review_org_repo + '.git'
-         if (review_platform == 'gitea' and (review_clone_protocol | default('ssh')) == 'ssh')
-         else 'https://github.com/' + review_org_repo + '.git'
-         if review_platform == 'github'
-         else 'https://' + (review_hostname or 'gitea.example.com') + '/' + review_org_repo + '.git'
-         if review_platform == 'gitea'
-         else 'https://' + (review_hostname or 'gitlab.com') + '/' + review_org_repo + '.git' }}
+    - name: Render review_context from the parsed PR/MR context
+      ansible.builtin.set_fact:
+        review_context: "{{ lookup('template', role_path + '/templates/pr_context.j2') }}"
 
-- name: Create a working checkout directory (controller — the clone always happens here)
-  ansible.builtin.tempfile:
-    state: directory
-    prefix: "review-{{ review_number }}-"
-  register: review_clone_dir_controller
+    - name: Determine the repo clone URL
+      ansible.builtin.set_fact:
+        review_clone_url: >-
+          {{ review_clone_url_override
+             if review_clone_url_override is defined
+             else 'git@' + review_hostname + ':' + review_org_repo + '.git'
+             if (review_platform == 'gitea' and (review_clone_protocol | default('ssh')) == 'ssh')
+             else 'https://github.com/' + review_org_repo + '.git'
+             if review_platform == 'github'
+             else 'https://' + (review_hostname or 'gitea.example.com') + '/' + review_org_repo + '.git'
+             if review_platform == 'gitea'
+             else 'https://' + (review_hostname or 'gitlab.com') + '/' + review_org_repo + '.git' }}
 
-# Clones on the controller rather than delegate_to review_delegate_host —
-# the controller has ambient git credentials or HTTPS clone access configured.
-# Mirrors review.yml's own harness-checkout pattern exactly: clone/checkout
-# wherever auth actually lives, then COPY into the sandbox for isolated
-# execution. A single git module call here: clone, fetch the PR/MR head ref via
-# refspec (GitHub/Gitea expose refs/pull/N/head, GitLab refs/merge-requests/N/head —
-# all fetchable the same way, no special auth/API access beyond a plain clone), and
-# check it out as 'review-source'. The module's own `after` return value is the
-# full checked-out SHA, so no extra rev-parse call is needed either.
-- name: Clone the target repo and check out the PR/MR head ref
-  ansible.builtin.git:
-    repo: "{{ review_clone_url }}"
-    dest: "{{ review_clone_dir_controller.path }}"
-    refspec: >-
-      +refs/{{ 'pull' if review_platform in ['github', 'gitea'] else 'merge-requests' }}/{{ review_number }}/head:refs/heads/review-source
-    version: review-source
-  register: review_clone_result
-  # Real network clone of a potentially large, foreign repo -- see
-  # "Post results back to the PR/MR"'s identical async/poll further
-  # down in this same file. Verified ansible.builtin.git supports
-  # async cleanly (register.after populates correctly) before applying
-  # it here.
-  async: 120
-  poll: 2
+    - name: Create a working checkout directory (controller — the clone always happens here)
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: "review-{{ review_number }}-"
+      register: review_clone_dir_controller
 
-# When the forge identifies a specific target branch (e.g., a release branch or stacked PR base),
-# fetch it explicitly into refs/remotes/origin/<target_branch> so git merge-base can compute against it.
-- name: Fetch the PR/MR target branch
-  when: review_pr_target_branch | default('') | length > 0
-  ansible.builtin.command:
-    argv:
-      - git
-      - fetch
-      - origin
-      - "+refs/heads/{{ review_pr_target_branch }}:refs/remotes/origin/{{ review_pr_target_branch }}"
-    chdir: "{{ review_clone_dir_controller.path }}"
-  changed_when: false
-  failed_when: false
-  register: _review_target_branch_fetch
+    # Clones on the controller rather than delegate_to review_delegate_host —
+    # the controller has ambient git credentials or HTTPS clone access configured.
+    # Mirrors review.yml's own harness-checkout pattern exactly: clone/checkout
+    # wherever auth actually lives, then COPY into the sandbox for isolated
+    # execution. A single git module call here: clone, fetch the PR/MR head ref via
+    # refspec (GitHub/Gitea expose refs/pull/N/head, GitLab refs/merge-requests/N/head —
+    # all fetchable the same way, no special auth/API access beyond a plain clone), and
+    # check it out as 'review-source'. The module's own `after` return value is the
+    # full checked-out SHA, so no extra rev-parse call is needed either.
+    - name: Clone the target repo and check out the PR/MR head ref
+      ansible.builtin.git:
+        repo: "{{ review_clone_url }}"
+        dest: "{{ review_clone_dir_controller.path }}"
+        refspec: >-
+          +refs/{{ 'pull' if review_platform in ['github', 'gitea'] else 'merge-requests' }}/{{ review_number }}/head:refs/heads/review-source
+        version: review-source
+      register: review_clone_result
+      # Real network clone of a potentially large, foreign repo -- see
+      # "Post results back to the PR/MR"'s identical async/poll further
+      # down in this same file. Verified ansible.builtin.git supports
+      # async cleanly (register.after populates correctly) before applying
+      # it here.
+      async: 120
+      poll: 2
 
-- name: Determine base ref for merge-base calculation
-  ansible.builtin.set_fact:
-    # Use origin/<target_branch> when the target branch was reported and fetched successfully;
-    # fall back to origin/HEAD only when the forge reports no target branch (or if fetching it fails).
-    review_base_ref: >-
-      {{
-        'origin/' + review_pr_target_branch
-        if (review_pr_target_branch | default('') | length > 0 and (_review_target_branch_fetch is not defined or _review_target_branch_fetch.rc == 0))
-        else 'origin/HEAD'
-      }}
+    # When the forge identifies a specific target branch (e.g., a release branch or stacked PR base),
+    # fetch it explicitly into refs/remotes/origin/<target_branch> so git merge-base can compute against it.
+    - name: Fetch the PR/MR target branch
+      when: review_pr_target_branch | default('') | length > 0
+      ansible.builtin.command:
+        argv:
+          - git
+          - fetch
+          - origin
+          - "+refs/heads/{{ review_pr_target_branch }}:refs/remotes/origin/{{ review_pr_target_branch }}"
+        chdir: "{{ review_clone_dir_controller.path }}"
+      changed_when: false
+      failed_when: false
+      register: _review_target_branch_fetch
 
-# See verify_target_freshness.yml's own header comment for why this
-# check exists and runs here, immediately after the clone and before
-# anything (sandbox copy, the review engine) reads the checkout.
-- name: Verify the cloned commit is still the target's current HEAD
-  ansible.builtin.include_tasks: verify_target_freshness.yml
+    - name: Determine base ref for merge-base calculation
+      ansible.builtin.set_fact:
+        # Use origin/<target_branch> when the target branch was reported and fetched successfully;
+        # fall back to origin/HEAD only when the forge reports no target branch (or if fetching it fails).
+        review_base_ref: >-
+          {{
+            'origin/' + review_pr_target_branch
+            if (review_pr_target_branch | default('') | length > 0 and (_review_target_branch_fetch is not defined or _review_target_branch_fetch.rc == 0))
+            else 'origin/HEAD'
+          }}
 
-# One "skipping" notice for this whole group on an unsandboxed run
-# instead of three -- see copy_to_sandbox.yml's own header comment
-# for why this is include_tasks + when, not block + when.
-- name: Copy the controller-side checkout into the sandbox
-  when: review_delegate_host | default('') | length > 0
-  ansible.builtin.include_tasks: copy_to_sandbox.yml
+    # See verify_target_freshness.yml's own header comment for why this
+    # check exists and runs here, immediately after the clone and before
+    # anything (sandbox copy, the review engine) reads the checkout.
+    - name: Verify the cloned commit is still the target's current HEAD
+      ansible.builtin.include_tasks: verify_target_freshness.yml
 
-# Not grouped with its own cleanup task below into one block: that
-# cleanup must run AFTER the review engine (the checkout still needs to
-# exist for it to read), so it isn't adjacent to this task — blocking
-# them together would silently reorder cleanup to happen before the
-# review instead of after, deleting the checkout the engine is about to
-# read.
-- name: Use the controller checkout directly when not sandboxed
-  when: not (review_delegate_host | default('') | length > 0)
-  ansible.builtin.set_fact:
-    # Minimal dict, not the raw registered result: the sandboxed branch
-    # above sets the same fact to a plain { path: ... } dict, so both
-    # branches produce the same shape rather than one being a full
-    # tempfile task result (changed/state/etc.) that only happens to
-    # also have a .path attribute.
-    review_checkout_dir: { path: "{{ review_clone_dir_controller.path }}" }
+    # One "skipping" notice for this whole group on an unsandboxed run
+    # instead of three -- see copy_to_sandbox.yml's own header comment
+    # for why this is include_tasks + when, not block + when.
+    - name: Copy the controller-side checkout into the sandbox
+      when: review_delegate_host | default('') | length > 0
+      ansible.builtin.include_tasks: copy_to_sandbox.yml
 
-# Compute the merge base between the target branch and the PR/MR head ref.
-# Using the merge base against the actual target branch (falling back to origin/HEAD only when
-# the forge does not report a target branch) provides true 3-dot PR diff semantics
-# (git diff $(git merge-base <target> <head>) <head>) so the review only analyzes changes
-# introduced by the PR branch relative to its intended target branch, ignoring commits on other branches.
-- name: Compute the merge base between the target branch and the PR/MR head
-  ansible.builtin.command:
-    argv: [git, merge-base, "{{ review_base_ref }}", review-source]
-    chdir: "{{ review_clone_dir_controller.path }}"
-  changed_when: false
-  register: _review_merge_base_result
+    # Not grouped with its own cleanup task below into one block: that
+    # cleanup must run AFTER the review engine (the checkout still needs to
+    # exist for it to read), so it isn't adjacent to this task — blocking
+    # them together would silently reorder cleanup to happen before the
+    # review instead of after, deleting the checkout the engine is about to
+    # read.
+    - name: Use the controller checkout directly when not sandboxed
+      when: not (review_delegate_host | default('') | length > 0)
+      ansible.builtin.set_fact:
+        # Minimal dict, not the raw registered result: the sandboxed branch
+        # above sets the same fact to a plain { path: ... } dict, so both
+        # branches produce the same shape rather than one being a full
+        # tempfile task result (changed/state/etc.) that only happens to
+        # also have a .path attribute.
+        review_checkout_dir: { path: "{{ review_clone_dir_controller.path }}" }
 
-# Plain set_fact, not include_role vars: -- target resolution and the
-# review engine are the same role now, so these just need to be ambient
-# facts before run_review_engine.yml is included, same pattern
-# resolve_target_branch.yml/resolve_target_commit.yml already use.
-- name: Set outputs for the review engine
-  ansible.builtin.set_fact:
-    review_repo_path: "{{ review_checkout_dir.path }}"
-    review_target_ref: "{{ _review_merge_base_result.stdout | trim }}"
-    review_source_ref: "review-source"
-    review_short_sha: "{{ review_clone_result.after[:7] }}"
-    review_branch: "{{ review_platform }}-{{ review_org_repo | regex_replace('/', '-') }}-{{ review_number }}"
+    # Compute the merge base between the target branch and the PR/MR head ref.
+    # Using the merge base against the actual target branch (falling back to origin/HEAD only when
+    # the forge does not report a target branch) provides true 3-dot PR diff semantics
+    # (git diff $(git merge-base <target> <head>) <head>) so the review only analyzes changes
+    # introduced by the PR branch relative to its intended target branch, ignoring commits on other branches.
+    - name: Compute the merge base between the target branch and the PR/MR head
+      ansible.builtin.command:
+        argv: [git, merge-base, "{{ review_base_ref }}", review-source]
+        chdir: "{{ review_clone_dir_controller.path }}"
+      changed_when: false
+      register: _review_merge_base_result
 
-- name: Run the review engine
-  ansible.builtin.include_tasks: run_review_engine.yml
+    # Plain set_fact, not include_role vars: -- target resolution and the
+    # review engine are the same role now, so these just need to be ambient
+    # facts before run_review_engine.yml is included, same pattern
+    # resolve_target_branch.yml/resolve_target_commit.yml already use.
+    - name: Set outputs for the review engine
+      ansible.builtin.set_fact:
+        review_repo_path: "{{ review_checkout_dir.path }}"
+        review_target_ref: "{{ _review_merge_base_result.stdout | trim }}"
+        review_source_ref: "review-source"
+        review_short_sha: "{{ review_clone_result.after[:7] }}"
+        review_branch: "{{ review_platform }}-{{ review_org_repo | regex_replace('/', '-') }}-{{ review_number }}"
 
-# The sandboxed path already cleans up review_clone_dir_controller
-# right after copying it in (above) — this is the missing other half:
-# when unsandboxed, review_checkout_dir IS review_clone_dir_controller
-# (no copy happens), so it was never cleaned up at all, leaking a
-# tempdir on every unsandboxed run. Runs AFTER the review engine (not
-# grouped with "Use the controller checkout directly" above) since the
-# checkout still needs to exist while the engine reads it.
-- name: Clean up the controller-side checkout (unsandboxed runs only)
-  when: not (review_delegate_host | default('') | length > 0)
-  ansible.builtin.file:
-    path: "{{ review_checkout_dir.path }}"
-    state: absent
+    - name: Run the review engine
+      ansible.builtin.include_tasks: run_review_engine.yml
 
-- name: Post results back to the PR/MR
-  when: post_results | bool
-  ansible.builtin.command:
-    argv: >-
-      {{
-        ['python3', role_path + '/files/pr_review/post_review_comment.py',
-         review_platform, review_org_repo, review_number, review_findings_path]
-        + (['--host', review_hostname] if review_hostname else [])
-      }}
-  changed_when: true
-  # See bug_pipeline.yml's "Push the fix branch" task for why async/poll,
-  # not a timeout: parameter (doesn't exist on ansible.builtin.command) --
-  # this is a real GitHub/GitLab API call, so the overhead is worth it.
-  async: 120
-  poll: 2
+    # The sandboxed path already cleans up review_clone_dir_controller
+    # right after copying it in (above) — this is the missing other half:
+    # when unsandboxed, review_checkout_dir IS review_clone_dir_controller
+    # (no copy happens), so it was never cleaned up at all, leaking a
+    # tempdir on every unsandboxed run. Runs AFTER the review engine (not
+    # grouped with "Use the controller checkout directly" above) since the
+    # checkout still needs to exist while the engine reads it.
+    - name: Clean up the controller-side checkout (unsandboxed runs only)
+      when: not (review_delegate_host | default('') | length > 0)
+      ansible.builtin.file:
+        path: "{{ review_checkout_dir.path }}"
+        state: absent
+
+    - name: Post results back to the PR/MR
+      when: post_results | bool
+      ansible.builtin.command:
+        argv: >-
+          {{
+            ['python3', role_path + '/files/pr_review/post_review_comment.py',
+             review_platform, review_org_repo, review_number, review_findings_path]
+            + (['--host', review_hostname] if review_hostname else [])
+          }}
+      changed_when: true
+      # See bug_pipeline.yml's "Push the fix branch" task for why async/poll,
+      # not a timeout: parameter (doesn't exist on ansible.builtin.command) --
+      # this is a real GitHub/GitLab API call, so the overhead is worth it.
+      async: 120
+      poll: 2
