@@ -53,5 +53,5 @@
   ansible.builtin.set_fact:
     review_verdict: "{{ review_prior_summary.verdict }}"
     score_overall: "{{ review_prior_summary.score_overall | float }}"
-    findings_critical: "{{ review_prior_summary.findings | selectattr('severity', 'equalto', 'Critical') | list }}"
-    findings_major: "{{ review_prior_summary.findings | selectattr('severity', 'equalto', 'Major') | list }}"
+    findings_critical: "{{ review_prior_summary.findings | default([]) | rejectattr('evidence_status', 'equalto', 'refuted') | selectattr('severity', 'equalto', 'Critical') | list }}"
+    findings_major: "{{ review_prior_summary.findings | default([]) | rejectattr('evidence_status', 'equalto', 'refuted') | selectattr('severity', 'equalto', 'Major') | list }}"

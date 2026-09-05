@@ -1,0 +1,180 @@
+---
+# Fast, no-LLM verification that summary.json excludes refuted findings
+# from findings_count so counts match score_overall and verdict, while
+# preserving the full findings list and adding refuted_count.
+#
+# Usage:
+#   ansible-playbook tests/test_summary_refuted_findings.yml
+
+- name: Test that summary.json findings_count and score_overall are computed over the same set
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_delegate_host: ""
+    review_write_artifact: false
+    review_org_repo: "test/refuted-findings-fixture"
+    review_branch: "test-refuted-branch"
+    review_short_sha: "def5678"
+    review_repo_path: "/tmp/does-not-matter-refuted-fixture"
+    review_diff_stats: {}
+    review_diff_categories: {}
+    review_completeness_checks: { deleted_files: [], todo_fixme: [], trailing_whitespace: 0 }
+    review_neutralization_check: { triggered: false, remaining_refs: [] }
+    review_checklist: { triggered: false, results: [] }
+    briefing_project: "test/refuted-findings-fixture"
+    briefing_branch: "test-refuted-branch"
+    briefing_commit: "def5678"
+    review_context: ""
+    fence: "```"
+    severity_points:
+      Critical: 20
+      Major: 10
+      Minor: 5
+      Nit: 0
+    guardian_scan_available: false
+    guardian_scan_skip_reason: "review_guardian_scan_enabled is false"
+    guardian_findings: []
+    guardian_scan_truncated: false
+    guardian_blocking_findings: []
+
+  tasks:
+    - name: Create a throwaway review_output_base
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: "summary-refuted-fixture-"
+      register: fixture_output
+
+    - name: Initialize pipeline accumulators
+      ansible.builtin.set_fact:
+        pipeline_findings_reports: []
+        review_output_base: "{{ fixture_output.path }}"
+
+    - name: Set up deduplicated findings containing both refuted and unrefuted findings
+      ansible.builtin.set_fact:
+        deduped_findings:
+          - file: "auth.py"
+            line: 42
+            severity: "Critical"
+            lens: "Security"
+            evidence: "fake finding claimed unverified auth token"
+            fix: "Verification stage proved token check is valid"
+            description: "Token check missing"
+            confidence: 0.9
+            evidence_status: "refuted"
+            verification_evidence: "Middleware test verified token validation"
+            verification_rationale: "The finding is completely incorrect; token is verified in middleware."
+          - file: "query.py"
+            line: 15
+            severity: "Major"
+            lens: "Functionality"
+            evidence: "claimed unbalanced braces in GraphQL query"
+            fix: "Braces verified balanced in ast parse"
+            description: "Unbalanced braces"
+            confidence: 0.85
+            evidence_status: "refuted"
+            verification_evidence: "Query ast parser confirmed matching braces"
+            verification_rationale: "False finding; query executes cleanly."
+          - file: "utils.py"
+            line: 88
+            severity: "Minor"
+            lens: "Quality"
+            evidence: "missing type annotation on helper"
+            fix: "Add type annotation"
+            description: "Helper lacks type hints"
+            confidence: 0.8
+            evidence_status: "verified"
+            verification_evidence: "def helper(x): lacks typing"
+            verification_rationale: "Confirmed helper has untyped parameters."
+          - file: "docs.py"
+            line: 5
+            severity: "Nit"
+            lens: "Quality"
+            evidence: "spelling typo in docstring"
+            fix: "Fix typo"
+            description: "Spelling error"
+            confidence: 0.7
+            evidence_status: null
+
+    - name: Prepare findings defaults using prepare_findings_for_verification
+      prepare_findings_for_verification:
+        findings: "{{ deduped_findings }}"
+        verify_severities: ["Critical", "Major"]
+        security_sensitive_pattern: ""
+      register: _prepared
+
+    - name: Store prepared findings
+      ansible.builtin.set_fact:
+        deduped_findings: "{{ _prepared.findings }}"
+
+    - name: Compute scores using the real compute_review_scores action plugin
+      compute_review_scores:
+        findings: "{{ deduped_findings | rejectattr('evidence_status', 'equalto', 'refuted') | list }}"
+        severity_points: "{{ severity_points }}"
+      register: score_result
+
+    - name: Store score and verdict facts
+      ansible.builtin.set_fact:
+        score_functionality: "{{ score_result.score_functionality }}"
+        score_security: "{{ score_result.score_security }}"
+        score_quality: "{{ score_result.score_quality }}"
+        score_overall: "{{ score_result.score_overall }}"
+        review_verdict: "{{ score_result.verdict }}"
+        findings_critical: "{{ deduped_findings | selectattr('severity', 'equalto', 'Critical') | list }}"
+        findings_major: "{{ deduped_findings | selectattr('severity', 'equalto', 'Major') | list }}"
+        findings_minor: "{{ deduped_findings | selectattr('severity', 'equalto', 'Minor') | list }}"
+        findings_nit: "{{ deduped_findings | selectattr('severity', 'equalto', 'Nit') | list }}"
+
+    - name: Persist the review using the real persist.yml
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: persist
+        public: true
+      vars:
+        review_number: "42"
+
+    - name: Read the persisted summary.json
+      ansible.builtin.slurp:
+        src: "{{ review_summary_path }}"
+      register: _summary_raw
+
+    - name: Parse summary.json content
+      ansible.builtin.set_fact:
+        summary_data: "{{ _summary_raw.content | b64decode | from_json }}"
+
+    - name: Print the generated summary.json artifact
+      ansible.builtin.debug:
+        var: summary_data
+
+    - name: Assert summary.json excludes refuted findings from findings_count while keeping them in findings
+      ansible.builtin.assert:
+        that:
+          # Full findings list preserves all findings (both refuted and active)
+          - summary_data.findings | length == 4
+          # Refuted count records the 2 refuted findings
+          - summary_data.refuted_count == 2
+          # findings_count excludes refuted findings (0 critical, 0 major, 1 minor, 1 nit)
+          - summary_data.findings_count.critical == 0
+          - summary_data.findings_count.major == 0
+          - summary_data.findings_count.minor == 1
+          - summary_data.findings_count.nit == 1
+          # Score and verdict match the non-refuted set (Quality minus 5 for Minor = 95, Functionality 100, Security 100)
+          - summary_data.score_overall == 98.3
+          - summary_data.scores.security == 100.0
+          - summary_data.scores.functionality == 100.0
+          - summary_data.scores.quality == 95.0
+          - summary_data.verdict == 'READY_FOR_HUMAN_REVIEW'
+        fail_msg: >-
+          summary.json invariant failed: findings_count ({{ summary_data.findings_count }})
+          did not exclude refuted findings or match score_overall ({{ summary_data.score_overall }}).
+          refuted_count: {{ summary_data.refuted_count | default('MISSING') }}
+        success_msg: >-
+          PASSED: summary.json findings_count (0 critical, 0 major, 1 minor, 1 nit)
+          and score_overall (98.3, READY_FOR_HUMAN_REVIEW) agree on the same active set,
+          with refuted_count=2 and all 4 findings preserved in findings.
+
+    - name: Clean up the fixture output directory
+      ansible.builtin.file:
+        path: "{{ fixture_output.path }}"
+        state: absent
