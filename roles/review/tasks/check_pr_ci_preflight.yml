@@ -20,7 +20,7 @@
       ansible.builtin.set_fact:
         review_verdict: "SKIPPED"
         score_overall: 0.0
-        review_short_sha: "{{ ((_pr_context.head_sha | default(''))[:7]) | default('', true) }}"
+        review_short_sha: "{{ (_pr_context.head_sha | default('', true))[:7] }}"
         review_branch: "{{ review_platform }}-{{ review_org_repo | regex_replace('/', '-') }}-{{ review_number }}"
         review_ci_failing_checks: "{{ _pr_context.failing_checks | default([]) }}"
 

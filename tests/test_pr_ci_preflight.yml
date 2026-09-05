@@ -256,6 +256,51 @@
             fail_msg: >-
               Scenario F failed: missing/inaccessible CI state must degrade gracefully without blocking.
 
+    # -------------------------------------------------------------------------
+    # Scenario G: head_sha is null/None when CI is failing
+    # -------------------------------------------------------------------------
+    - name: Reset facts for Scenario G
+      ansible.builtin.set_fact:
+        review_verdict: "UNSET"
+        score_overall: 100.0
+        review_short_sha: "INIT"
+        review_ci_preflight_failed: false
+        pipeline_findings_reports: []
+
+    - name: "Scenario G: head_sha is null when CI is failing, producing review_verdict SKIPPED and review_short_sha ''"
+      vars:
+        review_target: "https://github.com/my-org/my-repo/pull/42"
+        review_platform: "github"
+        review_org_repo: "my-org/my-repo"
+        review_number: "42"
+        review_require_ci_passing: true
+        _pr_context:
+          identifier: "PR #42"
+          title: "PR with null head_sha"
+          head_sha: null
+          ci_status: "failing"
+          failing_checks:
+            - name: "ci/broken"
+              url: "https://github.com/my-org/my-repo/actions/runs/102"
+      block:
+        - name: Run check_pr_ci_preflight.yml with null head_sha and failing CI
+          ansible.builtin.include_tasks: "{{ check_pr_ci_preflight_path }}"
+
+        - name: Assert null head_sha handles gracefully, producing review_verdict SKIPPED and review_short_sha ''
+          ansible.builtin.assert:
+            that:
+              - review_ci_preflight_failed | bool == true
+              - review_verdict == "SKIPPED"
+              - score_overall | float == 0.0
+              - review_short_sha == ""
+              - pipeline_findings_reports | length == 1
+              - pipeline_findings_reports[0].verdict == "SKIPPED"
+              - pipeline_findings_reports[0].ci_preflight_failed | bool == true
+            fail_msg: >-
+              Scenario G failed: null head_sha when CI is failing must not raise TypeError,
+              must produce review_verdict=SKIPPED and review_short_sha=''.
+
     - name: Show success message
       ansible.builtin.debug:
         msg: "All PR CI preflight check scenarios passed successfully."
+
