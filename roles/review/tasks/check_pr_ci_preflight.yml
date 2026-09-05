@@ -1,0 +1,51 @@
+---
+# Query/evaluate target PR/MR CI status before cloning or dispatching lens agents.
+# If CI is failing on the PR head commit and review_require_ci_passing is true,
+# stop early and record a SKIPPED verdict to avoid model spend on known-broken code.
+# If no CI checks exist (ci_status: none), or checks are running/passing, or if
+# review_require_ci_passing is false, review proceeds normally.
+
+- name: Determine if CI preflight check is failing
+  ansible.builtin.set_fact:
+    review_ci_preflight_failed: >-
+      {{
+        (review_require_ci_passing | default(true) | bool)
+        and ((_pr_context.ci_status | default('none')) == 'failing')
+      }}
+
+- name: Handle failing CI preflight check (stop early to avoid model spend)
+  when: review_ci_preflight_failed | bool
+  block:
+    - name: Set facts for skipped review due to failing CI
+      ansible.builtin.set_fact:
+        review_verdict: "SKIPPED"
+        score_overall: 0.0
+        review_short_sha: "{{ ((_pr_context.head_sha | default(''))[:7]) | default('', true) }}"
+        review_branch: "{{ review_platform }}-{{ review_org_repo | regex_replace('/', '-') }}-{{ review_number }}"
+        review_ci_failing_checks: "{{ _pr_context.failing_checks | default([]) }}"
+
+    - name: Render skipped review report
+      ansible.builtin.set_fact:
+        _ci_preflight_report: "{{ lookup('template', role_path + '/templates/ci_preflight_skipped.md.j2') }}"
+
+    - name: Notice that review was skipped due to failing CI checks
+      ansible.builtin.debug:
+        msg: >-
+          CI checks are failing on {{ review_org_repo }}#{{ review_number }}.
+          Review skipped before lens dispatch (review_verdict=SKIPPED).
+          Override with -e review_require_ci_passing=false to review anyway.
+
+    - name: Record skipped review in pipeline_findings_reports
+      ansible.builtin.set_fact:
+        pipeline_findings_reports: >-
+          {{ (pipeline_findings_reports | default([])) + [{
+            'target': review_org_repo + '#' + review_number,
+            'report': _ci_preflight_report,
+            'verdict': 'SKIPPED',
+            'score': 0.0,
+            'summary_path': '',
+            'findings_path': '',
+            'summary_run_scoped_path': '',
+            'findings_run_scoped_path': '',
+            'ci_preflight_failed': true
+          }] }}

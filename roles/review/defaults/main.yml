@@ -11,6 +11,14 @@ review_type: pr
 # for review_type: pr.
 post_results: false
 
+# Gate: query target PR/MR CI status before dispatching lens agents.
+# When true, if CI is failing on the PR head commit, stop and report early
+# (verdict: SKIPPED) instead of dispatching lenses and incurring model spend
+# on known-broken code. If no CI checks exist (ci_status: none), or if checks
+# are running or passing, review proceeds normally.
+# Override via -e review_require_ci_passing=false to review anyway.
+review_require_ci_passing: true
+
 review_delegate_host: ""
 
 # resolve_target_pr.yml's clone fetches via GitHub/GitLab's ref mirror

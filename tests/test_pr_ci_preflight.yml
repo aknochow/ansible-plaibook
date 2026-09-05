@@ -1,0 +1,261 @@
+---
+# Deterministic regression test for PR CI preflight check:
+# Proves:
+#   a) CI failing blocks lens dispatch when review_require_ci_passing=true (verdict: SKIPPED, no clone/engine run).
+#   b) review_require_ci_passing=false bypasses the block and proceeds.
+#   c) No CI checks found (ci_status=none) proceeds without blocking.
+#   d) Running (ci_status=running) and passing (ci_status=passing) checks proceed without blocking.
+#   e) Missing/inaccessible CI API status degrades gracefully to proceed without blocking.
+#
+# Usage:
+#   ansible-playbook tests/test_pr_ci_preflight.yml
+
+- name: Test PR CI status preflight check
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    check_pr_ci_preflight_path: "{{ playbook_dir }}/../roles/review/tasks/check_pr_ci_preflight.yml"
+    resolve_target_pr_path: "{{ playbook_dir }}/../roles/review/tasks/resolve_target_pr.yml"
+    role_path: "{{ playbook_dir }}/../roles/review"
+
+  tasks:
+    # -------------------------------------------------------------------------
+    # Scenario A: CI failing blocks lens dispatch when review_require_ci_passing=true
+    # -------------------------------------------------------------------------
+    - name: Reset facts for Scenario A
+      ansible.builtin.set_fact:
+        review_verdict: "UNSET"
+        score_overall: 100.0
+        review_ci_preflight_failed: false
+        pipeline_findings_reports: []
+
+    - name: "Scenario A: CI failing blocks lens dispatch and reports SKIPPED (end-to-end through resolve_target_pr.yml)"
+      vars:
+        review_target: "https://github.com/my-org/my-repo/pull/42"
+        review_require_ci_passing: true
+        _pr_context:
+          identifier: "PR #42"
+          title: "Add awesome feature"
+          author: "contributor1"
+          state: "open"
+          source_branch: "feat/awesome"
+          target_branch: "main"
+          url: "https://github.com/my-org/my-repo/pull/42"
+          head_sha: "1234567890abcdef1234567890abcdef12345678"
+          ci_status: "failing"
+          failing_checks:
+            - name: "ci/unit-tests"
+              url: "https://github.com/my-org/my-repo/actions/runs/100"
+            - name: "ci/lint"
+              url: "https://github.com/my-org/my-repo/actions/runs/101"
+      block:
+        - name: Run resolve_target_pr.yml with failing CI
+          ansible.builtin.include_tasks: "{{ resolve_target_pr_path }}"
+
+        - name: Assert failing CI stopped execution early before clone and lens dispatch
+          ansible.builtin.assert:
+            that:
+              - review_ci_preflight_failed | bool == true
+              - review_verdict == "SKIPPED"
+              - score_overall | float == 0.0
+              - review_short_sha == "1234567"
+              - review_branch == "github-my-org-my-repo-42"
+              - pipeline_findings_reports | length == 1
+              - pipeline_findings_reports[0].verdict == "SKIPPED"
+              - pipeline_findings_reports[0].score | float == 0.0
+              - pipeline_findings_reports[0].ci_preflight_failed | bool == true
+              - pipeline_findings_reports[0].target == "my-org/my-repo#42"
+              - "'ci/unit-tests' in pipeline_findings_reports[0].report"
+              - "'ci/lint' in pipeline_findings_reports[0].report"
+              - "'Review skipped: CI checks are failing' in pipeline_findings_reports[0].report"
+              - review_clone_dir_controller.skipped | default(false) | bool == true
+              - review_repo_path is not defined
+            fail_msg: >-
+              Scenario A failed: failing CI should block lens dispatch, set review_verdict=SKIPPED,
+              and avoid creating a clone or dispatching the review engine.
+
+    # -------------------------------------------------------------------------
+    # Scenario B: review_require_ci_passing=false bypasses the block and proceeds
+    # -------------------------------------------------------------------------
+    - name: Reset facts for Scenario B
+      ansible.builtin.set_fact:
+        review_verdict: "UNSET"
+        score_overall: 100.0
+        review_ci_preflight_failed: false
+        pipeline_findings_reports: []
+
+    - name: "Scenario B: review_require_ci_passing=false bypasses the block and proceeds"
+      vars:
+        review_target: "https://github.com/my-org/my-repo/pull/42"
+        review_platform: "github"
+        review_org_repo: "my-org/my-repo"
+        review_number: "42"
+        review_require_ci_passing: false
+        _pr_context:
+          identifier: "PR #42"
+          title: "Add awesome feature"
+          head_sha: "1234567890abcdef1234567890abcdef12345678"
+          ci_status: "failing"
+          failing_checks:
+            - name: "ci/unit-tests"
+              url: "https://github.com/my-org/my-repo/actions/runs/100"
+      block:
+        - name: Run check_pr_ci_preflight.yml with bypass enabled
+          ansible.builtin.include_tasks: "{{ check_pr_ci_preflight_path }}"
+
+        - name: Assert bypass allowed review to proceed
+          ansible.builtin.assert:
+            that:
+              - review_ci_preflight_failed | bool == false
+              - review_verdict == "UNSET"
+              - pipeline_findings_reports | length == 0
+            fail_msg: >-
+              Scenario B failed: review_require_ci_passing=false must bypass the CI preflight block.
+
+    # -------------------------------------------------------------------------
+    # Scenario C: No CI checks found (ci_status=none) proceeds without blocking
+    # -------------------------------------------------------------------------
+    - name: Reset facts for Scenario C
+      ansible.builtin.set_fact:
+        review_verdict: "UNSET"
+        score_overall: 100.0
+        review_ci_preflight_failed: false
+        pipeline_findings_reports: []
+
+    - name: "Scenario C: No CI checks found (ci_status=none) proceeds without blocking"
+      vars:
+        review_target: "https://github.com/my-org/my-repo/pull/42"
+        review_platform: "github"
+        review_org_repo: "my-org/my-repo"
+        review_number: "42"
+        review_require_ci_passing: true
+        _pr_context:
+          identifier: "PR #42"
+          title: "No workflows repo"
+          head_sha: "1234567890abcdef1234567890abcdef12345678"
+          ci_status: "none"
+          failing_checks: []
+      block:
+        - name: Run check_pr_ci_preflight.yml with no CI checks found
+          ansible.builtin.include_tasks: "{{ check_pr_ci_preflight_path }}"
+
+        - name: Assert no CI checks found allows review to proceed
+          ansible.builtin.assert:
+            that:
+              - review_ci_preflight_failed | bool == false
+              - review_verdict == "UNSET"
+              - pipeline_findings_reports | length == 0
+            fail_msg: >-
+              Scenario C failed: ci_status=none must proceed without blocking.
+
+    # -------------------------------------------------------------------------
+    # Scenario D: CI checks running (ci_status=running) proceeds without blocking
+    # -------------------------------------------------------------------------
+    - name: Reset facts for Scenario D
+      ansible.builtin.set_fact:
+        review_verdict: "UNSET"
+        score_overall: 100.0
+        review_ci_preflight_failed: false
+        pipeline_findings_reports: []
+
+    - name: "Scenario D: CI checks running (ci_status=running) proceeds without blocking"
+      vars:
+        review_target: "https://github.com/my-org/my-repo/pull/42"
+        review_platform: "github"
+        review_org_repo: "my-org/my-repo"
+        review_number: "42"
+        review_require_ci_passing: true
+        _pr_context:
+          identifier: "PR #42"
+          title: "In-progress CI repo"
+          head_sha: "1234567890abcdef1234567890abcdef12345678"
+          ci_status: "running"
+          failing_checks: []
+      block:
+        - name: Run check_pr_ci_preflight.yml with in-progress CI
+          ansible.builtin.include_tasks: "{{ check_pr_ci_preflight_path }}"
+
+        - name: Assert in-progress CI allows review to proceed
+          ansible.builtin.assert:
+            that:
+              - review_ci_preflight_failed | bool == false
+              - review_verdict == "UNSET"
+              - pipeline_findings_reports | length == 0
+            fail_msg: >-
+              Scenario D failed: ci_status=running must proceed without blocking.
+
+    # -------------------------------------------------------------------------
+    # Scenario E: CI checks passing (ci_status=passing) proceeds without blocking
+    # -------------------------------------------------------------------------
+    - name: Reset facts for Scenario E
+      ansible.builtin.set_fact:
+        review_verdict: "UNSET"
+        score_overall: 100.0
+        review_ci_preflight_failed: false
+        pipeline_findings_reports: []
+
+    - name: "Scenario E: CI checks passing (ci_status=passing) proceeds without blocking"
+      vars:
+        review_target: "https://github.com/my-org/my-repo/pull/42"
+        review_platform: "github"
+        review_org_repo: "my-org/my-repo"
+        review_number: "42"
+        review_require_ci_passing: true
+        _pr_context:
+          identifier: "PR #42"
+          title: "Green CI repo"
+          head_sha: "1234567890abcdef1234567890abcdef12345678"
+          ci_status: "passing"
+          failing_checks: []
+      block:
+        - name: Run check_pr_ci_preflight.yml with passing CI
+          ansible.builtin.include_tasks: "{{ check_pr_ci_preflight_path }}"
+
+        - name: Assert passing CI allows review to proceed
+          ansible.builtin.assert:
+            that:
+              - review_ci_preflight_failed | bool == false
+              - review_verdict == "UNSET"
+              - pipeline_findings_reports | length == 0
+            fail_msg: >-
+              Scenario E failed: ci_status=passing must proceed without blocking.
+
+    # -------------------------------------------------------------------------
+    # Scenario F: Degrade gracefully when CI API is inaccessible/unknown
+    # -------------------------------------------------------------------------
+    - name: Reset facts for Scenario F
+      ansible.builtin.set_fact:
+        review_verdict: "UNSET"
+        score_overall: 100.0
+        review_ci_preflight_failed: false
+        pipeline_findings_reports: []
+
+    - name: "Scenario F: Forge API inaccessible/missing fields degrades gracefully without blocking"
+      vars:
+        review_target: "https://github.com/my-org/my-repo/pull/42"
+        review_platform: "github"
+        review_org_repo: "my-org/my-repo"
+        review_number: "42"
+        review_require_ci_passing: true
+        _pr_context:
+          identifier: "PR #42"
+          title: "Unknown CI state"
+          head_sha: "1234567890abcdef1234567890abcdef12345678"
+      block:
+        - name: Run check_pr_ci_preflight.yml with missing ci_status
+          ansible.builtin.include_tasks: "{{ check_pr_ci_preflight_path }}"
+
+        - name: Assert missing ci_status degrades gracefully without blocking
+          ansible.builtin.assert:
+            that:
+              - review_ci_preflight_failed | bool == false
+              - review_verdict == "UNSET"
+              - pipeline_findings_reports | length == 0
+            fail_msg: >-
+              Scenario F failed: missing/inaccessible CI state must degrade gracefully without blocking.
+
+    - name: Show success message
+      ansible.builtin.debug:
+        msg: "All PR CI preflight check scenarios passed successfully."

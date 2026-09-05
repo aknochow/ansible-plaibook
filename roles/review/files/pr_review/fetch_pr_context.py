@@ -285,11 +285,11 @@ def fetch_github(owner: str, repo: str, number: int) -> dict:
     ci_status = "none"
     failing_checks = []
     if head_sha:
-        _, status_resp, _ = http_get(f"{base_url}/commits/{head_sha}/status", headers=headers)
-        _, check_runs_resp, _ = http_get(f"{base_url}/commits/{head_sha}/check-runs", headers=headers)
+        _, statuses_resp, _ = http_get(f"{base_url}/commits/{head_sha}/status", headers=headers)
+        statuses = ((statuses_resp or {}).get("statuses") or []) if isinstance(statuses_resp, dict) else []
 
-        statuses = (status_resp.get("statuses", []) if isinstance(status_resp, dict) else [])
-        check_runs = (check_runs_resp.get("check_runs", []) if isinstance(check_runs_resp, dict) else [])
+        _, check_runs_resp, _ = http_get(f"{base_url}/commits/{head_sha}/check-runs", headers=headers)
+        check_runs = ((check_runs_resp or {}).get("check_runs") or []) if isinstance(check_runs_resp, dict) else []
 
         failing = []
         pending = []

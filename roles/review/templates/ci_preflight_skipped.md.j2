@@ -1,0 +1,13 @@
+## Code Review: {{ review_org_repo }} ({{ review_platform }}-{{ review_org_repo | regex_replace('/', '-') }}-{{ review_number }})
+
+### Verdict: SKIPPED
+
+Review skipped: CI checks are failing on the PR head commit ({{ _pr_context.head_sha | default('unknown') }}). Lens agents were not dispatched to avoid model spend on known-broken code. Pass `-e review_require_ci_passing=false` to bypass.
+
+{% if review_ci_failing_checks | default([]) %}
+### Failing Checks:
+{% for check in review_ci_failing_checks %}
+- **{{ check.name }}**{% if check.url %} ({{ check.url }}){% endif %}
+
+{% endfor %}
+{% endif %}

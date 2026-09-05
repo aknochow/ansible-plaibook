@@ -17,6 +17,7 @@ PLAYBOOKS=(
   "tests/test_neutralization_check.yml"
   "tests/test_persisted_path_collision.yml"
   "tests/test_pipeline_stats.yml"
+  "tests/test_pr_ci_preflight.yml"
   "tests/test_pr_merge_base_diff.yml"
   "tests/test_resolve_target_pr_parsing.yml"
   "tests/test_sandbox_unreachable_teardown.yml"
