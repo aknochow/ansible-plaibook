@@ -140,6 +140,8 @@
     review_findings_run_scoped_path: "{{ review_findings_path | dirname }}/findings.{{ review_persist_run_id }}.md"
 
 - name: Render the structured summary content
+  vars:
+    _active_findings: "{{ deduped_findings | default([]) | rejectattr('evidence_status', 'equalto', 'refuted') | list }}"
   ansible.builtin.set_fact:
     _review_summary_content: >-
       {{ {
@@ -155,11 +157,12 @@
           'quality': score_quality | float
         },
         'findings_count': {
-          'critical': findings_critical | length,
-          'major': findings_major | length,
-          'minor': findings_minor | length,
-          'nit': findings_nit | length
+          'critical': _active_findings | selectattr('severity', 'equalto', 'Critical') | list | length,
+          'major': _active_findings | selectattr('severity', 'equalto', 'Major') | list | length,
+          'minor': _active_findings | selectattr('severity', 'equalto', 'Minor') | list | length,
+          'nit': _active_findings | selectattr('severity', 'equalto', 'Nit') | list | length
         },
+        'refuted_count': deduped_findings | default([]) | selectattr('evidence_status', 'equalto', 'refuted') | list | length,
         'findings': deduped_findings,
         'findings_path': review_findings_path,
         'diff_stats': review_diff_stats,
