@@ -1,0 +1,125 @@
+---
+# Cursor lens dispatch (agent_family: cursor). Uses aknochow.cursor.agent
+# (cursor-sdk local Agent.prompt), not an OpenAI-compatible chat client.
+#
+# Module contract (measured 2026-09-06; live ping 2026-09-06 rc 0 with
+# structured present):
+# - No parent system_prompt. Trusted lens text lives in agents.*.prompt
+#   on one subagent.
+# - No generation-time output_format: json_schema. structured_tool
+#   (report_findings) takes the same schema claude_cli passes to
+#   output_format.schema. The model may skip the tool; the asserts
+#   below fail loudly if .structured is absent.
+# - Do not print .text in fail_msg (lens drafts can quote secrets).
+# - cwd is review_repo_path; setting_sources is [] so the repo under
+#   review does not leak CLAUDE.md / Cursor rules into the session.
+# - tools: [mcp] -- tools=[] hides custom tools (collection + spike).
+#
+# Sets security_result/review_result in the SAME normalized shape
+# dispatch_lens_claude_cli.yml produces: .structured.{findings,scores},
+# .resolved_model, .usage_normalized. No observed_cost_usd -- cursor-sdk
+# RunResult has no USD on the one-shot path.
+
+- name: "Cursor: show the Security agent's request configuration"
+  ansible.builtin.debug:
+    msg: "{{ [
+      'model: ' + review_cursor_model,
+      'effort: ' + review_cursor_effort,
+      'cwd: ' + review_repo_path,
+      'setting_sources: []',
+      'tools: [mcp]',
+      'structured_tool: report_findings (security_findings_schema)',
+      '',
+      '--- subagent prompt ---',
+      ] + security_system_prompt.split('\n') }}"
+
+- name: "Cursor: dispatch the Security agent"
+  aknochow.cursor.agent:
+    prompt: >-
+      Use the security_lens agent, then call report_findings with its
+      findings and scores. You must call report_findings.
+    model: "{{ review_cursor_model }}"
+    effort: "{{ review_cursor_effort }}"
+    cwd: "{{ review_repo_path }}"
+    setting_sources: []
+    tools: [mcp]
+    agents:
+      security_lens:
+        description: Security review lens with trusted instructions.
+        prompt: "{{ security_system_prompt }}"
+    structured_tool:
+      name: report_findings
+      description: Submit the security findings and scores for this diff.
+      input_schema: "{{ security_findings_schema }}"
+  register: _cursor_security_raw
+
+- name: "Cursor: show the Review agent's request configuration"
+  ansible.builtin.debug:
+    msg: "{{ [
+      'model: ' + review_cursor_model,
+      'effort: ' + review_cursor_effort,
+      'cwd: ' + review_repo_path,
+      'setting_sources: []',
+      'tools: [mcp]',
+      'structured_tool: report_findings (review_findings_schema)',
+      '',
+      '--- subagent prompt ---',
+      ] + review_system_prompt.split('\n') }}"
+
+- name: "Cursor: dispatch the Review agent"
+  aknochow.cursor.agent:
+    prompt: >-
+      Use the review_lens agent, then call report_findings with its
+      findings and scores. You must call report_findings.
+    model: "{{ review_cursor_model }}"
+    effort: "{{ review_cursor_effort }}"
+    cwd: "{{ review_repo_path }}"
+    setting_sources: []
+    tools: [mcp]
+    agents:
+      review_lens:
+        description: Functionality and quality review lens with trusted instructions.
+        prompt: "{{ review_system_prompt }}"
+    structured_tool:
+      name: report_findings
+      description: Submit the review findings and scores for this diff.
+      input_schema: "{{ review_findings_schema }}"
+  register: _cursor_review_raw
+
+- name: "Cursor: fail loudly if the Security agent produced no structured output"
+  ansible.builtin.assert:
+    that:
+      - _cursor_security_raw.structured is defined
+    fail_msg: >-
+      Security lens (agent_family=cursor) produced no .structured
+      output -- the model did not call report_findings
+      (status={{ _cursor_security_raw.status | default('unknown') }}).
+      The model's draft is NOT printed here.
+
+- name: "Cursor: fail loudly if the Review agent produced no structured output"
+  ansible.builtin.assert:
+    that:
+      - _cursor_review_raw.structured is defined
+    fail_msg: >-
+      Review lens (agent_family=cursor) produced no .structured
+      output -- the model did not call report_findings
+      (status={{ _cursor_review_raw.status | default('unknown') }}).
+      The model's draft is NOT printed here.
+
+- name: "Cursor: build the normalized Security result"
+  ansible.builtin.set_fact:
+    security_result:
+      structured:
+        findings: "{{ _cursor_security_raw.structured.findings | default([]) }}"
+        scores: "{{ _cursor_security_raw.structured.scores | default({}) }}"
+      resolved_model: "{{ _cursor_security_raw.resolved_model | default(review_cursor_model) }}"
+      usage_normalized: "{{ _cursor_security_raw.usage_normalized }}"
+
+- name: "Cursor: build the normalized Review result"
+  ansible.builtin.set_fact:
+    review_result:
+      structured:
+        findings: "{{ _cursor_review_raw.structured.findings | default([]) }}"
+        scores: "{{ _cursor_review_raw.structured.scores | default({}) }}"
+      resolved_model: "{{ _cursor_review_raw.resolved_model | default(review_cursor_model) }}"
+      usage_normalized: "{{ _cursor_review_raw.usage_normalized }}"

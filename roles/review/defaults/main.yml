@@ -49,7 +49,7 @@ review_agent_model: "claude-opus-4-6"
 # audit_{{ agent_family }}.yml" -- one hand-written, provider-native
 # task file per family, never a shared abstraction. claude is default
 # so existing behavior/callers are unchanged. qwen isn't implemented
-# yet (only claude/gemini/claude_cli dispatch files exist) -- named
+# yet (claude/gemini/claude_cli/cursor dispatch files exist) -- named
 # here so it slots in later without a rename, per
 # ansible-agentbench/harness/tier1_lens_dispatch.yml's own precedent
 # (that harness already proves a Qwen path via aknochow.openai.chat).
@@ -210,6 +210,15 @@ review_openai_continuity_reasoning_effort: "{{ lookup('ansible.builtin.env', 'AN
 # -e review_claude_cli_model=<model> once you know what your
 # subscription can reach.
 review_claude_cli_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_CLAUDE_CLI_MODEL') | default(omit, true) }}"
+
+# Cursor Pro via aknochow.cursor.agent (cursor-sdk). SDK id grok-4.6,
+# effort high -- measured 2026-09-06, not a personal-machine default.
+# Same env-lookup style as review_gemini_model / review_claude_cli_model.
+# Override with -e or ANSIBLE_REVIEW_CURSOR_MODEL.
+review_cursor_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_CURSOR_MODEL') | default('grok-4.6', true) }}"
+review_cursor_effort: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_CURSOR_EFFORT') | default('high', true) }}"
+review_explore_cursor_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_EXPLORE_CURSOR_MODEL') | default(review_cursor_model, true) }}"
+review_verify_cursor_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_VERIFY_CURSOR_MODEL') | default(review_cursor_model, true) }}"
 
 # high by default, same "review quality is the point of this pipeline"
 # reasoning as review_gemini_thinking_level above. Unlike Gemini's

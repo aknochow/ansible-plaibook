@@ -1,0 +1,82 @@
+---
+# One dispatch attempt for current verify turn, cursor side.
+#
+# Same idea as dispatch_verify_turn_attempt_claude_cli.yml: one module
+# call runs explore-then-verdict internally. Cursor cannot take
+# plaibook's custom read_file/search/trace_reachability schemas (no
+# parent system_prompt, no generation-time json_schema, custom tools
+# only via structured_tool / mcp). Built-in read + report_verdict
+# structured_tool stand in. Reachability is the model's own read of
+# control flow, not trace_reachability.py -- same gap as claude_cli.
+#
+# Synthesize at most one report_verdict tool_use so verify_turn.yml's
+# "dispatch any other tool calls" step sees an empty other-tools list
+# and flips review_verify_done on the first outer turn when a verdict
+# lands.
+
+- name: "Cursor: show this verify turn's request configuration"
+  ansible.builtin.debug:
+    msg:
+      - "model: {{ review_verify_cursor_model }}"
+      - "effort: {{ review_cursor_effort }}"
+      - "cwd: {{ review_repo_path }}"
+      - "setting_sources: []"
+      - "tools: [read, mcp]"
+      - "structured_tool: report_verdict (verify_verdict_schema)"
+
+- name: "Cursor: dispatch the verify agent"
+  aknochow.cursor.agent:
+    prompt: >-
+      Use the verify agent. Try to refute the finding described in its
+      instructions using read, then call report_verdict exactly once.
+      You must call report_verdict.
+    model: "{{ review_verify_cursor_model }}"
+    effort: "{{ review_cursor_effort }}"
+    cwd: "{{ review_repo_path }}"
+    setting_sources: []
+    tools: [read, mcp]
+    agents:
+      verify:
+        description: Adversarial single-finding verifier with trusted instructions.
+        prompt: "{{ verify_system_prompt }}"
+    structured_tool:
+      name: report_verdict
+      description: Submit the verification verdict for this one finding.
+      input_schema: "{{ verify_verdict_schema }}"
+  register: _cursor_verify_raw
+
+- name: "Cursor: record this attempt's usage for the pipeline-wide stats summary"
+  ansible.builtin.set_fact:
+    pipeline_agent_calls: >-
+      {{ pipeline_agent_calls + [{
+           'target': review_org_repo + '#' + review_number, 'lens': 'verify',
+           'model': _cursor_verify_raw.resolved_model | default(review_verify_cursor_model),
+           'usage': _cursor_verify_raw.usage_normalized,
+           'attempt': verify_attempt_number | default(1)
+         }] }}
+
+- name: "Cursor: build this attempt's synthesized report_verdict tool_use (if any)"
+  ansible.builtin.set_fact:
+    _cursor_verify_report_call: >-
+      {{ [{'id': 'cursor_report_verdict',
+           'name': 'report_verdict',
+           'input': _cursor_verify_raw.structured}]
+         if _cursor_verify_raw.structured is defined else [] }}
+
+- name: "Cursor: normalize this attempt's result into the shared verify_turn_result shape"
+  ansible.builtin.set_fact:
+    verify_turn_result:
+      message:
+        content: "{{ _cursor_verify_report_call }}"
+        model: "{{ _cursor_verify_raw.resolved_model | default(review_verify_cursor_model) }}"
+      tool_calls: "{{ _cursor_verify_report_call }}"
+      stop_reason: "{{ 'tool_use' if _cursor_verify_raw.structured is defined else (_cursor_verify_raw.status | default('unknown')) }}"
+      usage: "{{ _cursor_verify_raw.usage_normalized }}"
+
+- name: "Cursor: check whether this attempt produced a structured verdict"
+  ansible.builtin.set_fact:
+    _verify_cursor_structured_present: "{{ _cursor_verify_raw.structured is defined }}"
+
+- name: "Cursor: mark this attempt valid unless it's the forced last turn with no verdict at all"
+  ansible.builtin.set_fact:
+    verify_dispatch_valid: "{{ (not verify_last_turn) or (_verify_cursor_structured_present | bool) }}"

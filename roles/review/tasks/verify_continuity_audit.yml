@@ -152,6 +152,38 @@
   when: agent_family == 'claude_cli'
   ansible.builtin.include_tasks: verify_continuity_audit_claude_cli.yml
 
+- name: "Cursor: call Cursor via the Agent SDK to independently audit the continuity claim"
+  when: agent_family == 'cursor'
+  aknochow.cursor.agent:
+    api_key: "{{ review_cursor_api_key }}"
+    prompt: >-
+      Use the continuity_audit agent. Assess the continuity claim
+      described in its instructions, then call report_continuity_audit
+      exactly once. You must call report_continuity_audit.
+    model: "{{ review_verify_cursor_model }}"
+    effort: "{{ review_cursor_effort }}"
+    cwd: "{{ review_repo_path }}"
+    setting_sources: []
+    tools: [mcp]
+    agents:
+      continuity_audit:
+        description: Independent continuity-claim auditor with trusted instructions.
+        prompt: "{{ _continuity_audit_prompt }}"
+    structured_tool:
+      name: report_continuity_audit
+      description: Report whether a continuity claim between two findings is plausible.
+      input_schema: "{{ continuity_audit_schema }}"
+  register: _continuity_audit_cursor_result
+
+- name: "Cursor: normalize the continuity audit result"
+  when: agent_family == 'cursor'
+  ansible.builtin.set_fact:
+    _continuity_audit_resolved_model: "{{ _continuity_audit_cursor_result.resolved_model | default(review_verify_cursor_model) }}"
+    _continuity_audit_usage_normalized: "{{ _continuity_audit_cursor_result.usage_normalized }}"
+    _continuity_audit_answered: "{{ _continuity_audit_cursor_result.structured is defined }}"
+    _continuity_audit_verdict: "{{ (_continuity_audit_cursor_result.structured | default({})).verdict | default('') }}"
+    _continuity_audit_rationale: "{{ (_continuity_audit_cursor_result.structured | default({})).rationale | default('') }}"
+
 # Fail clearly rather than with an undefined-variable error. Every supported
 # provider branch must set the normalized facts before the shared usage record
 # below; an unhandled family should fail here, not with an opaque missing fact.

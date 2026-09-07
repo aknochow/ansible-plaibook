@@ -1,0 +1,98 @@
+---
+# One dispatch attempt for current explore turn, cursor side.
+#
+# Same shape as dispatch_explore_turn_attempt_claude_cli.yml: one
+# aknochow.cursor.agent call that explores then reports. Cursor has no
+# parent system_prompt and no output_format json_schema -- trusted
+# explore text is the explore subagent's prompt; report_findings is a
+# structured_tool with explore_findings_schema.
+#
+# tools: [read, mcp] -- mcp is required for structured_tool (tools=[]
+# hides custom tools); read is the collection's documented filesystem
+# tool name. Do not invent grep/glob ids the module has not measured.
+
+- name: "Cursor: show this explore turn's request configuration"
+  ansible.builtin.debug:
+    msg:
+      - "model: {{ review_explore_cursor_model }}"
+      - "effort: {{ review_cursor_effort }}"
+      - "cwd: {{ review_repo_path }}"
+      - "setting_sources: []"
+      - "tools: [read, mcp]"
+      - "structured_tool: report_findings (explore_findings_schema)"
+
+- name: "Cursor: dispatch the explore agent"
+  aknochow.cursor.agent:
+    prompt: >-
+      Use the explore agent. Decide whether this change needs checking
+      against the rest of the repo, using read if so, then call
+      report_findings with any additional findings (or an empty list
+      if none). You must call report_findings.
+    model: "{{ review_explore_cursor_model }}"
+    effort: "{{ review_cursor_effort }}"
+    cwd: "{{ review_repo_path }}"
+    setting_sources: []
+    tools: [read, mcp]
+    agents:
+      explore:
+        description: Explore beyond the diff with trusted instructions.
+        prompt: "{{ explore_system_prompt }}"
+    structured_tool:
+      name: report_findings
+      description: Submit additional findings found outside the diff, or an empty list.
+      input_schema: "{{ explore_findings_schema }}"
+  register: _cursor_explore_raw
+
+- name: "Cursor: record this attempt's usage for the pipeline-wide stats summary"
+  ansible.builtin.set_fact:
+    pipeline_agent_calls: >-
+      {{ pipeline_agent_calls + [{
+           'target': review_org_repo + '#' + review_number, 'lens': 'explore',
+           'model': _cursor_explore_raw.resolved_model | default(review_explore_cursor_model),
+           'usage': _cursor_explore_raw.usage_normalized,
+           'attempt': explore_attempt_number | default(1)
+         }] }}
+
+- name: "Cursor: build this attempt's synthesized report_findings tool_use (if any)"
+  ansible.builtin.set_fact:
+    _cursor_explore_report_call: >-
+      {{ [{'id': 'cursor_report_findings',
+           'name': 'report_findings',
+           'input': _cursor_explore_raw.structured}]
+         if _cursor_explore_raw.structured is defined else [] }}
+
+- name: "Cursor: normalize this attempt's result into the shared explore_turn_result shape"
+  ansible.builtin.set_fact:
+    explore_turn_result:
+      message:
+        content: "{{ _cursor_explore_report_call }}"
+        model: "{{ _cursor_explore_raw.resolved_model | default(review_explore_cursor_model) }}"
+      tool_calls: "{{ _cursor_explore_report_call }}"
+      stop_reason: "{{ 'tool_use' if _cursor_explore_raw.structured is defined else (_cursor_explore_raw.status | default('unknown')) }}"
+      usage: "{{ _cursor_explore_raw.usage_normalized }}"
+
+- name: "Cursor: check whether this attempt called report_findings"
+  ansible.builtin.set_fact:
+    _explore_attempt_report_calls: "{{ explore_turn_result.tool_calls | selectattr('name', 'equalto', 'report_findings') | list }}"
+
+- name: "Cursor: validate this attempt's report_findings call, if it made one"
+  when: _explore_attempt_report_calls | length > 0
+  block:
+    - name: Coerce this attempt's findings, tolerating a JSON-encoded string
+      coerce_findings_encoding:
+        value: "{{ _explore_attempt_report_calls[0].input.findings }}"
+        label: "Explore agent"
+      register: _explore_attempt_coerce_result
+
+    - name: Mark this attempt valid
+      ansible.builtin.set_fact:
+        explore_dispatch_valid: true
+  rescue:
+    - name: Mark this attempt invalid (malformed report_findings call)
+      ansible.builtin.set_fact:
+        explore_dispatch_valid: false
+
+- name: "Cursor: mark this attempt valid unless it is the forced last turn without report_findings"
+  when: _explore_attempt_report_calls | length == 0
+  ansible.builtin.set_fact:
+    explore_dispatch_valid: "{{ not (explore_last_turn | default(false)) }}"

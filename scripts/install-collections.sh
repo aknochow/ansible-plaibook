@@ -18,6 +18,7 @@
 #   ANSIBLE_OPENSHELL_DIR=/path/to/ansible-openshell \
 #   ANSIBLE_CLAUDE_DIR=/path/to/ansible-claude \
 #   ANSIBLE_GEMINI_DIR=/path/to/ansible-gemini \
+#   ANSIBLE_CURSOR_DIR=/path/to/ansible-cursor \
 #     scripts/install-collections.sh
 
 set -euo pipefail
@@ -30,6 +31,7 @@ fi
 ANSIBLE_OPENSHELL_DIR="${ANSIBLE_OPENSHELL_DIR:-}"
 ANSIBLE_CLAUDE_DIR="${ANSIBLE_CLAUDE_DIR:-}"
 ANSIBLE_GEMINI_DIR="${ANSIBLE_GEMINI_DIR:-}"
+ANSIBLE_CURSOR_DIR="${ANSIBLE_CURSOR_DIR:-}"
 
 collections=(
   "aknochow.openshell:${ANSIBLE_OPENSHELL_DIR}"
@@ -38,6 +40,9 @@ collections=(
   # it, README doesn't list it) -- included ahead of time since
   # ansible-gemini is close to done and about to be pushed publicly.
   "aknochow.gemini:${ANSIBLE_GEMINI_DIR}"
+  # Optional: ansible-cursor has no public GitHub repo yet. Do not add
+  # it to collections-requirements.yml. Skip when the env var is unset.
+  "aknochow.cursor:${ANSIBLE_CURSOR_DIR}"
 )
 
 failed=()
