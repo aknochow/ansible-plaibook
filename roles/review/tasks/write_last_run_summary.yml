@@ -3,6 +3,16 @@
 # Extracted to consolidate duplicated tail logic; last_run.json is shared path (race-safe for human use only).
 # Use run-scoped last_run.<run_id>.json for programmatic consumption.
 
+- name: Record the review completion time and elapsed duration
+  ansible.builtin.set_fact:
+    review_finished_at: "{{ now(utc=true).isoformat() }}"
+    review_duration_seconds: >-
+      {{ [
+           0,
+           (lookup('pipe', 'date +%s') | int)
+           - (review_started_epoch | default(lookup('pipe', 'date +%s'), true) | int)
+         ] | max }}
+
 - name: Show the final pipeline stats breakdown
   when: pipeline_findings_reports is defined
   ansible.builtin.include_tasks: pipeline_stats.yml

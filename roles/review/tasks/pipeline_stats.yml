@@ -32,6 +32,7 @@
     msg: |-
       {{ [
         '=== Pipeline Stats ===',
+        'Elapsed time: ' + (review_duration_seconds | default(0) | int | string) + ' seconds',
         'Targets reviewed: ' + (review_targets | length | string),
         'Agents dispatched: ' + (pipeline_agent_calls | length | string),
         'Total input tokens: ' + (pipeline_total_input_tokens | int | string),

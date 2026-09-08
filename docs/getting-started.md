@@ -58,6 +58,9 @@ Every run writes one predictable file, overwritten each run:
     }
   ],
   "cost_usd": 0.1234,
+  "started_at": "2026-09-08T13:46:41+00:00",
+  "finished_at": "2026-09-08T13:54:32+00:00",
+  "duration_seconds": 471,
   "total_input_tokens": 12345,
   "total_output_tokens": 6789,
   "agents_dispatched": 3

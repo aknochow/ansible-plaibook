@@ -175,6 +175,11 @@
     review_extra_notes: ""
 
   tasks:
+    - name: Record the review start time
+      ansible.builtin.set_fact:
+        review_started_at: "{{ now(utc=true).isoformat() }}"
+        review_started_epoch: "{{ lookup('pipe', 'date +%s') | int }}"
+
     # connection: local can otherwise auto-discover a different system
     # Python for module execution than the interpreter running ansible-
     # playbook itself. That split is especially dangerous for provider SDKs:
