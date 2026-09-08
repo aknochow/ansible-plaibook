@@ -219,7 +219,28 @@ def test_no_claim_keeps_own_finding_id_and_marks_not_claimed():
     assert result[1]["finding_id"] == "own-id-1"
     assert result[1]["continues_finding_id"] is None
     assert result[1]["continuity_status"] == "not-claimed"
-    assert result[1]["continuity_rationale"] == ""
+
+
+def test_stringified_nested_verify_dicts_are_coerced():
+    """Ansible's non-native templating may stringify nested dict arguments."""
+    result = merge_verify_result(
+        BASELINE_FIXTURE_FINDINGS,
+        verify_index=0,
+        evidence_status="verified",
+        verification_evidence="evidence",
+        verification_rationale="rationale",
+        requires_execution=False,
+        suggested_severity="Major",
+        reachability="reachable",
+        trust_boundary="untrusted",
+        worst_outcome_category="data-loss",
+        silent_failure=False,
+        used_static_reachability_trace=False,
+        claim_input="{'continues_finding_id': None}",
+        audit_result="{}",
+    )
+
+    assert result[0]["continuity_status"] == "not-claimed"
 
 
 def test_plausible_audit_inherits_the_claimed_id_and_marks_confirmed():

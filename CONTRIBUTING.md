@@ -21,7 +21,10 @@ uv run ansible-playbook review.yml --syntax-check  # Playbook syntax check
 
 - Sign off all commits (`git commit -s`).
 - Include AI assistance attribution via trailer when applicable:
-  `Assisted-by: Claude (<model-id>)` (never `Co-Authored-By:`).
+  `Assisted-by: Provider (model)`, using the actual provider/tool and exact
+  model that performed the work (for example,
+  `Assisted-by: Codex (gpt-5.6-luna-xhigh)`). Never copy an attribution from
+  another session or use `Co-Authored-By:`.
 
 ## Before submitting a PR: avoiding sensitive/internal info leaks
 

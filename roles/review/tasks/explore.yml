@@ -28,6 +28,8 @@
     review_explore_done: false
     review_explore_findings: []
     explore_turn_count: 0
+    explore_tool_calls_used: 0
+    review_exploration_incomplete: false
 
 - name: Run the exploration loop
   ansible.builtin.include_tasks: explore_turn.yml

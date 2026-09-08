@@ -20,14 +20,56 @@
 # independent, deterministic, model-agnostic check running in parallel
 # with the model-based lens review, not a gate in front of it. See
 # guardian_scan.yml's own header for the full design rationale.
-- name: Scan the shared diff/PR-description content with ai-guardian
-  ansible.builtin.include_tasks: guardian_scan.yml
+- name: Time the ai-guardian scan stage
+  block:
+    - name: Record the ai-guardian stage start time
+      ansible.builtin.set_fact:
+        _review_phase_started_epoch: "{{ lookup('pipe', 'date +%s') | int }}"
+    - name: Scan the shared diff/PR-description content with ai-guardian
+      ansible.builtin.include_tasks: guardian_scan.yml
+  always:
+    - name: Record the ai-guardian stage duration
+      ansible.builtin.set_fact:
+        pipeline_phase_durations: >-
+          {{ pipeline_phase_durations + [{
+            'target': review_org_repo + '#' + review_number,
+            'phase': 'guardian_scan',
+            'duration_seconds': [0, (lookup('pipe', 'date +%s') | int) - (_review_phase_started_epoch | int)] | max
+          }] }}
 
-- name: Dispatch the Security and Review lens agents
-  ansible.builtin.include_tasks: lenses.yml
+- name: Time the Security and Review lens stage
+  block:
+    - name: Record the lens stage start time
+      ansible.builtin.set_fact:
+        _review_phase_started_epoch: "{{ lookup('pipe', 'date +%s') | int }}"
+    - name: Dispatch the Security and Review lens agents
+      ansible.builtin.include_tasks: lenses.yml
+  always:
+    - name: Record the lens stage duration
+      ansible.builtin.set_fact:
+        pipeline_phase_durations: >-
+          {{ pipeline_phase_durations + [{
+            'target': review_org_repo + '#' + review_number,
+            'phase': 'lenses',
+            'duration_seconds': [0, (lookup('pipe', 'date +%s') | int) - (_review_phase_started_epoch | int)] | max
+          }] }}
 
-- name: Merge findings and compute scores
-  ansible.builtin.include_tasks: merge.yml
+- name: Time the merge and score stage
+  block:
+    - name: Record the merge stage start time
+      ansible.builtin.set_fact:
+        _review_phase_started_epoch: "{{ lookup('pipe', 'date +%s') | int }}"
+    - name: Merge findings and compute scores
+      ansible.builtin.include_tasks: merge.yml
+  always:
+    - name: Record the merge stage duration
+      ansible.builtin.set_fact:
+        pipeline_phase_durations: >-
+          {{ pipeline_phase_durations + [{
+            'target': review_org_repo + '#' + review_number,
+            'phase': 'merge',
+            'duration_seconds': [0, (lookup('pipe', 'date +%s') | int) - (_review_phase_started_epoch | int)] | max
+          }] }}
 
 # when: on the include itself, not a when:+block: inside explore.yml --
 # explore.yml's entire content used to be one such block; hoisted here
@@ -35,12 +77,40 @@
 # doc.ansible-best-practices.yaml's block_rescue_always_unreachable_gotcha
 # entry -- purely a cleaner-output concern here, no delegate_to/remote
 # connection involved).
-- name: Look beyond the diff for additional findings
-  ansible.builtin.include_tasks: explore.yml
-  when: review_explore_enabled | bool
+- name: Time the exploration stage
+  block:
+    - name: Record the exploration stage start time
+      ansible.builtin.set_fact:
+        _review_phase_started_epoch: "{{ lookup('pipe', 'date +%s') | int }}"
+    - name: Look beyond the diff for additional findings
+      ansible.builtin.include_tasks: explore.yml
+      when: review_explore_enabled | bool
+  always:
+    - name: Record the exploration stage duration
+      ansible.builtin.set_fact:
+        pipeline_phase_durations: >-
+          {{ pipeline_phase_durations + [{
+            'target': review_org_repo + '#' + review_number,
+            'phase': 'explore',
+            'duration_seconds': [0, (lookup('pipe', 'date +%s') | int) - (_review_phase_started_epoch | int)] | max
+          }] }}
 
-- name: Independently verify checkable claims in Critical/Major findings
-  ansible.builtin.include_tasks: verify.yml
+- name: Time the verification stage
+  block:
+    - name: Record the verification stage start time
+      ansible.builtin.set_fact:
+        _review_phase_started_epoch: "{{ lookup('pipe', 'date +%s') | int }}"
+    - name: Independently verify checkable claims in Critical/Major findings
+      ansible.builtin.include_tasks: verify.yml
+  always:
+    - name: Record the verification stage duration
+      ansible.builtin.set_fact:
+        pipeline_phase_durations: >-
+          {{ pipeline_phase_durations + [{
+            'target': review_org_repo + '#' + review_number,
+            'phase': 'verify',
+            'duration_seconds': [0, (lookup('pipe', 'date +%s') | int) - (_review_phase_started_epoch | int)] | max
+          }] }}
 
 # Runs AFTER verify.yml, not inside guardian_scan.yml itself -- verify.yml
 # is the last stage that sets review_verdict (via merge.yml first, then
@@ -54,5 +124,19 @@
 - name: Enforce SECRET-001-class ai-guardian findings as a blocking verdict
   ansible.builtin.include_tasks: guardian_scan_enforce_verdict.yml
 
-- name: Render and persist the findings
-  ansible.builtin.include_tasks: persist.yml
+- name: Time the persistence stage
+  block:
+    - name: Record the persistence stage start time
+      ansible.builtin.set_fact:
+        _review_phase_started_epoch: "{{ lookup('pipe', 'date +%s') | int }}"
+    - name: Render and persist the findings
+      ansible.builtin.include_tasks: persist.yml
+  always:
+    - name: Record the persistence stage duration
+      ansible.builtin.set_fact:
+        pipeline_phase_durations: >-
+          {{ pipeline_phase_durations + [{
+            'target': review_org_repo + '#' + review_number,
+            'phase': 'persist',
+            'duration_seconds': [0, (lookup('pipe', 'date +%s') | int) - (_review_phase_started_epoch | int)] | max
+          }] }}

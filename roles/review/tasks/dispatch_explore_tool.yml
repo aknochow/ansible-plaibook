@@ -246,7 +246,7 @@
       # what is known to be big today, and the next repo will have
       # something else. A search that cannot finish in two minutes is
       # not going to produce a useful result for a reviewer either.
-      async: 120
+      async: "{{ review_explore_tool_timeout_seconds | int }}"
       poll: 2
       when: not _explore_search_path_rejected
 
@@ -266,15 +266,37 @@
              }] }}
       when: _explore_search_path_rejected
 
+    - name: Classify the search result without treating failures as no matches
+      ansible.builtin.set_fact:
+        _explore_search_failed: >-
+          {{ (_explore_search_result.rc | default(2) | int) not in [0, 1]
+             or (_explore_search_result.failed | default(false) | bool)
+             or (_explore_search_result.unreachable | default(false) | bool) }}
+      when: not _explore_search_path_rejected
+
     - name: Record the search tool result
       ansible.builtin.set_fact:
         explore_tool_results: >-
           {{ explore_tool_results + [{
                'type': 'tool_result',
                'tool_use_id': tool_call.id,
-               'content': _explore_search_result.stdout if (_explore_search_result.stdout | default('') | length > 0) else '(no matches)'
+               'content': (_explore_search_result.stdout if (_explore_search_result.rc | default(2) | int) == 0
+                           else '(no matches)') if not _explore_search_failed
+                           else 'ERROR: search did not complete cleanly; no result is available',
+               'is_error': _explore_search_failed
              }] }}
       when: not _explore_search_path_rejected
+
+    # Do not let a failed grep masquerade as a successful empty search. The
+    # tool result above is still constructed for traceability, but the review
+    # must stop before the model can turn the error into a false conclusion.
+    - name: Fail closed when exploration search fails or times out
+      ansible.builtin.fail:
+        msg: >-
+          Exploration search failed or timed out (rc={{ _explore_search_result.rc | default('unknown') }}).
+          No clean search result was returned, so the review cannot safely
+          claim that the requested pattern has no matches.
+      when: not _explore_search_path_rejected and (_explore_search_failed | bool)
 
 - name: "Dispatch tool: trace_reachability"
   when: tool_call.name == 'trace_reachability'

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from fetch_pr_context import fetch_gitea, fetch_github, fetch_gitlab, parse_url
+from fetch_pr_context import fetch_gitea, fetch_github, fetch_gitlab, get_gitlab_token, parse_url
 
 
 def test_github_pull_url():
@@ -81,6 +81,26 @@ def test_fetch_gitlab_mock():
     assert result["head_sha"] == "gl1234567890abcdef"
     assert len(result["files_changed"]) == 1
     assert result["files_changed"][0]["path"] == "playbook.yml"
+
+
+def test_get_gitlab_token_uses_requested_hostname_and_supported_glab_command():
+    completed = type("Completed", (), {
+        "returncode": 1,
+        "stdout": "",
+        "stderr": "gitlab.example.com\n  ✓ Token: example-token-value\n",
+    })()
+
+    with patch("fetch_pr_context.shutil.which", return_value="/usr/bin/glab"), patch(
+        "fetch_pr_context.subprocess.run", return_value=completed,
+    ) as run:
+        assert get_gitlab_token("gitlab.example.com") == "example-token-value"
+
+    run.assert_called_once_with(
+        ["glab", "auth", "status", "--hostname", "gitlab.example.com", "--show-token"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
 
 
 def test_fetch_github_with_pagination():
@@ -218,8 +238,6 @@ def test_fetch_gitea_file_statuses_and_deletions():
     assert file_map["docs/old_name.md"]["status"] == "Renamed"
     assert file_map["admin/wiki-lint"]["status"] == "Added"
     assert file_map[".gitignore"]["status"] == "Modified"
-
-
 def test_fetch_github_failing_ci_check_runs():
     pr_data = {
         "number": 55,
@@ -331,6 +349,3 @@ def test_fetch_github_ci_api_inaccessible_degrades_gracefully():
 
     assert result["ci_status"] == "none"
     assert result["failing_checks"] == []
-
-
-

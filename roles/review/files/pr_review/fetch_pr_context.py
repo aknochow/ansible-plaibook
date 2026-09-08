@@ -128,13 +128,27 @@ def get_github_token() -> str | None:
     return token
 
 
-def get_gitlab_token() -> str | None:
+def get_gitlab_token(hostname: str | None = None) -> str | None:
     token = os.environ.get("GITLAB_TOKEN") or os.environ.get("GLAB_TOKEN")
     if not token and shutil.which("glab"):
         try:
-            res = subprocess.run(["glab", "auth", "token"], capture_output=True, text=True, timeout=5)
-            if res.returncode == 0 and res.stdout.strip():
-                token = res.stdout.strip()
+            # Recent glab releases do not provide `glab auth token`; the
+            # supported way to display the configured token is
+            # `glab auth status --show-token`.  Select the requested host so
+            # a multi-host glab config cannot silently return a token for a
+            # different GitLab instance.  Parse both streams because glab
+            # renders status output on stderr when the host API is
+            # unreachable, while still displaying the locally configured
+            # token.  Never print the captured output.
+            cmd = ["glab", "auth", "status"]
+            if hostname:
+                cmd.extend(["--hostname", hostname])
+            cmd.append("--show-token")
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            status_output = f"{res.stdout}\n{res.stderr}"
+            match = re.search(r"(?m)Token:\s*(\S+)", status_output)
+            if match:
+                token = match.group(1)
         except Exception:
             pass
     return token
@@ -149,7 +163,7 @@ def get_gitea_token() -> str | None:
 # ---------------------------------------------------------------------------
 
 def fetch_gitlab(hostname: str, project: str, mr_iid: int) -> dict:
-    token = get_gitlab_token()
+    token = get_gitlab_token(hostname)
     headers = {}
     if token:
         headers["PRIVATE-TOKEN"] = token
@@ -472,4 +486,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

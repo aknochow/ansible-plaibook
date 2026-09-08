@@ -42,8 +42,9 @@ just "a Python script that happens to be YAML":
   even exists. That's just `delegate_to`, not custom isolation plumbing.
 - **Cost.** No persistent agent service, no idle infra. This runs
   on-demand and you pay for exactly the LLM calls a review actually
-  makes. A single review typically costs a few cents to ~$0.20
-  depending on findings/exploration depth (see a real example below).
+  makes. The pipeline reports token totals and an estimate for every run;
+  the amount depends on provider, model, prompt-cache hits, and exploration
+  depth.
 
 ## More reasons for Ansible
 
@@ -184,7 +185,7 @@ per domain, independently editable/reviewable.
 Phase 2 (sandboxed) runs stand up an OpenShell sandbox for isolated
 script execution and register it as a real Ansible inventory host over
 SSH, delegating individual tasks to it as needed, while every
-Claude/Gemini call still runs on the controller, never inside the
+Claude/Gemini/OpenAI call still runs on the controller, never inside the
 sandbox. See [`docs/sandbox-and-agent-safety.md`](docs/sandbox-and-agent-safety.md)
 for the full pattern (and the community pattern we deliberately don't
 use instead).
