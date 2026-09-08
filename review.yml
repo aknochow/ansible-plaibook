@@ -247,6 +247,7 @@
     - name: Initialize pipeline-wide agent usage accounting
       ansible.builtin.set_fact:
         pipeline_agent_calls: []
+        pipeline_phase_durations: []
         pipeline_findings_reports: []
 
     # Load the review role's provider defaults and validate provider-specific

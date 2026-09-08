@@ -145,7 +145,10 @@ aborting the whole verify pass over.
 """
 from __future__ import annotations
 
+import ast
+import json
 import re
+from collections.abc import Mapping
 
 from ansible.plugins.action import ActionBase
 
@@ -154,6 +157,40 @@ _FINDING_ID_PATTERN = re.compile(r"^[0-9a-f]{12}$")
 
 class FindingNotFoundError(ValueError):
     """Raised when no finding in the list has the given verify_index."""
+
+
+class InvalidMappingEncodingError(ValueError):
+    """Raised when a nested verify result is not a mapping after coercion."""
+
+
+def _coerce_mapping(value: Mapping | str, label: str) -> dict:
+    """Recover a mapping that Ansible may have rendered as text.
+
+    ``set_fact`` normally preserves a native dict, but a nested Jinja
+    expression can produce ``AnsibleUnsafeText`` instead. The verify pass
+    passes two whole dicts through that boundary specifically to preserve
+    nullable values, so accepting both JSON and Python-literal renderings is
+    safer than letting a later ``.get()`` fail with an opaque attribute error.
+    ``literal_eval`` is deliberately used instead of ``eval``: the fallback
+    parses data only and cannot execute model-provided text.
+    """
+    if isinstance(value, Mapping):
+        return dict(value)
+    if isinstance(value, str):
+        parsed = None
+        try:
+            parsed = json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            try:
+                parsed = ast.literal_eval(value)
+            except (SyntaxError, ValueError):
+                parsed = None
+        if isinstance(parsed, Mapping):
+            return dict(parsed)
+    raise InvalidMappingEncodingError(
+        f"{label} was rendered as {type(value).__name__}, not a mapping "
+        "or a JSON/Python-literal mapping"
+    )
 
 
 def merge_verify_result(
@@ -169,8 +206,8 @@ def merge_verify_result(
     worst_outcome_category: str,
     silent_failure: bool | str,
     used_static_reachability_trace: bool,
-    claim_input: dict,
-    audit_result: dict,
+    claim_input: Mapping | str,
+    audit_result: Mapping | str,
 ) -> list[dict]:
     # int(), not assumed-native -- see module docstring's "Real gap"
     # note: dot-accessed integers don't reliably arrive pre-coerced.
@@ -185,6 +222,8 @@ def merge_verify_result(
     if isinstance(silent_failure, str):
         silent_failure = silent_failure.strip().lower() in ("true", "1", "yes")
 
+    claim_input = _coerce_mapping(claim_input, "claim_input")
+    audit_result = _coerce_mapping(audit_result, "audit_result")
     continues_finding_id = claim_input.get("continues_finding_id")
     audit_verdict = audit_result.get("verdict")
     audit_rationale = audit_result.get("rationale", "")
@@ -293,7 +332,7 @@ class ActionModule(ActionBase):
                 claim_input=self._task.args["claim_input"],
                 audit_result=self._task.args["audit_result"],
             )
-        except FindingNotFoundError as exc:
+        except (FindingNotFoundError, InvalidMappingEncodingError) as exc:
             result["failed"] = True
             result["msg"] = str(exc)
             return result

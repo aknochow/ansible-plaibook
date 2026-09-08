@@ -32,6 +32,15 @@
         'started_at': review_started_at | default(''),
         'finished_at': review_finished_at | default(''),
         'duration_seconds': review_duration_seconds | default(0) | int,
+        'phase_durations_seconds': {
+          'guardian_scan': pipeline_phase_durations_seconds.guardian_scan | default(0) | int,
+          'lenses': pipeline_phase_durations_seconds.lenses | default(0) | int,
+          'merge': pipeline_phase_durations_seconds.merge | default(0) | int,
+          'explore': pipeline_phase_durations_seconds.explore | default(0) | int,
+          'verify': pipeline_phase_durations_seconds.verify | default(0) | int,
+          'persist': pipeline_phase_durations_seconds.persist | default(0) | int,
+          'unattributed': pipeline_phase_durations_seconds.unattributed | default(0) | int
+        },
         'commit': review_short_sha | default(''),
         'branch': review_branch | default(''),
         'targets': pipeline_findings_reports,
@@ -145,6 +154,15 @@
         'started_at': review_started_at | default(''),
         'finished_at': review_finished_at | default(''),
         'duration_seconds': review_duration_seconds | default(0) | int,
+        'phase_durations_seconds': {
+          'guardian_scan': pipeline_phase_durations_seconds.guardian_scan | default(0) | int,
+          'lenses': pipeline_phase_durations_seconds.lenses | default(0) | int,
+          'merge': pipeline_phase_durations_seconds.merge | default(0) | int,
+          'explore': pipeline_phase_durations_seconds.explore | default(0) | int,
+          'verify': pipeline_phase_durations_seconds.verify | default(0) | int,
+          'persist': pipeline_phase_durations_seconds.persist | default(0) | int,
+          'unattributed': pipeline_phase_durations_seconds.unattributed | default(0) | int
+        },
         'commit': review_short_sha | default(''),
         'branch': review_branch | default(''),
         'agent_family': agent_family | default('unknown'),

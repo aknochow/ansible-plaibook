@@ -44,6 +44,14 @@
           output_tokens: 100
           cache_write_tokens: 0
           cache_read_tokens: 0
+    review_duration_seconds: 10
+    pipeline_phase_durations:
+      - phase: lenses
+        duration_seconds: 4
+      - phase: verify
+        duration_seconds: 3
+      - phase: persist
+        duration_seconds: 1
 
   tasks:
     - name: Run pipeline_stats.yml
@@ -71,3 +79,11 @@
           - (costs[0] - 0.0021125) | abs < 0.0000001
           - (costs[1] - 0.0036) | abs < 0.0000001
           - costs[2] == 0.0
+
+    - name: Assert phase timing is grouped and unattributed time is retained
+      ansible.builtin.assert:
+        that:
+          - pipeline_phase_durations_seconds.lenses | int == 4
+          - pipeline_phase_durations_seconds.verify | int == 3
+          - pipeline_phase_durations_seconds.persist | int == 1
+          - pipeline_phase_durations_seconds.unattributed | int == 2
