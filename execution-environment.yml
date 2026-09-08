@@ -33,6 +33,7 @@ dependencies:
   galaxy: build/requirements.yml
   python:
     - anthropic>=0.84.0
+    - openai>=1.0.0,<4.0.0
     - openshell>=0.0.70,<0.0.91
     # Runtime dependency of kubernetes.core.k8s_info (build/requirements.yml).
     - kubernetes
@@ -43,6 +44,8 @@ dependencies:
 # referenced by requirements.yml need to be brought along explicitly.
 additional_build_files:
   - src: build/collections/aknochow-claude-0.1.0.tar.gz
+    dest: collections
+  - src: build/collections/aknochow-openai-0.1.0.tar.gz
     dest: collections
   - src: build/collections/aknochow-openshell-0.1.0.tar.gz
     dest: collections

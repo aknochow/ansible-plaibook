@@ -113,7 +113,7 @@
     dump_prompt_content: "{{ review_system_prompt }}"
 
 # Dispatch both lenses via the provider-native module for agent_family
-# (claude | gemini | qwen; qwen not implemented yet). Mirrors
+# (claude | gemini | openai | qwen; qwen not implemented yet). Mirrors
 # tasks/main.yml's own "include_tasks: resolve_target_{{ review_type }}.yml"
 # idiom one level up. Each dispatch_lens_*.yml is a hand-written,
 # provider-native task file (never a shared abstraction class, see

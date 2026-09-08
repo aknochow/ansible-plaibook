@@ -68,7 +68,7 @@ review_agent_model: "claude-opus-4-6"
 # 'claude' stays the fallback rather than becoming a considered choice --
 # changing it is a separate decision, not a side effect of making the
 # var overridable.
-# claude | gemini | claude_cli | qwen
+# claude | gemini | openai | claude_cli | qwen
 agent_family: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_AGENT_FAMILY') | default('claude', true) }}"
 
 # aknochow.claude auth: no provider or project baked in on purpose --
@@ -158,6 +158,37 @@ review_gemini_max_output_tokens: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVI
 # review_gemini_thinking_level (high by default) over a full diff, and
 # a timeout here discards every prior stage of the run.
 review_gemini_timeout: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_GEMINI_TIMEOUT') | default(300, true) | float }}"
+
+# aknochow.openai auth for agent_family=openai. Map both the SDK-standard
+# names and collection-specific names so a normal OPENAI_API_KEY works while
+# preserving the collection's local llama-server defaults for standalone use.
+# The key is never shown in request-configuration debug output.
+openai_base_url: "{{ lookup('ansible.builtin.env', 'OPENAI_BASE_URL') | default(lookup('ansible.builtin.env', 'ANSIBLE_OPENAI_BASE_URL'), true) | default('https://api.openai.com/v1', true) }}"
+openai_api_key: "{{ lookup('ansible.builtin.env', 'OPENAI_API_KEY') | default(lookup('ansible.builtin.env', 'ANSIBLE_OPENAI_API_KEY'), true) | default(omit, true) }}"
+openai_timeout: "{{ lookup('ansible.builtin.env', 'ANSIBLE_OPENAI_TIMEOUT') | default(300, true) | float }}"
+# GPT-5.6 is an intentional alias: OpenAI documents that it routes to the
+# flagship gpt-5.6-sol model. Operators can select gpt-5.6-terra or
+# gpt-5.6-luna with ANSIBLE_REVIEW_OPENAI_MODEL. If review_agent_model was
+# explicitly overridden, preserve that choice for the OpenAI family; replace
+# the normal Claude default so agent_family=openai works without extra vars.
+review_openai_model: >-
+  {{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_OPENAI_MODEL')
+     | default(('gpt-5.6' if (review_agent_model | default('')) == 'claude-opus-4-6'
+                else review_agent_model), true) }}
+review_explore_openai_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_EXPLORE_OPENAI_MODEL') | default(review_openai_model, true) }}"
+review_verify_openai_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_VERIFY_OPENAI_MODEL') | default(review_openai_model, true) }}"
+review_openai_max_completion_tokens: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_OPENAI_MAX_COMPLETION_TOKENS') | default(16384, true) | int }}"
+# Optional explicit reasoning effort for the structured lens calls. Explore
+# and verify use hosted function tools, for which Chat Completions requires
+# reasoning_effort=none; keep this setting scoped to the no-tool lens calls.
+review_openai_lens_reasoning_effort: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_OPENAI_LENS_REASONING_EFFORT') | default('', true) }}"
+# The continuity audit is a no-tool structured-output call. It needs its own
+# explicit budget because reasoning models can spend most of a small budget on
+# hidden reasoning and return no JSON at all. Default to the main OpenAI
+# completion budget, while retaining a separate override for cost-sensitive
+# operators.
+review_openai_continuity_max_completion_tokens: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_OPENAI_CONTINUITY_MAX_COMPLETION_TOKENS') | default(review_openai_max_completion_tokens, true) | int }}"
+review_openai_continuity_reasoning_effort: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_OPENAI_CONTINUITY_REASONING_EFFORT') | default(review_openai_lens_reasoning_effort, true) }}"
 
 # aknochow.claude.agent auth for agent_family=claude_cli: no
 # ANTHROPIC_API_KEY/provider config here on purpose, mirroring
@@ -310,6 +341,14 @@ review_explore_enabled: true
 # tends to keep exploring until forced to conclude on the last allowed
 # turn, so turn 4 tends to be pure unused cost.
 review_explore_max_turns: 3
+# Hard ceiling for one read-only search/grep command. A failed or timed-out
+# search is surfaced as an error and aborts the run rather than becoming a
+# false "no matches" result. Override for unusually large repositories.
+review_explore_tool_timeout_seconds: 120
+# Total number of read-only exploration tool calls in one target. This keeps a
+# model that repeatedly asks for searches from consuming an unbounded wall
+# clock even when each individual command stays within its timeout.
+review_explore_max_tool_calls: 12
 # Separate from review_agent_model: explore's job (decide whether
 # something needs checking, do a simple read/grep, report) is a much
 # lighter task than the lenses' full diff review, and a cheaper model
@@ -537,6 +576,26 @@ agent_pricing: &agent_pricing
     output_per_million: 5.00
     cache_write_per_million: 1.25
     cache_read_per_million: 0.10
+  # OpenAI API pricing, verified against the official GPT-5.6 model pages.
+  # The unsuffixed gpt-5.6 alias resolves to Sol; the explicit entries let
+  # operators choose the lower-cost Terra or Luna variants without an
+  # unpriced-model warning.
+  gpt-5.6:
+    input_per_million: 4.00
+    output_per_million: 20.00
+    cache_read_per_million: 0.40
+  gpt-5.6-sol:
+    input_per_million: 4.00
+    output_per_million: 20.00
+    cache_read_per_million: 0.40
+  gpt-5.6-terra:
+    input_per_million: 2.00
+    output_per_million: 12.00
+    cache_read_per_million: 0.20
+  gpt-5.6-luna:
+    input_per_million: 0.20
+    output_per_million: 1.20
+    cache_read_per_million: 0.02
   # Gemini has no sourced cache-tier rate in this repo (implicit
   # caching, no cache_system-style explicit control -- see
   # dispatch_lens_gemini.yml's own comment) -- cache_write/cache_read

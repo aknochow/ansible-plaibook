@@ -110,6 +110,44 @@
     _continuity_audit_verdict: "{{ (_continuity_audit_gemini_result.structured | default({})).verdict | default('') }}"
     _continuity_audit_rationale: "{{ (_continuity_audit_gemini_result.structured | default({})).rationale | default('') }}"
 
+- name: "OpenAI: call OpenAI to independently audit the continuity claim"
+  when: agent_family == 'openai'
+  aknochow.openai.chat:
+    base_url: "{{ openai_base_url }}"
+    api_key: "{{ openai_api_key | default(omit, true) }}"
+    model: "{{ review_verify_openai_model }}"
+    max_completion_tokens: "{{ review_openai_continuity_max_completion_tokens }}"
+    reasoning_effort: "{{ review_openai_continuity_reasoning_effort | default(omit, true) }}"
+    timeout: "{{ openai_timeout }}"
+    llama_server_mode: false
+    messages:
+      - role: developer
+        content: "{{ _continuity_audit_prompt }}"
+      - role: user
+        content: "Assess the continuity claim described in your developer instructions."
+    response_format:
+      type: json_schema
+      json_schema:
+        name: continuity_audit
+        strict: true
+        schema: "{{ continuity_audit_schema }}"
+  register: _continuity_audit_openai_result
+
+- name: "OpenAI: normalize the continuity audit result"
+  when: agent_family == 'openai'
+  ansible.builtin.set_fact:
+    _continuity_audit_resolved_model: "{{ (_continuity_audit_openai_result.response | default({})).model | default(review_verify_openai_model, true) }}"
+    _continuity_audit_usage_normalized:
+      input_tokens: "{{ [(_continuity_audit_openai_result.usage.prompt_tokens | default(0) | int) - (_continuity_audit_openai_result.usage.cached_tokens | default(0) | int), 0] | max }}"
+      output_tokens: "{{ _continuity_audit_openai_result.usage.completion_tokens | default(0) | int }}"
+      cache_write_tokens: 0
+      cache_read_tokens: "{{ _continuity_audit_openai_result.usage.cached_tokens | default(0) | int }}"
+      thinking_tokens: "{{ (_continuity_audit_openai_result.response | default({})) | openai_reasoning_tokens }}"
+      total_tokens: "{{ _continuity_audit_openai_result.usage.total_tokens | default(0) | int }}"
+    _continuity_audit_answered: "{{ _continuity_audit_openai_result.structured is defined }}"
+    _continuity_audit_verdict: "{{ (_continuity_audit_openai_result.structured | default({})).verdict | default('') }}"
+    _continuity_audit_rationale: "{{ (_continuity_audit_openai_result.structured | default({})).rationale | default('') }}"
+
 - name: "Claude CLI: call Claude via the Agent SDK to independently audit the continuity claim"
   when: agent_family == 'claude_cli'
   aknochow.claude.agent:

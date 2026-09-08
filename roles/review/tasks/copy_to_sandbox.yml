@@ -19,8 +19,3 @@
     name: "{{ sandbox.sandbox.name }}"
     src: "{{ review_clone_dir_controller.path }}"
     dest: "{{ review_checkout_dir.path }}"
-
-- name: Clean up the controller-side clone once it's been copied into the sandbox
-  ansible.builtin.file:
-    path: "{{ review_clone_dir_controller.path }}"
-    state: absent

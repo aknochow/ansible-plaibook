@@ -48,7 +48,8 @@
           Explore agent
           ({{ review_explore_model if agent_family == 'claude' else
           ((review_explore_claude_cli_model if review_explore_claude_cli_model is string else '(CLI default)')
-          if agent_family == 'claude_cli' else review_explore_gemini_model) }})
+          if agent_family == 'claude_cli' else
+          (review_explore_openai_model if agent_family == 'openai' else review_explore_gemini_model)) }})
           produced invalid or incomplete structured output on turn {{ explore_turn_count }}
           after {{ review_structured_output_max_attempts }} attempt(s).
           This is a confirmed, probabilistic model-generation quirk (see
@@ -105,6 +106,25 @@
     - name: Dispatch other tool calls and continue the loop
       when: explore_report_calls | length == 0 and explore_turn_result.stop_reason == 'tool_use'
       block:
+        - name: Enforce the exploration tool-call budget
+          ansible.builtin.assert:
+            that:
+              - >-
+                (explore_tool_calls_used | default(0) | int)
+                + (explore_turn_result.tool_calls | length)
+                <= (review_explore_max_tool_calls | int)
+            fail_msg: >-
+              Exploration stopped before dispatch: the configured limit of
+              {{ review_explore_max_tool_calls }} tool call(s) was reached.
+              Raise review_explore_max_tool_calls deliberately if this target
+              needs a broader audit.
+
+        - name: Account for this turn's exploration tool calls
+          ansible.builtin.set_fact:
+            explore_tool_calls_used: >-
+              {{ (explore_tool_calls_used | default(0) | int)
+                 + (explore_turn_result.tool_calls | length) }}
+
         - name: Reset the tool-result accumulator for this turn
           ansible.builtin.set_fact:
             explore_tool_results: []

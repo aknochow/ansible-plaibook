@@ -1,0 +1,92 @@
+---
+# One OpenAI Chat Completions dispatch attempt for a verification turn.
+# Conversation and tool-call normalization is kept at this boundary; the
+# shared verify loop continues to execute the read-only Ansible tools.
+
+- name: "OpenAI: translate the verification conversation and tool definitions"
+  ansible.builtin.set_fact:
+    _openai_verify_messages: >-
+      {{ [{'role': 'developer', 'content': verify_system_prompt}]
+         + (verify_messages | to_openai_messages) }}
+    _openai_verify_tools: >-
+      {{ (explore_tools + [trace_reachability_tool, {
+           'name': 'report_verdict',
+           'description': 'Report your verdict on the single finding you were given.',
+           'input_schema': verify_verdict_schema
+         }]) | to_openai_tools }}
+
+- name: "OpenAI: choose the forced verification tool"
+  ansible.builtin.set_fact:
+    _openai_verify_tool_choice: >-
+      {{ {'type': 'function', 'function': {'name': 'report_verdict'}} if verify_last_turn
+         else ({'type': 'function', 'function': {'name': 'trace_reachability'}}
+               if (verify_first_turn and verify_is_reachability_claim) else {}) }}
+
+- name: "OpenAI: show the verification request configuration"
+  ansible.builtin.debug:
+    msg:
+      - "model: {{ review_verify_openai_model }}"
+      - "max_completion_tokens: {{ review_openai_max_completion_tokens | string }}"
+      - "tools: [read_file, search, trace_reachability, report_verdict]"
+      - "forced_tool: {{ 'report_verdict' if verify_last_turn else ('trace_reachability' if (verify_first_turn and verify_is_reachability_claim) else 'none') }}"
+
+- name: "OpenAI: call the verification agent, turn {{ verify_turn_count ~ ', attempt ' ~ (verify_attempt_number | default(1)) }}"
+  aknochow.openai.chat:
+    base_url: "{{ openai_base_url }}"
+    api_key: "{{ openai_api_key | default(omit, true) }}"
+    model: "{{ review_verify_openai_model }}"
+    max_completion_tokens: "{{ review_openai_max_completion_tokens }}"
+    timeout: "{{ openai_timeout }}"
+    llama_server_mode: false
+    messages: "{{ _openai_verify_messages }}"
+    tools: "{{ _openai_verify_tools }}"
+    tool_choice: "{{ _openai_verify_tool_choice if _openai_verify_tool_choice else omit }}"
+  register: _openai_verify_raw
+
+- name: "OpenAI: normalize the verification response's tool calls"
+  ansible.builtin.set_fact:
+    _openai_verify_tool_calls: "{{ _openai_verify_raw.tool_calls | default([]) | openai_tool_calls_with_input }}"
+
+- name: "OpenAI: normalize the verification result into the shared shape"
+  ansible.builtin.set_fact:
+    verify_turn_result:
+      message:
+        content: "{{ _openai_verify_raw.text | default('') | openai_response_to_message_content(_openai_verify_raw.tool_calls | default([])) }}"
+        model: "{{ (_openai_verify_raw.response | default({})).model | default(review_verify_openai_model, true) }}"
+      tool_calls: "{{ _openai_verify_tool_calls }}"
+      stop_reason: >-
+        {{ 'tool_use' if (_openai_verify_tool_calls | length > 0)
+           else ('end_turn' if _openai_verify_raw.finish_reason | default('') == 'stop'
+           else _openai_verify_raw.finish_reason | default('unknown')) }}
+      usage:
+        input_tokens: "{{ [(_openai_verify_raw.usage.prompt_tokens | default(0) | int) - (_openai_verify_raw.usage.cached_tokens | default(0) | int), 0] | max }}"
+        output_tokens: "{{ _openai_verify_raw.usage.completion_tokens | default(0) | int }}"
+        cache_creation_input_tokens: 0
+        cache_read_input_tokens: "{{ _openai_verify_raw.usage.cached_tokens | default(0) | int }}"
+
+- name: Record this OpenAI verification attempt's usage for the pipeline-wide stats summary
+  ansible.builtin.set_fact:
+    pipeline_agent_calls: >-
+      {{ pipeline_agent_calls + [{
+           'target': review_org_repo + '#' + review_number, 'lens': 'verify',
+           'model': verify_turn_result.message.model,
+           'usage': {
+             'input_tokens': verify_turn_result.usage.input_tokens | default(0) | int,
+             'output_tokens': verify_turn_result.usage.output_tokens | default(0) | int,
+             'cache_write_tokens': 0,
+             'cache_read_tokens': verify_turn_result.usage.cache_read_input_tokens | default(0) | int,
+             'thinking_tokens': (_openai_verify_raw.response | default({}) | openai_reasoning_tokens),
+             'total_tokens': (verify_turn_result.usage.input_tokens | default(0) | int)
+               + (verify_turn_result.usage.output_tokens | default(0) | int)
+               + (verify_turn_result.usage.cache_read_input_tokens | default(0) | int)
+           },
+           'attempt': verify_attempt_number | default(1)
+         }] }}
+
+- name: Check whether this OpenAI attempt called report_verdict
+  ansible.builtin.set_fact:
+    _verify_attempt_report_calls: "{{ verify_turn_result.tool_calls | selectattr('name', 'equalto', 'report_verdict') | list }}"
+
+- name: Mark this OpenAI attempt valid unless the forced final turn had no verdict
+  ansible.builtin.set_fact:
+    verify_dispatch_valid: "{{ (not verify_last_turn) or (_verify_attempt_report_calls | length > 0) }}"

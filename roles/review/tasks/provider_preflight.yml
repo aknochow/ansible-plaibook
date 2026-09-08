@@ -1,0 +1,76 @@
+---
+# Provider-specific checks that must pass before any target checkout, sandbox,
+# or model call is started.  In particular, an installed but stale
+# aknochow.openai collection otherwise accepts the playbook until the first
+# lens task, where Ansible reports an opaque "unsupported parameter" error.
+
+- name: Validate the OpenAI provider runtime before starting the review
+  when: agent_family == 'openai'
+  block:
+    - name: Resolve the effective local module interpreter
+      ansible.builtin.set_fact:
+        _openai_runtime_python: "{{ ansible_python_interpreter | default(ansible_playbook_python) }}"
+
+    - name: Create a private temporary directory for ansible-doc
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: "plaibook-openai-preflight-"
+      register: _openai_preflight_tmp
+
+    - name: Inspect the installed OpenAI module interface
+      ansible.builtin.command:
+        argv: [ansible-doc, -j, aknochow.openai.chat]
+      environment:
+        ANSIBLE_LOCAL_TEMP: "{{ _openai_preflight_tmp.path }}"
+      register: _openai_module_doc_result
+      changed_when: false
+      failed_when: false
+
+    - name: Extract the installed OpenAI module options
+      ansible.builtin.set_fact:
+        _openai_chat_options: >-
+          {{ (((_openai_module_doc_result.stdout | from_json)['aknochow.openai.chat']['doc']['options']) | default({}))
+             if (_openai_module_doc_result.rc | default(1) | int) == 0 else {} }}
+
+    - name: Check the Python interpreter that will run the provider module
+      ansible.builtin.command:
+        argv:
+          - "{{ _openai_runtime_python }}"
+          - -c
+          - "import importlib.util; raise SystemExit(0 if importlib.util.find_spec('openai') else 1)"
+      register: _openai_sdk_check
+      changed_when: false
+      failed_when: false
+
+    - name: Assert that the installed OpenAI runtime matches hosted review needs
+      ansible.builtin.assert:
+        that:
+          - _openai_module_doc_result.rc | default(1) | int == 0
+          - >-
+            "max_completion_tokens" in (_openai_chat_options | default({}))
+          - >-
+            "reasoning_effort" in (_openai_chat_options | default({}))
+          - >-
+            "llama_server_mode" in (_openai_chat_options | default({}))
+          - _openai_sdk_check.rc | default(1) | int == 0
+          - openai_base_url is match('^https?://')
+        fail_msg: >-
+          OpenAI provider preflight failed. The controller needs the current
+          aknochow.openai.chat interface (max_completion_tokens,
+          reasoning_effort, and llama_server_mode) plus the openai Python SDK
+          in the effective module interpreter={{ _openai_runtime_python }}. Install or
+          rebuild the collection/dependencies before retrying; no model calls
+          were dispatched.
+  rescue:
+    - name: Re-raise a sanitized OpenAI preflight error
+      ansible.builtin.fail:
+        msg: >-
+          OpenAI provider preflight failed before model dispatch:
+          {{ ansible_failed_result.msg | default('runtime prerequisite check failed') }}
+          No model calls were dispatched.
+  always:
+    - name: Remove the OpenAI preflight temporary directory
+      ansible.builtin.file:
+        path: "{{ _openai_preflight_tmp.path }}"
+        state: absent
+      when: _openai_preflight_tmp is defined and _openai_preflight_tmp.path is defined

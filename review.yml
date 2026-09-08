@@ -175,6 +175,16 @@
     review_extra_notes: ""
 
   tasks:
+    # connection: local can otherwise auto-discover a different system
+    # Python for module execution than the interpreter running ansible-
+    # playbook itself. That split is especially dangerous for provider SDKs:
+    # the preflight can pass while the first provider module fails to import.
+    # Preserve an explicit host_vars/extra-vars override, but make the
+    # default deterministic and aligned with the controller process.
+    - name: Align local module execution with the playbook interpreter
+      ansible.builtin.set_fact:
+        ansible_python_interpreter: "{{ ansible_python_interpreter | default(ansible_playbook_python) }}"
+
     - name: Split survey-provided newline-separated targets into a list
       when: >-
         review_type != 'commit'
@@ -233,6 +243,15 @@
       ansible.builtin.set_fact:
         pipeline_agent_calls: []
         pipeline_findings_reports: []
+
+    # Load the review role's provider defaults and validate provider-specific
+    # controller prerequisites before creating a sandbox or cloning a target.
+    # A stale collection or missing SDK must fail here, not after an expensive
+    # setup followed by zero dispatched agents.
+    - name: Validate the selected provider runtime
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: provider_preflight.yml
 
     # block/rescue/always so a failure anywhere in the pipeline (a bad
     # target, a broken script, an SSH hiccup, a review-engine agent-call

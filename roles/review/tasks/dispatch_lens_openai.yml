@@ -1,0 +1,122 @@
+---
+# OpenAI lens dispatch (agent_family: openai).
+#
+# This uses Chat Completions' native JSON-schema response format rather than
+# pretending that OpenAI's tool-call response is an Anthropic tool block. The
+# result is normalized here to the same shape consumed by lenses.yml.
+
+- name: "OpenAI: show the Security agent's request configuration"
+  ansible.builtin.debug:
+    msg: "{{ [
+      'base_url: configured OpenAI-compatible endpoint',
+      'model: ' + review_openai_model,
+      'reasoning_effort: ' + (review_openai_lens_reasoning_effort | default('api-default', true)),
+      'max_completion_tokens: ' + (review_openai_max_completion_tokens | string),
+      'response_format: json_schema (security_findings_schema)',
+      '',
+      '--- developer prompt ---',
+      ] + security_system_prompt.split('\n') }}"
+
+- name: "OpenAI: dispatch the Security agent"
+  aknochow.openai.chat:
+    base_url: "{{ openai_base_url }}"
+    api_key: "{{ openai_api_key | default(omit, true) }}"
+    model: "{{ review_openai_model }}"
+    reasoning_effort: "{{ review_openai_lens_reasoning_effort | default(omit, true) }}"
+    max_completion_tokens: "{{ review_openai_max_completion_tokens }}"
+    timeout: "{{ openai_timeout }}"
+    llama_server_mode: false
+    messages:
+      - role: developer
+        content: "{{ security_system_prompt }}"
+      - role: user
+        content: "Review this diff per your instructions."
+    response_format:
+      type: json_schema
+      json_schema:
+        name: security_review_findings
+        strict: true
+        schema: "{{ security_findings_schema }}"
+  register: _openai_security_raw
+
+- name: "OpenAI: show the Review agent's request configuration"
+  ansible.builtin.debug:
+    msg: "{{ [
+      'base_url: configured OpenAI-compatible endpoint',
+      'model: ' + review_openai_model,
+      'reasoning_effort: ' + (review_openai_lens_reasoning_effort | default('api-default', true)),
+      'max_completion_tokens: ' + (review_openai_max_completion_tokens | string),
+      'response_format: json_schema (review_findings_schema)',
+      '',
+      '--- developer prompt ---',
+      ] + review_system_prompt.split('\n') }}"
+
+- name: "OpenAI: dispatch the Review agent"
+  aknochow.openai.chat:
+    base_url: "{{ openai_base_url }}"
+    api_key: "{{ openai_api_key | default(omit, true) }}"
+    model: "{{ review_openai_model }}"
+    reasoning_effort: "{{ review_openai_lens_reasoning_effort | default(omit, true) }}"
+    max_completion_tokens: "{{ review_openai_max_completion_tokens }}"
+    timeout: "{{ openai_timeout }}"
+    llama_server_mode: false
+    messages:
+      - role: developer
+        content: "{{ review_system_prompt }}"
+      - role: user
+        content: "Review this diff per your instructions."
+    response_format:
+      type: json_schema
+      json_schema:
+        name: code_review_findings
+        strict: true
+        schema: "{{ review_findings_schema }}"
+  register: _openai_review_raw
+
+- name: "OpenAI: fail loudly if the Security agent produced no structured output"
+  ansible.builtin.assert:
+    that:
+      - _openai_security_raw.structured is defined
+    fail_msg: >-
+      Security lens ({{ review_openai_model }}, agent_family=openai) produced no
+      .structured output despite response_format being set
+      (finish_reason={{ _openai_security_raw.finish_reason | default('unknown') }}).
+
+- name: "OpenAI: fail loudly if the Review agent produced no structured output"
+  ansible.builtin.assert:
+    that:
+      - _openai_review_raw.structured is defined
+    fail_msg: >-
+      Review lens ({{ review_openai_model }}, agent_family=openai) produced no
+      .structured output despite response_format being set
+      (finish_reason={{ _openai_review_raw.finish_reason | default('unknown') }}).
+
+- name: "OpenAI: build the normalized Security result"
+  ansible.builtin.set_fact:
+    security_result:
+      structured:
+        findings: "{{ (_openai_security_raw.structured | default({})).findings | default([]) }}"
+        scores: "{{ (_openai_security_raw.structured | default({})).scores | default({}) }}"
+      resolved_model: "{{ (_openai_security_raw.response | default({})).model | default(review_openai_model, true) }}"
+      usage_normalized:
+        input_tokens: "{{ [(_openai_security_raw.usage.prompt_tokens | default(0) | int) - (_openai_security_raw.usage.cached_tokens | default(0) | int), 0] | max }}"
+        output_tokens: "{{ _openai_security_raw.usage.completion_tokens | default(0) | int }}"
+        cache_write_tokens: 0
+        cache_read_tokens: "{{ _openai_security_raw.usage.cached_tokens | default(0) | int }}"
+        thinking_tokens: "{{ (_openai_security_raw.response | default({})) | openai_reasoning_tokens }}"
+        total_tokens: "{{ _openai_security_raw.usage.total_tokens | default(0) | int }}"
+
+- name: "OpenAI: build the normalized Review result"
+  ansible.builtin.set_fact:
+    review_result:
+      structured:
+        findings: "{{ (_openai_review_raw.structured | default({})).findings | default([]) }}"
+        scores: "{{ (_openai_review_raw.structured | default({})).scores | default({}) }}"
+      resolved_model: "{{ (_openai_review_raw.response | default({})).model | default(review_openai_model, true) }}"
+      usage_normalized:
+        input_tokens: "{{ [(_openai_review_raw.usage.prompt_tokens | default(0) | int) - (_openai_review_raw.usage.cached_tokens | default(0) | int), 0] | max }}"
+        output_tokens: "{{ _openai_review_raw.usage.completion_tokens | default(0) | int }}"
+        cache_write_tokens: 0
+        cache_read_tokens: "{{ _openai_review_raw.usage.cached_tokens | default(0) | int }}"
+        thinking_tokens: "{{ (_openai_review_raw.response | default({})) | openai_reasoning_tokens }}"
+        total_tokens: "{{ _openai_review_raw.usage.total_tokens | default(0) | int }}"

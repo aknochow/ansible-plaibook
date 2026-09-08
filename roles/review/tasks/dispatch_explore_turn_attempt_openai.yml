@@ -1,0 +1,115 @@
+---
+# One OpenAI Chat Completions dispatch attempt for the current explore turn.
+# The shared loop stores conversations in Claude's content-block shape so the
+# existing read-only Ansible tool runner can remain provider-neutral. The
+# openai_conversation filters translate at this boundary and normalize the
+# response back before explore_turn.yml consumes it.
+
+- name: "OpenAI: translate the explore conversation and tool definitions"
+  ansible.builtin.set_fact:
+    _openai_explore_messages: >-
+      {{ [{'role': 'developer', 'content': explore_system_prompt}]
+         + (explore_messages | to_openai_messages) }}
+    _openai_explore_tools: >-
+      {{ (explore_tools + [{
+           'name': 'report_findings',
+           'description': 'Report any additional findings discovered via exploration (empty list if none).',
+           'input_schema': explore_findings_schema
+         }]) | to_openai_tools }}
+
+- name: "OpenAI: show the explore request configuration"
+  ansible.builtin.debug:
+    msg:
+      - "model: {{ review_explore_openai_model }}"
+      - "max_completion_tokens: {{ review_openai_max_completion_tokens | string }}"
+      - "tools: [read_file, search, report_findings]"
+      - "forced_tool: {{ 'report_findings' if explore_last_turn else 'none' }}"
+
+- name: "OpenAI: call the explore agent, turn {{ explore_turn_count ~ ', attempt ' ~ (explore_attempt_number | default(1)) }}"
+  aknochow.openai.chat:
+    base_url: "{{ openai_base_url }}"
+    api_key: "{{ openai_api_key | default(omit, true) }}"
+    model: "{{ review_explore_openai_model }}"
+    max_completion_tokens: "{{ review_openai_max_completion_tokens }}"
+    timeout: "{{ openai_timeout }}"
+    llama_server_mode: false
+    messages: "{{ _openai_explore_messages }}"
+    tools: "{{ _openai_explore_tools }}"
+    tool_choice: "{{ {'type': 'function', 'function': {'name': 'report_findings'}} if explore_last_turn else omit }}"
+  register: _openai_explore_raw
+
+- name: "OpenAI: normalize the explore response's tool calls"
+  ansible.builtin.set_fact:
+    _openai_explore_tool_calls: "{{ _openai_explore_raw.tool_calls | default([]) | openai_tool_calls_with_input }}"
+
+- name: "OpenAI: normalize the explore result into the shared shape"
+  ansible.builtin.set_fact:
+    explore_turn_result:
+      message:
+        content: "{{ _openai_explore_raw.text | default('') | openai_response_to_message_content(_openai_explore_raw.tool_calls | default([])) }}"
+        model: "{{ (_openai_explore_raw.response | default({})).model | default(review_explore_openai_model, true) }}"
+      tool_calls: "{{ _openai_explore_tool_calls }}"
+      stop_reason: >-
+        {{ 'tool_use' if (_openai_explore_tool_calls | length > 0)
+           else ('end_turn' if _openai_explore_raw.finish_reason | default('') == 'stop'
+           else _openai_explore_raw.finish_reason | default('unknown')) }}
+      usage:
+        input_tokens: "{{ [(_openai_explore_raw.usage.prompt_tokens | default(0) | int) - (_openai_explore_raw.usage.cached_tokens | default(0) | int), 0] | max }}"
+        output_tokens: "{{ _openai_explore_raw.usage.completion_tokens | default(0) | int }}"
+        cache_creation_input_tokens: 0
+        cache_read_input_tokens: "{{ _openai_explore_raw.usage.cached_tokens | default(0) | int }}"
+
+- name: Record this OpenAI explore attempt's usage for the pipeline-wide stats summary
+  ansible.builtin.set_fact:
+    pipeline_agent_calls: >-
+      {{ pipeline_agent_calls + [{
+           'target': review_org_repo + '#' + review_number, 'lens': 'explore',
+           'model': explore_turn_result.message.model,
+           'usage': {
+             'input_tokens': explore_turn_result.usage.input_tokens | default(0) | int,
+             'output_tokens': explore_turn_result.usage.output_tokens | default(0) | int,
+             'cache_write_tokens': 0,
+             'cache_read_tokens': explore_turn_result.usage.cache_read_input_tokens | default(0) | int,
+             'thinking_tokens': (_openai_explore_raw.response | default({}) | openai_reasoning_tokens),
+             'total_tokens': (explore_turn_result.usage.input_tokens | default(0) | int)
+               + (explore_turn_result.usage.output_tokens | default(0) | int)
+               + (explore_turn_result.usage.cache_read_input_tokens | default(0) | int)
+           },
+           'attempt': explore_attempt_number | default(1)
+         }] }}
+
+- name: Check whether this OpenAI attempt called report_findings
+  ansible.builtin.set_fact:
+    _explore_attempt_report_calls: "{{ explore_turn_result.tool_calls | selectattr('name', 'equalto', 'report_findings') | list }}"
+
+- name: Validate this OpenAI attempt's report_findings call, if it made one
+  when: _explore_attempt_report_calls | length > 0
+  block:
+    - name: Coerce this OpenAI attempt's findings, tolerating a JSON-encoded string
+      coerce_findings_encoding:
+        value: "{{ _explore_attempt_report_calls[0].input.findings }}"
+        label: "Explore agent"
+      register: _explore_attempt_coerce_result
+
+    - name: Mark this OpenAI attempt valid
+      ansible.builtin.set_fact:
+        explore_dispatch_valid: true
+  rescue:
+    - name: Mark this OpenAI attempt invalid (malformed report_findings call)
+      ansible.builtin.set_fact:
+        explore_dispatch_valid: false
+
+- name: Mark this OpenAI attempt invalid if the forced last turn had no tool call
+  when: >-
+    _explore_attempt_report_calls | length == 0
+    and explore_last_turn
+    and explore_turn_result.stop_reason != 'tool_use'
+  ansible.builtin.set_fact:
+    explore_dispatch_valid: false
+
+- name: Mark this OpenAI attempt valid for a normal non-final turn without a report call
+  when: >-
+    _explore_attempt_report_calls | length == 0
+    and not (explore_last_turn and explore_turn_result.stop_reason != 'tool_use')
+  ansible.builtin.set_fact:
+    explore_dispatch_valid: true
