@@ -127,6 +127,8 @@ uv run pytest                                             # full Python unit sui
 uv run pytest action_plugins/test_foo.py                  # single file
 uv run ./scripts/run_playbook_tests.sh                    # offline Ansible playbook test suite
 uv run ansible-playbook review.yml --syntax-check
-ansible-playbook review.yml -e review_type=commit         # fast, cheap, local
-ansible-playbook review.yml -e review_targets_raw="org/repo!N" # full PR/MR review
+uv run ansible-playbook review.yml -e review_type=commit         # fast, cheap, local
+uv run ansible-playbook review.yml -e review_targets_raw="org/repo!N" # full PR/MR review
+# From outside the checkout, keep the caller's cwd:
+# uv run --directory /path/to/ansible-plaibook ansible-playbook review.yml ...
 ```
