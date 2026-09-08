@@ -22,6 +22,13 @@ dev = [
     "ruff>=0.9.0",
     "ansible-lint>=24.0.0",
 ]
+# Live agent_family=cursor reviews. CI mocks the SDK and does not install
+# this extra. The collection (aknochow.cursor) also depends on it; this
+# extra puts it on plaibook's uv interpreter so `uv run ansible-playbook`
+# can import cursor_sdk. Sync with: uv sync --extra dev --extra cursor
+cursor = [
+    "cursor-sdk>=1.0.31,<2.0.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["action_plugins*", "filter_plugins*", "library*", "roles*", "scripts*"]

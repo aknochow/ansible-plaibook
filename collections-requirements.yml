@@ -14,6 +14,10 @@ collections:
     # Pin the interface this role calls; moving main can silently change
     # module argument names and break every OpenAI review at runtime.
     version: 60a9cc192b12867c4234c6eaad6b256460f550d5
+  # aknochow.cursor is omitted on purpose: ansible-cursor has no public
+  # GitHub repo yet. `ansible-galaxy collection install -r` this file in
+  # CI, so a git source that 404s would fail every PR. Install from a
+  # local checkout with ANSIBLE_CURSOR_DIR=... scripts/install-collections.sh.
   # community.general.jira — the native Jira module bug_context uses
   # to fetch/comment on tickets, replacing hand-rolled ansible.builtin.uri
   # calls against the REST API directly.
