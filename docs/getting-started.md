@@ -11,24 +11,30 @@ status: stable
 ## Review a GitHub PR or GitLab MR
 
 ```bash
-ansible-playbook review.yml -e review_targets_raw="org/repo#123"
-ansible-playbook review.yml -e review_targets_raw="https://github.com/org/repo/pull/12"
-ansible-playbook review.yml -e review_targets_raw="org/repo!34"
+uv run ansible-playbook review.yml -e review_targets_raw="org/repo#123"
+uv run ansible-playbook review.yml -e review_targets_raw="https://github.com/org/repo/pull/12"
+uv run ansible-playbook review.yml -e review_targets_raw="org/repo!34"
 ```
+
+These assume the shell is already in the plaibook checkout. From
+anywhere else, keep the caller's cwd with
+`uv run --directory /path/to/ansible-plaibook ansible-playbook review.yml ...`.
+AAP / execution-environment runs still invoke `ansible-playbook`
+directly; `uv run` is the local, lockfile-pinned path.
 
 `review_targets_raw` accepts a GitHub PR URL, a GitLab MR URL, or a bare
 `org/repo#N` (GitHub) / `org/repo!N` (GitLab) identifier. Pass several
 targets at once as a newline-separated string, or use the JSON-list form:
 
 ```bash
-ansible-playbook review.yml -e '{"review_targets": ["org/repo#1", "org/repo#2"]}'
+uv run ansible-playbook review.yml -e '{"review_targets": ["org/repo#1", "org/repo#2"]}'
 ```
 
 ## Review a single local commit: fast and cheap
 
 ```bash
-ansible-playbook review.yml -e review_type=commit
-ansible-playbook review.yml -e review_type=commit -e commit_sha=abc1234 -e repo_path=/path/to/repo
+uv run ansible-playbook review.yml -e review_type=commit
+uv run ansible-playbook review.yml -e review_type=commit -e commit_sha=abc1234 -e repo_path=/path/to/repo
 ```
 
 Both arguments are optional (`commit_sha` defaults to `HEAD`, `repo_path`
@@ -100,5 +106,5 @@ Reviewing is safe to automate by default; posting is a write to shared
 state and requires explicit opt-in:
 
 ```bash
-ansible-playbook review.yml -e review_targets_raw="org/repo!34" -e post_results=true
+uv run ansible-playbook review.yml -e review_targets_raw="org/repo!34" -e post_results=true
 ```
