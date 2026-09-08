@@ -141,6 +141,27 @@
     - name: Verify the cloned commit is still the target's current HEAD
       ansible.builtin.include_tasks: verify_target_freshness.yml
 
+    # Compute the merge base between the target branch and the PR/MR head ref.
+    # Using the merge base against the actual target branch (falling back to origin/HEAD only when
+    # the forge does not report a target branch) provides true 3-dot PR diff semantics
+    # (git diff $(git merge-base <target> <head>) <head>) so the review only analyzes changes
+    # introduced by the PR branch relative to its intended target branch, ignoring commits on other branches.
+    #
+    # MUST run BEFORE copy_to_sandbox.yml. That file uploads the checkout
+    # and then DELETES the controller-side clone, and this chdirs into
+    # that clone -- so on a sandboxed run the directory was already gone
+    # and every PR review died here with "Unable to change directory
+    # before execution". The unsandboxed branch keeps the clone, so the
+    # ordering was only wrong on the path nobody had run to completion.
+    # It is a controller-side git operation either way: compute it while
+    # the thing it reads still exists.
+    - name: Compute the merge base between the target branch and the PR/MR head
+      ansible.builtin.command:
+        argv: [git, merge-base, "{{ review_base_ref }}", review-source]
+        chdir: "{{ review_clone_dir_controller.path }}"
+      changed_when: false
+      register: _review_merge_base_result
+
     # One "skipping" notice for this whole group on an unsandboxed run
     # instead of three -- see copy_to_sandbox.yml's own header comment
     # for why this is include_tasks + when, not block + when.
@@ -164,17 +185,6 @@
         # also have a .path attribute.
         review_checkout_dir: { path: "{{ review_clone_dir_controller.path }}" }
 
-    # Compute the merge base between the target branch and the PR/MR head ref.
-    # Using the merge base against the actual target branch (falling back to origin/HEAD only when
-    # the forge does not report a target branch) provides true 3-dot PR diff semantics
-    # (git diff $(git merge-base <target> <head>) <head>) so the review only analyzes changes
-    # introduced by the PR branch relative to its intended target branch, ignoring commits on other branches.
-    - name: Compute the merge base between the target branch and the PR/MR head
-      ansible.builtin.command:
-        argv: [git, merge-base, "{{ review_base_ref }}", review-source]
-        chdir: "{{ review_clone_dir_controller.path }}"
-      changed_when: false
-      register: _review_merge_base_result
 
     # Plain set_fact, not include_role vars: -- target resolution and the
     # review engine are the same role now, so these just need to be ambient
