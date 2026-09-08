@@ -13,7 +13,7 @@ collections:
     type: git
     # Pin the interface this role calls; moving main can silently change
     # module argument names and break every OpenAI review at runtime.
-    version: f839452ab910e4e7669a5fdeeb5e83e2e8d36e95
+    version: 60a9cc192b12867c4234c6eaad6b256460f550d5
   # community.general.jira — the native Jira module bug_context uses
   # to fetch/comment on tickets, replacing hand-rolled ansible.builtin.uri
   # calls against the REST API directly.
