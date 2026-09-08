@@ -53,11 +53,10 @@ lens's own reasoning.
 
 ## Known, load-bearing gaps
 
-- **No `pyproject.toml`/lockfile yet.** `ansible-core`/`jinja2` versions
-  can drift across separate checkouts (e.g. git worktrees), producing
-  different test results for identical code. If a test result looks
-  inconsistent with another checkout of the same commit, check dependency
-  versions before assuming a logic bug.
+- **Ambient `ansible-playbook` can still drift.** `pyproject.toml` and
+  `uv.lock` pin `ansible-core`/`jinja2`, and CI uses `uv sync --locked`.
+  A bare `ansible-playbook` on PATH ignores that pin. Invoke with
+  `uv run` (or `uv run --directory <checkout>` from elsewhere).
 - **`~/.cache/ansible-plaibook/last_run.json` is a single global path** with no
   per-session isolation. Concurrent invocations on the same machine race
   to overwrite it. See [Getting Started](getting-started.md#reading-the-output).

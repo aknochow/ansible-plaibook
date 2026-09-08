@@ -106,8 +106,8 @@ One playbook, `review_type` selects the mode (`pr` | `branch` |
    always knows where to look, no timestamp-guessing).
 
 ```bash
-ansible-playbook review.yml -e review_targets_raw="org/repo#123"
-ansible-playbook review.yml -e review_targets_raw="https://gitlab.example.com/org/repo/-/merge_requests/45"
+uv run ansible-playbook review.yml -e review_targets_raw="org/repo#123"
+uv run ansible-playbook review.yml -e review_targets_raw="https://gitlab.example.com/org/repo/-/merge_requests/45"
 ```
 
 Runs in an OpenShell sandbox by default (`use_sandbox: true`) since
@@ -124,8 +124,8 @@ calls, just the Security + Functionality/Quality lenses against your
 working tree.
 
 ```bash
-ansible-playbook review.yml -e review_type=commit
-ansible-playbook review.yml -e review_type=commit -e commit_sha=abc1234 -e repo_path=/path/to/repo
+uv run ansible-playbook review.yml -e review_type=commit
+uv run ansible-playbook review.yml -e review_type=commit -e commit_sha=abc1234 -e repo_path=/path/to/repo
 ```
 
 Unlike `review_type: pr`/`branch` (which never fail the Ansible run

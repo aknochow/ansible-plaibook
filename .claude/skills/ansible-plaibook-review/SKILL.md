@@ -6,11 +6,32 @@ description: "Invoke this repo's AI code-review playbook (review.yml) and read i
 # ansible-plaibook review pipeline
 
 This repo (`ansible-plaibook`) is an Ansible-native AI code-review pipeline.
-One top-level playbook, `ansible-playbook review.yml` from the repo
-root, dispatching on `review_type` (`pr` | `branch` | `commit`).
+One top-level playbook, `review.yml`, dispatching on `review_type`
+(`pr` | `branch` | `commit`).
 **Read this whole file before invoking anything** — the output-reading
 section is not optional context, it's how you avoid grepping fragile
 stdout.
+
+## How to invoke — `uv run`, don't cd
+
+Always launch through the checkout's uv env so you get this repo's
+pinned `ansible-core`, not whatever `ansible-playbook` happens to be
+on PATH. `uv run --directory` is the no-cd form: it runs the child in
+the plaibook checkout and leaves the caller's cwd alone.
+
+```bash
+uv run --directory /path/to/ansible-plaibook ansible-playbook review.yml \
+  -e review_targets_raw="org/repo#123"
+```
+
+If the shell is already in the checkout, `uv run ansible-playbook review.yml ...`
+is enough. Do not `cd` around a shared session just to run a review.
+
+If a given `agent_family` needs an optional extra from `pyproject.toml`
+(a provider SDK that is not in the default dependency set), pass it on
+the same `uv run` so the playbook interpreter can import it:
+`uv run --extra <name> ansible-playbook review.yml ...`. `uv run`
+without that extra will sync it *out* of `.venv`.
 
 (A second playbook, `bug_pipeline.yml` — Jira-driven autonomous bug
 fix — is deliberately parked on the `wip/bug-fix-pipeline` branch, not
@@ -23,9 +44,9 @@ handoff.ansible-plaibook-bug-fix-pipeline-deferred.yaml.)
 ### `review_type: pr` (default) — review a GitHub PR or GitLab MR
 
 ```bash
-ansible-playbook review.yml -e review_targets_raw="org/repo#123"
-ansible-playbook review.yml -e review_targets_raw="https://github.com/org/repo/pull/12"
-ansible-playbook review.yml -e review_targets_raw="org/repo!34" -e use_sandbox=false
+uv run ansible-playbook review.yml -e review_targets_raw="org/repo#123"
+uv run ansible-playbook review.yml -e review_targets_raw="https://github.com/org/repo/pull/12"
+uv run ansible-playbook review.yml -e review_targets_raw="org/repo!34" -e use_sandbox=false
 ```
 
 - Plain `-e key=value` extra-vars — no quoting or JSON brackets needed
@@ -43,7 +64,7 @@ ansible-playbook review.yml -e review_targets_raw="org/repo!34" -e use_sandbox=f
   full URL form for a subgrouped project, which does support it.
 - For **multiple targets** in one run: either pass `review_targets_raw`
   as a newline-separated string, or use the JSON-list form directly:
-  `ansible-playbook review.yml -e '{"review_targets": ["org/repo#1", "org/repo#2"]}'`
+  `uv run ansible-playbook review.yml -e '{"review_targets": ["org/repo#1", "org/repo#2"]}'`
 - Runs in an OpenShell sandbox by default (`use_sandbox: true` —
   `library/run_checklist.py` executes commands parsed out of a
   source-branch-controlled `CHECKLIST.md`, i.e. untrusted input). Set
@@ -57,8 +78,8 @@ ansible-playbook review.yml -e review_targets_raw="org/repo!34" -e use_sandbox=f
 ### `review_type: commit` — fast local single-commit check
 
 ```bash
-ansible-playbook review.yml -e review_type=commit
-ansible-playbook review.yml -e review_type=commit -e commit_sha=abc1234 -e repo_path=/path/to/repo
+uv run ansible-playbook review.yml -e review_type=commit
+uv run ansible-playbook review.yml -e review_type=commit -e commit_sha=abc1234 -e repo_path=/path/to/repo
 ```
 
 - Both `commit_sha`/`repo_path` are optional: `commit_sha` defaults to
@@ -72,7 +93,7 @@ ansible-playbook review.yml -e review_type=commit -e commit_sha=abc1234 -e repo_
   "successful" playbook run). `review_type: commit` instead **fails
   (non-zero exit)** when the verdict is `NEEDS_CHANGES` with a real
   Critical/Major finding, so a hook can gate directly on the exit code:
-  `if ! ansible-playbook review.yml -e review_type=commit; then ...; fi`.
+  `if ! uv run ansible-playbook review.yml -e review_type=commit; then ...; fi`.
   Set `-e fail_on_regressions=false` to always exit 0 regardless of
   verdict.
 
@@ -87,8 +108,8 @@ otherwise dormant. Not part of the CLI-supported surface today.
 
 | Situation | Command |
 |---|---|
-| Someone (or something) opened a GitHub PR or GitLab MR and it needs a review | `review.yml` (default `review_type: pr`) |
-| You just made a local commit and want a fast sanity check before pushing/opening a PR | `review.yml -e review_type=commit` |
+| Someone (or something) opened a GitHub PR or GitLab MR and it needs a review | `uv run ansible-playbook review.yml` (default `review_type: pr`) |
+| You just made a local commit and want a fast sanity check before pushing/opening a PR | `uv run ansible-playbook review.yml -e review_type=commit` |
 
 ## Reading the output — do this, not stdout-grepping
 
