@@ -111,8 +111,11 @@ re-deriving a claim from scratch.
 - Per-task-config-var for multi-provider dispatch (Claude/Gemini/
   Qwen), never a generic abstraction-class layer. Decided, don't
   re-litigate (see `handoff.ansible-plaibook-multi-provider-agents.yaml`).
-- Commits: `-s` sign-off + `Assisted-by: Claude` trailer, never
-  `Co-Authored-By:` (creates phantom accounts on GitHub/GitLab).
+- Commits: `-s` sign-off plus an accurate `Assisted-by: Provider (model)`
+  trailer when AI assisted. Record the provider/tool and exact model that
+  performed the work (for example, `Assisted-by: Codex
+  (gpt-5.6-luna-xhigh)`); never copy a provider or model from another
+  session. Never use `Co-Authored-By:` (it creates phantom accounts).
 - Dogfood every real MR (`review_type=commit` **and**
   `review_type=pr` against your own diff) before merging. A passing
   test suite alone has missed real bugs here more than once.
