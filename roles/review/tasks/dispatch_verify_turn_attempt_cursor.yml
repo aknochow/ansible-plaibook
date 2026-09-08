@@ -26,6 +26,7 @@
 
 - name: "Cursor: dispatch the verify agent"
   aknochow.cursor.agent:
+    api_key: "{{ review_cursor_api_key }}"
     prompt: >-
       Use the verify agent. Try to refute the finding described in its
       instructions using read, then call report_verdict exactly once.

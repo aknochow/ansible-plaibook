@@ -23,6 +23,7 @@
 
 - name: "Cursor: dispatch the explore agent"
   aknochow.cursor.agent:
+    api_key: "{{ review_cursor_api_key }}"
     prompt: >-
       Use the explore agent. Decide whether this change needs checking
       against the rest of the repo, using read if so, then call

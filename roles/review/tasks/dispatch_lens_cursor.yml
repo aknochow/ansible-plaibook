@@ -35,6 +35,7 @@
 
 - name: "Cursor: dispatch the Security agent"
   aknochow.cursor.agent:
+    api_key: "{{ review_cursor_api_key }}"
     prompt: >-
       Use the security_lens agent, then call report_findings with its
       findings and scores. You must call report_findings.
@@ -68,6 +69,7 @@
 
 - name: "Cursor: dispatch the Review agent"
   aknochow.cursor.agent:
+    api_key: "{{ review_cursor_api_key }}"
     prompt: >-
       Use the review_lens agent, then call report_findings with its
       findings and scores. You must call report_findings.

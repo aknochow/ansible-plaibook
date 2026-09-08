@@ -49,7 +49,7 @@ review_agent_model: "claude-opus-4-6"
 # audit_{{ agent_family }}.yml" -- one hand-written, provider-native
 # task file per family, never a shared abstraction. claude is default
 # so existing behavior/callers are unchanged. qwen isn't implemented
-# yet (claude/gemini/claude_cli/cursor dispatch files exist) -- named
+# yet (claude/gemini/openai/claude_cli/cursor dispatch files exist) -- named
 # here so it slots in later without a rename, per
 # ansible-agentbench/harness/tier1_lens_dispatch.yml's own precedent
 # (that harness already proves a Qwen path via aknochow.openai.chat).
@@ -68,7 +68,7 @@ review_agent_model: "claude-opus-4-6"
 # 'claude' stays the fallback rather than becoming a considered choice --
 # changing it is a separate decision, not a side effect of making the
 # var overridable.
-# claude | gemini | openai | claude_cli | qwen
+# claude | gemini | openai | claude_cli | cursor | qwen
 agent_family: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_AGENT_FAMILY') | default('claude', true) }}"
 
 # aknochow.claude auth: no provider or project baked in on purpose --
@@ -217,6 +217,18 @@ review_claude_cli_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_CLAUD
 # Override with -e or ANSIBLE_REVIEW_CURSOR_MODEL.
 review_cursor_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_CURSOR_MODEL') | default('grok-4.6', true) }}"
 review_cursor_effort: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_CURSOR_EFFORT') | default('high', true) }}"
+
+# Without a key, cursor-sdk falls back to LOCAL BRIDGE DISCOVERY and the
+# dispatch dies with "Cursor agent failed to start: Timed out waiting for
+# bridge discovery" after ~32s. Measured on a clean checkout: every cursor
+# lens failed this way until the key was threaded through, because the
+# module accepts api_key (no_log) but nothing ever passed one.
+#
+# default(omit, true), not a literal: an unset env lookup returns the
+# empty string, and passing "" is not the same as omitting the parameter
+# -- omitting lets the SDK use its own resolution, passing empty asserts
+# an empty credential. Same shape as gemini_api_key above.
+review_cursor_api_key: "{{ lookup('ansible.builtin.env', 'CURSOR_API_KEY') | default(omit, true) }}"
 review_explore_cursor_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_EXPLORE_CURSOR_MODEL') | default(review_cursor_model, true) }}"
 review_verify_cursor_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_VERIFY_CURSOR_MODEL') | default(review_cursor_model, true) }}"
 
