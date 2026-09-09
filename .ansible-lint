@@ -18,15 +18,13 @@ warn_list:
   # not a blind find-and-replace.
   - var-naming[no-role-prefix]
 
-mock_modules:
-  - aknochow.claude.agent
-  - aknochow.claude.message
-  - aknochow.gemini.generate
-  - aknochow.openai.chat
-  - aknochow.openshell.sandbox
-  - aknochow.openshell.sandbox_upload
-  - aknochow.cursor.agent
-  - aknochow.cursor.bridge
+# Do not list aknochow.* modules here. ansible-lint writes those stubs
+# through ~/.ansible/collections/.../aknochow/* which on this machine
+# (and any laptop using INV-11 symlinks) are the source repos. One
+# `ansible-lint --offline` replaced six real modules with
+# argument_spec=dict() (2026-09-05 outage; again 2026-09-09). CI
+# installs the collections from collections-requirements.yml instead.
+
 
 exclude_paths:
   - .venv/

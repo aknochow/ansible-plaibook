@@ -9,6 +9,9 @@ collections:
   - name: https://github.com/aknochow/ansible-claude.git
     type: git
     version: main
+  - name: https://github.com/aknochow/ansible-gemini.git
+    type: git
+    version: main
   - name: https://github.com/aknochow/ansible-openai.git
     type: git
     # Pin the interface this role calls; moving main can silently change
