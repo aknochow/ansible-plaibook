@@ -40,8 +40,9 @@ collections=(
   # it, README doesn't list it) -- included ahead of time since
   # ansible-gemini is close to done and about to be pushed publicly.
   "aknochow.gemini:${ANSIBLE_GEMINI_DIR}"
-  # Optional: ansible-cursor has no public GitHub repo yet. Do not add
-  # it to collections-requirements.yml. Skip when the env var is unset.
+  # Optional local override. CI installs aknochow.cursor from
+  # collections-requirements.yml; set this to reinstall from a checkout
+  # whose galaxy.yml version has not been bumped.
   "aknochow.cursor:${ANSIBLE_CURSOR_DIR}"
 )
 
