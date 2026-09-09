@@ -27,11 +27,20 @@ uv run --directory /path/to/ansible-plaibook ansible-playbook review.yml \
 If the shell is already in the checkout, `uv run ansible-playbook review.yml ...`
 is enough. Do not `cd` around a shared session just to run a review.
 
+Do not pass `-e agent_family=...` unless you are overriding the operator
+default for this one run. `review.yml` loads
+`$XDG_CONFIG_HOME/ansible-plaibook/vars.yml` (or
+`~/.config/ansible-plaibook/vars.yml`) when that file exists; a
+gitignored `host_vars/localhost.yml` in the checkout is the
+per-worktree alternative; `ANSIBLE_REVIEW_AGENT_FAMILY` still works.
+None of those bake a provider into the repo. Extra-vars (`-e`) still win.
+
 If a given `agent_family` needs an optional extra from `pyproject.toml`
 (a provider SDK that is not in the default dependency set), pass it on
 the same `uv run` so the playbook interpreter can import it:
 `uv run --extra <name> ansible-playbook review.yml ...`. `uv run`
-without that extra will sync it *out* of `.venv`.
+without that extra will sync it *out* of `.venv`. XDG/host_vars do not
+install extras — they only set Ansible variables.
 
 (A second playbook, `bug_pipeline.yml` — Jira-driven autonomous bug
 fix — is deliberately parked on the `wip/bug-fix-pipeline` branch, not

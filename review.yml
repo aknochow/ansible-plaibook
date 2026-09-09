@@ -175,6 +175,28 @@
     review_extra_notes: ""
 
   tasks:
+    # Operator-wide defaults live outside the repo so a provider choice
+    # is not baked into role defaults. $XDG_CONFIG_HOME/ansible-plaibook/vars.yml
+    # (or ~/.config/ansible-plaibook/vars.yml) is loaded when the file
+    # exists; a missing file is a no-op. Extra-vars (-e) still win.
+    # host_vars/localhost.yml remains the per-checkout alternative.
+    - name: Resolve the operator XDG vars path
+      ansible.builtin.set_fact:
+        _plaibook_xdg_vars: "{{ (lookup('ansible.builtin.env', 'XDG_CONFIG_HOME') | default(lookup('ansible.builtin.env', 'HOME') ~ '/.config', true) | regex_replace('/$', '')) }}/ansible-plaibook/vars.yml"
+
+    - name: Check for an operator XDG vars file
+      ansible.builtin.stat:
+        path: "{{ _plaibook_xdg_vars }}"
+        get_checksum: false
+        get_mime: false
+        get_attributes: false
+      register: _plaibook_xdg_vars_stat
+
+    - name: Load operator XDG vars if present
+      when: _plaibook_xdg_vars_stat.stat.exists | bool and _plaibook_xdg_vars_stat.stat.isreg | bool
+      ansible.builtin.include_vars:
+        file: "{{ _plaibook_xdg_vars }}"
+
     - name: Record the review start time
       ansible.builtin.set_fact:
         review_started_at: "{{ now(utc=true).isoformat() }}"
