@@ -13,7 +13,10 @@ collections:
     type: git
     # Pin the interface this role calls; moving main can silently change
     # module argument names and break every OpenAI review at runtime.
-    version: 60a9cc192b12867c4234c6eaad6b256460f550d5
+    # Must be an ancestor of ansible-openai origin/main — galaxy clones
+    # the default branch, then checks out this SHA. 60a9cc1 had the same
+    # tree but is not on current main (history rewrite).
+    version: 0df6de7215c55aca40938a59fb700a18abe33dae
   - name: https://github.com/aknochow/ansible-cursor.git
     type: git
     # Pin the interface this role calls (effort mapping, structured_tool
