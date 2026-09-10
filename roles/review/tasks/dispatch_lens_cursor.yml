@@ -2,6 +2,10 @@
 # Cursor lens dispatch (agent_family: cursor). Uses aknochow.cursor.agent
 # (cursor-sdk local Agent.prompt), not an OpenAI-compatible chat client.
 #
+# When review.yml started a playbook-owned sidecar, this task inherits
+# CURSOR_SDK_BRIDGE_URL_FILE / CURSOR_SDK_BRIDGE_TOKEN_FILE (paths only)
+# and attaches instead of nested launch_bridge.
+#
 # Module contract (measured 2026-09-06; live ping 2026-09-06 rc 0 with
 # structured present):
 # - No parent system_prompt. Trusted lens text lives in agents.*.prompt

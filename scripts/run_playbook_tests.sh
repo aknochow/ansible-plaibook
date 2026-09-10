@@ -31,4 +31,7 @@ for pb in "${PLAYBOOKS[@]}"; do
   ansible-playbook "${pb}"
 done
 
-echo "All ${#PLAYBOOKS[@]} playbook tests passed successfully."
+echo "--- Running tests/run_cursor_sidecar_skip.sh ---"
+bash "${REPO_ROOT}/tests/run_cursor_sidecar_skip.sh"
+
+echo "All ${#PLAYBOOKS[@]} playbook tests plus sidecar skip scenarios passed successfully."

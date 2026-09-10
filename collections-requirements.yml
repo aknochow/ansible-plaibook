@@ -13,12 +13,16 @@ collections:
     type: git
     # Pin the interface this role calls; moving main can silently change
     # module argument names and break every OpenAI review at runtime.
-    version: 60a9cc192b12867c4234c6eaad6b256460f550d5
+    # Must be an ancestor of ansible-openai origin/main — galaxy clones
+    # the default branch, then checks out this SHA. 60a9cc1 had the same
+    # tree but is not on current main (history rewrite).
+    version: 0df6de7215c55aca40938a59fb700a18abe33dae
   - name: https://github.com/aknochow/ansible-cursor.git
     type: git
     # Pin the interface this role calls (effort mapping, structured_tool
-    # / mcp coupling). Moving main can silently change module arguments.
-    version: 6d5998c0e9a94238ef5c9400bd53aa08dc25f370
+    # / mcp coupling, playbook-owned sidecar). Moving main can silently
+    # change module arguments.
+    version: 059daf017c0fcc406f35905b26688836255a925a
   # community.general.jira — the native Jira module bug_context uses
   # to fetch/comment on tickets, replacing hand-rolled ansible.builtin.uri
   # calls against the REST API directly.

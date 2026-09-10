@@ -1,0 +1,55 @@
+---
+# Keep the wanted expression in lockstep with review.yml's
+# "Decide whether to start a playbook-owned cursor-sdk-bridge sidecar".
+# Invoke via tests/run_cursor_sidecar_skip.sh so lookup('env') sees the
+# ansible-playbook process environment (task-level environment: does not
+# affect controller lookups).
+#
+# Usage:
+#   ./tests/run_cursor_sidecar_skip.sh
+
+- name: Test playbook-owned sidecar skip for already-set attach env
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    agent_family: cursor
+    expect_sidecar_wanted: true
+
+  tasks:
+    - name: Compute sidecar wanted (must match review.yml)
+      ansible.builtin.set_fact:
+        review_cursor_sidecar_wanted: >-
+          {{
+            (agent_family | default('')) == 'cursor'
+            and (lookup('ansible.builtin.env', 'CURSOR_AGENT') == '1')
+            and not (
+              (
+                (lookup('ansible.builtin.env', 'CURSOR_SDK_BRIDGE_URL') | length > 0)
+                and (
+                  (lookup('ansible.builtin.env', 'CURSOR_SDK_BRIDGE_TOKEN') | length > 0)
+                  or (lookup('ansible.builtin.env', 'CURSOR_SDK_BRIDGE_AUTH_TOKEN') | length > 0)
+                )
+              )
+              or (
+                (lookup('ansible.builtin.env', 'CURSOR_SDK_BRIDGE_URL_FILE') | length > 0)
+                and (lookup('ansible.builtin.env', 'CURSOR_SDK_BRIDGE_TOKEN_FILE') | length > 0)
+              )
+            )
+          }}
+
+    - name: Assert wanted matches the scenario
+      ansible.builtin.assert:
+        that:
+          - (review_cursor_sidecar_wanted | bool) == (expect_sidecar_wanted | bool)
+        fail_msg: >-
+          sidecar wanted={{ review_cursor_sidecar_wanted }}
+          expected={{ expect_sidecar_wanted }}
+
+    - name: Assert FILE facts stay unset so environment default(omit) cannot clobber
+      ansible.builtin.assert:
+        that:
+          - review_cursor_bridge_url_file is not defined
+          - review_cursor_bridge_token_file is not defined
+        fail_msg: sidecar FILE facts must stay unset when we did not start a sidecar
