@@ -9,7 +9,7 @@ __pycache__/
 
 # Local-only, machine-specific Python interpreter override — points at
 # this machine's .venv via an absolute path (Homebrew's Ansible runs
-# under python3.10, too old for openshell>=0.0.70's Python floor — see
+# under python3.10, too old for openshell>=0.0.116's Python floor (>=3.11) — see
 # .venv/ above). ansible.cfg itself is now committed (roles_path and
 # callback settings are portable) — only this file, which sets
 # ansible_python_interpreter for the implicit localhost host, stays

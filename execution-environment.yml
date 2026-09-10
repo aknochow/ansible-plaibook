@@ -7,14 +7,16 @@
 # images, or a much heavier UBI10 Claude-Code-sandbox image built for a
 # different purpose — neither is the right base for a plain Ansible EE).
 #
-# UBI10, not UBI9: the openshell PyPI package only ships
-# manylinux_2_39 wheels (glibc >=2.39) — minee:ubi9's glibc 2.34 can
-# never satisfy that, confirmed by testing (only a stray 0.0.0a0 alpha
-# resolves on ubi9, no real release). minee:ubi10 (glibc 2.39, added
-# upstream specifically for this) installs it cleanly. Bonus: UBI10's
-# default python3 is already 3.12, so the python3.11-symlink workaround
-# ubi9 needed (for the harness scripts' 3.10+ syntax) is gone entirely
-# — ansible-core and the harness scripts now share the same interpreter.
+# UBI10, not UBI9: historically the openshell PyPI package only shipped
+# manylinux_2_39 wheels (glibc >=2.39) — minee:ubi9's glibc 2.34 could
+# never satisfy that (only a stray 0.0.0a0 alpha resolved on ubi9).
+# openshell 0.0.113+ is a pure-Python py3-none-any wheel, so the glibc
+# floor is no longer the reason to stay on UBI10; keep UBI10 anyway
+# (python3.12 default, the python3.11-symlink workaround ubi9 needed
+# is gone, ansible-core and the harness scripts share the same
+# interpreter). The pip range below must match ansible-openshell's
+# on-purpose ceiling (not an unpinned latest — 0.0.9x broke the
+# Python API once already).
 #
 # Build:
 #   ansible-builder build -t quay.io/aknochow/ansible-plaibook-ee:latest -f execution-environment.yml
@@ -34,7 +36,7 @@ dependencies:
   python:
     - anthropic>=0.84.0
     - openai>=1.0.0,<4.0.0
-    - openshell>=0.0.70,<0.0.91
+    - openshell>=0.0.116,<0.0.120
     # Runtime dependency of kubernetes.core.k8s_info (build/requirements.yml).
     - kubernetes
 
