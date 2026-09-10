@@ -19,7 +19,7 @@ collections:
     # Pin the interface this role calls (effort mapping, structured_tool
     # / mcp coupling, playbook-owned sidecar). Moving main can silently
     # change module arguments.
-    version: 125fde19d10446aaf779450a77d0a1058b74454e
+    version: 059daf017c0fcc406f35905b26688836255a925a
   # community.general.jira — the native Jira module bug_context uses
   # to fetch/comment on tickets, replacing hand-rolled ansible.builtin.uri
   # calls against the REST API directly.
