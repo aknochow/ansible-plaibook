@@ -1,0 +1,81 @@
+name: Collection CI
+
+on:
+  workflow_call:
+    inputs:
+      collection_name:
+        description: Galaxy collection name (e.g. claude, gemini)
+        required: true
+        type: string
+      collection_namespace:
+        description: Galaxy namespace
+        required: false
+        type: string
+        default: aknochow
+      ansible_lint_paths:
+        description: Paths for ansible-lint --offline (empty skips the step)
+        required: false
+        type: string
+        default: examples/
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies with lockfile
+        run: uv sync --locked --extra dev --python ${{ matrix.python-version }}
+
+      - name: Run ruff lint check
+        run: uv run --python ${{ matrix.python-version }} ruff check .
+
+      - name: Run ansible-lint check
+        if: inputs.ansible_lint_paths != ''
+        run: uv run --python ${{ matrix.python-version }} ansible-lint --offline ${{ inputs.ansible_lint_paths }}
+
+      - name: Run pytest test suite
+        run: uv run --python ${{ matrix.python-version }} pytest -v --tb=short
+
+  sanity:
+    name: Sanity (ansible-test)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository into collection tree
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+        with:
+          path: ansible_collections/${{ inputs.collection_namespace }}/${{ inputs.collection_name }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          enable-cache: true
+
+      - name: Set up Python 3.13
+        run: uv python install 3.13
+
+      - name: Install dependencies with lockfile
+        working-directory: ansible_collections/${{ inputs.collection_namespace }}/${{ inputs.collection_name }}
+        run: uv sync --locked --extra dev --python 3.13
+
+      - name: Run ansible-test sanity
+        working-directory: ansible_collections/${{ inputs.collection_namespace }}/${{ inputs.collection_name }}
+        run: uv run --python 3.13 ansible-test sanity --local --python 3.13 -v
