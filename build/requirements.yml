@@ -9,12 +9,14 @@
 #   ansible-galaxy collection build /path/to/ansible-openshell --output-path build/collections -f
 #   ansible-galaxy collection build /path/to/ansible-claude --output-path build/collections -f
 #   ansible-galaxy collection build /path/to/ansible-openai --output-path build/collections -f
-# aknochow.openshell (needed for Phase 2 sandboxing) required moving
-# the base image from minee:ubi9 to minee:ubi10 — the openshell PyPI
-# package only ships manylinux_2_39 wheels (glibc >=2.39), and ubi9's
-# glibc 2.34 could never satisfy that (confirmed: only a stray 0.0.0a0
-# alpha ever resolved on ubi9, no real release). See
-# execution-environment.yml's own header comment for the full story.
+# Rebuild the openshell tarball from ansible-openshell after that
+# collection's SDK-bump PR merges (the EE python pin in
+# execution-environment.yml must match ansible-openshell's bounded
+# openshell>=0.0.116,<0.0.120 range). collections-requirements.yml
+# already tracks git main for this collection — do not pin a stale SHA.
+# UBI10 history: openshell used to ship only manylinux_2_39 wheels
+# (glibc >=2.39); 0.0.113+ is a pure-Python wheel. Keep UBI10. See
+# execution-environment.yml's header comment.
 collections:
   - name: collections/aknochow-claude-0.1.0.tar.gz
     type: file
