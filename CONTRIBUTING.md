@@ -17,6 +17,23 @@ uv run ./scripts/run_playbook_tests.sh             # Offline Ansible playbook te
 uv run ansible-playbook review.yml --syntax-check  # Playbook syntax check
 ```
 
+## Collection pins
+
+`collections-requirements.yml` mixes Galaxy collections, floating git
+`version: main` entries, and SHA pins for provider collections whose
+module interface this repo calls (`aknochow.cursor`, `aknochow.openai`).
+Dependabot cannot update that file. After a sibling collection merge,
+either bump the SHA by hand or run:
+
+```bash
+uv run python scripts/bump_collection_pins.py --write
+```
+
+`.github/workflows/bump-collection-pins.yml` does the same weekly (and
+on `workflow_dispatch`) and opens a PR. Floating `version: main` pins
+are left alone. Galaxy collections (`ansible.posix`, and the others) stay unpinned
+until they grow an explicit version.
+
 ## Commit Standards
 
 - Sign off all commits (`git commit -s`).

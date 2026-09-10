@@ -1,5 +1,9 @@
 version: 2
 
+# No Ansible Galaxy / collections-requirements.yml ecosystem exists here.
+# SHA-pinned git collections are bumped by
+# .github/workflows/bump-collection-pins.yml instead.
+
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
