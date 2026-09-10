@@ -1,0 +1,59 @@
+name: Bump collection git pins
+
+# Dependabot cannot update collections-requirements.yml (no Ansible ecosystem).
+# This weekly job is the stand-in for SHA-pinned type: git collections.
+# Floating `version: main` entries are left alone.
+#
+# PRs opened with GITHUB_TOKEN do not trigger new workflow runs. This job
+# only rewrites SHAs; merge after a human retriggers CI or reviews the
+# compare links. The branch below is bot-owned — do not commit onto it.
+
+on:
+  schedule:
+    - cron: "17 12 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: bump-collection-git-pins
+  cancel-in-progress: true
+
+jobs:
+  bump:
+    name: Bump SHA-pinned git collections
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4.2.2
+
+      - name: Refresh SHA pins
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/bump_collection_pins.py --write --pr-body /tmp/collection-pin-pr.md
+
+      - name: Open or update the pin bump PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git diff --quiet -- collections-requirements.yml; then
+            echo "SHA-pinned git collections already match default-branch HEAD"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B chore/bump-collection-git-pins
+          git add collections-requirements.yml
+          git commit -s -m "chore(deps): bump SHA-pinned git collections"
+          git fetch origin chore/bump-collection-git-pins || true
+          git push --force-with-lease origin chore/bump-collection-git-pins
+          existing="$(gh pr list --head chore/bump-collection-git-pins --json number --jq '.[0].number // empty')"
+          if [ -n "${existing}" ]; then
+            echo "Updated existing PR #${existing}"
+            exit 0
+          fi
+          gh pr create \
+            --title "chore(deps): bump SHA-pinned git collections" \
+            --body-file /tmp/collection-pin-pr.md
