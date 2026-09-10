@@ -174,6 +174,12 @@
     # to every target in a multi-target run.
     review_extra_notes: ""
 
+    # Sidecar rundir is used from this playbook (present before the review
+    # role, absent in always). Role defaults are not in scope here.
+    review_cursor_bridge_rundir: "{{ lookup('ansible.builtin.env', 'HOME') }}/.cache/ansible-cursor-sidecar"
+    review_cursor_bridge_timeout: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_CURSOR_BRIDGE_TIMEOUT') | default(120, true) }}"
+    review_cursor_sidecar_started: false
+
   tasks:
     # Operator-wide defaults live outside the repo so a provider choice
     # is not baked into role defaults. $XDG_CONFIG_HOME/ansible-plaibook/vars.yml
@@ -281,6 +287,44 @@
         name: review
         tasks_from: provider_preflight.yml
 
+    # Playbook-owned cursor-sdk-bridge sidecar. Must start *before* the
+    # pipeline block so FILE attach paths can be put in that block's
+    # environment (templated at block entry). Nested launch_bridge under
+    # a Cursor IDE agent is SIGKILL'd (137). Skip when attach env is
+    # already set, or when this is not a Cursor-agent session (iTerm/CI/AAP
+    # keep in-process launch_bridge). Never set_fact the token.
+    - name: Decide whether to start a playbook-owned cursor-sdk-bridge sidecar
+      ansible.builtin.set_fact:
+        review_cursor_sidecar_wanted: >-
+          {{
+            (agent_family | default('')) == 'cursor'
+            and (lookup('ansible.builtin.env', 'CURSOR_AGENT') == '1')
+            and not (
+              (lookup('ansible.builtin.env', 'CURSOR_SDK_BRIDGE_URL') | length > 0)
+              and (
+                (lookup('ansible.builtin.env', 'CURSOR_SDK_BRIDGE_TOKEN') | length > 0)
+                or (lookup('ansible.builtin.env', 'CURSOR_SDK_BRIDGE_AUTH_TOKEN') | length > 0)
+              )
+            )
+          }}
+
+    - name: Start a playbook-owned cursor-sdk-bridge sidecar
+      when: review_cursor_sidecar_wanted | bool
+      aknochow.cursor.bridge:
+        state: present
+        rundir: "{{ review_cursor_bridge_rundir }}"
+        timeout: "{{ review_cursor_bridge_timeout }}"
+      register: _cursor_sidecar
+
+    - name: Record sidecar attach file paths without loading the token
+      when:
+        - review_cursor_sidecar_wanted | bool
+        - _cursor_sidecar is succeeded
+      ansible.builtin.set_fact:
+        review_cursor_sidecar_started: true
+        review_cursor_bridge_url_file: "{{ _cursor_sidecar.url_file }}"
+        review_cursor_bridge_token_file: "{{ _cursor_sidecar.token_file }}"
+
     # block/rescue/always so a failure anywhere in the pipeline (a bad
     # target, a broken script, an SSH hiccup, a review-engine agent-call
     # error) doesn't leak the sandbox forever and always gets a last-run
@@ -291,6 +335,9 @@
     # correctly reports as failed — cleanup shouldn't hide the actual
     # error.
     - name: Run the review pipeline (sandbox lifecycle is failure-safe)
+      environment:
+        CURSOR_SDK_BRIDGE_URL_FILE: "{{ review_cursor_bridge_url_file | default('') }}"
+        CURSOR_SDK_BRIDGE_TOKEN_FILE: "{{ review_cursor_bridge_token_file | default('') }}"
       block:
         # One "skipping" notice for this whole group on an unsandboxed
         # (including every review_type: commit) run instead of three --
@@ -331,6 +378,24 @@
                  | regex_replace('([?&](?:token|access_token|private_token)=)[^&\s]*', '\1***') }}
 
       always:
+        # Reap a sidecar we started even if sandbox teardown or stats fail.
+        # Do not pgrep argv (the token can be there); the module uses the pidfile.
+        - name: Stop the playbook-owned cursor-sdk-bridge sidecar (failure-safe)
+          when: review_cursor_sidecar_started | default(false) | bool
+          block:
+            - name: Stop the playbook-owned cursor-sdk-bridge sidecar
+              aknochow.cursor.bridge:
+                state: absent
+                rundir: "{{ review_cursor_bridge_rundir }}"
+          rescue:
+            - name: Warn that cursor sidecar stop itself failed
+              ansible.builtin.debug:
+                msg: >-
+                  WARNING: cursor-sdk-bridge sidecar stop failed
+                  ({{ ansible_failed_result.msg | default('unknown error') }}).
+                  Reap via the pidfile under the sidecar rundir. Preserving the
+                  original pipeline error (if any) below rather than this one.
+
         # block/rescue here too — without it, a teardown failure (e.g.
         # gateway unreachable) would propagate out of this `always` and
         # replace review_pipeline_error with the teardown's own error,

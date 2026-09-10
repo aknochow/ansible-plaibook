@@ -25,6 +25,8 @@ mock_modules:
   - aknochow.openai.chat
   - aknochow.openshell.sandbox
   - aknochow.openshell.sandbox_upload
+  - aknochow.cursor.agent
+  - aknochow.cursor.bridge
 
 exclude_paths:
   - .venv/

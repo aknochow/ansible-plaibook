@@ -32,7 +32,7 @@ status: stable
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `agent_family` | `claude` (or operator config) | Provider dispatch family: `claude`, `gemini`, `openai`, or `cursor`. Committed default is `claude`. Per-machine override (none of these are in git): `$XDG_CONFIG_HOME/ansible-plaibook/vars.yml` (or `~/.config/ansible-plaibook/vars.yml`) when that file exists, else gitignored `host_vars/localhost.yml`, else `ANSIBLE_REVIEW_AGENT_FAMILY`. Extra-vars (`-e`) still win. |
+| `agent_family` | `claude` (or operator config) | Provider dispatch family: `claude`, `gemini`, `openai`, or `cursor`. Committed default is `claude`. Per-machine override (none of these are in git): `$XDG_CONFIG_HOME/ansible-plaibook/vars.yml` (or `~/.config/ansible-plaibook/vars.yml`) when that file exists, else gitignored `host_vars/localhost.yml`, else `ANSIBLE_REVIEW_AGENT_FAMILY`. Extra-vars (`-e`) still win. When `agent_family=cursor` and `CURSOR_AGENT=1` with no attach env, `review.yml` starts `aknochow.cursor.bridge` (double-fork sidecar) and reaps it in `always`. Already-set `CURSOR_SDK_BRIDGE_URL`+token is left alone. iTerm/CI/AAP keep in-process `launch_bridge`. |
 | `review_agent_model` | `claude-opus-4-6` | Model used for the Security and Functionality/Quality lens dispatch. |
 | `review_openai_model` | `gpt-5.6` when `agent_family=openai` | OpenAI model for both lenses; the unsuffixed GPT-5.6 alias resolves to Sol. Set `OPENAI_API_KEY` for hosted OpenAI use. |
 | `review_openai_max_completion_tokens` | `16384` | Hosted OpenAI completion budget for lens, exploration, and verification calls. |

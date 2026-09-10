@@ -232,6 +232,15 @@ review_cursor_api_key: "{{ lookup('ansible.builtin.env', 'CURSOR_API_KEY') | def
 review_explore_cursor_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_EXPLORE_CURSOR_MODEL') | default(review_cursor_model, true) }}"
 review_verify_cursor_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_VERIFY_CURSOR_MODEL') | default(review_cursor_model, true) }}"
 
+# Playbook-owned cursor-sdk-bridge sidecar. Nested launch_bridge under
+# CURSOR_AGENT=1 is SIGKILL'd (137); aknochow.cursor.bridge double-forks
+# so the vendor node is not a child of ansible-playbook. Attach env that
+# is already set wins (do not start a second sidecar). Not used in
+# iTerm/CI/AAP — those keep in-process launch_bridge.
+review_cursor_bridge_rundir: "{{ lookup('ansible.builtin.env', 'HOME') }}/.cache/ansible-cursor-sidecar"
+review_cursor_bridge_timeout: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_CURSOR_BRIDGE_TIMEOUT') | default(120, true) }}"
+review_cursor_sidecar_started: false
+
 # high by default, same "review quality is the point of this pipeline"
 # reasoning as review_gemini_thinking_level above. Unlike Gemini's
 # thinking_level, this rides on subscription usage rather than
