@@ -291,8 +291,9 @@
     # pipeline block so FILE attach paths can be put in that block's
     # environment (templated at block entry). Nested launch_bridge under
     # a Cursor IDE agent is SIGKILL'd (137). Skip when attach env is
-    # already set, or when this is not a Cursor-agent session (iTerm/CI/AAP
-    # keep in-process launch_bridge). Never set_fact the token.
+    # already set (URL+token or URL_FILE+TOKEN_FILE), or when this is
+    # not a Cursor-agent session (iTerm/CI/AAP keep in-process
+    # launch_bridge). Never set_fact the token.
     - name: Decide whether to start a playbook-owned cursor-sdk-bridge sidecar
       ansible.builtin.set_fact:
         review_cursor_sidecar_wanted: >-
@@ -300,10 +301,16 @@
             (agent_family | default('')) == 'cursor'
             and (lookup('ansible.builtin.env', 'CURSOR_AGENT') == '1')
             and not (
-              (lookup('ansible.builtin.env', 'CURSOR_SDK_BRIDGE_URL') | length > 0)
-              and (
-                (lookup('ansible.builtin.env', 'CURSOR_SDK_BRIDGE_TOKEN') | length > 0)
-                or (lookup('ansible.builtin.env', 'CURSOR_SDK_BRIDGE_AUTH_TOKEN') | length > 0)
+              (
+                (lookup('ansible.builtin.env', 'CURSOR_SDK_BRIDGE_URL') | length > 0)
+                and (
+                  (lookup('ansible.builtin.env', 'CURSOR_SDK_BRIDGE_TOKEN') | length > 0)
+                  or (lookup('ansible.builtin.env', 'CURSOR_SDK_BRIDGE_AUTH_TOKEN') | length > 0)
+                )
+              )
+              or (
+                (lookup('ansible.builtin.env', 'CURSOR_SDK_BRIDGE_URL_FILE') | length > 0)
+                and (lookup('ansible.builtin.env', 'CURSOR_SDK_BRIDGE_TOKEN_FILE') | length > 0)
               )
             )
           }}
@@ -336,8 +343,8 @@
     # error.
     - name: Run the review pipeline (sandbox lifecycle is failure-safe)
       environment:
-        CURSOR_SDK_BRIDGE_URL_FILE: "{{ review_cursor_bridge_url_file | default('') }}"
-        CURSOR_SDK_BRIDGE_TOKEN_FILE: "{{ review_cursor_bridge_token_file | default('') }}"
+        CURSOR_SDK_BRIDGE_URL_FILE: "{{ review_cursor_bridge_url_file | default(omit) }}"
+        CURSOR_SDK_BRIDGE_TOKEN_FILE: "{{ review_cursor_bridge_token_file | default(omit) }}"
       block:
         # One "skipping" notice for this whole group on an unsandboxed
         # (including every review_type: commit) run instead of three --
