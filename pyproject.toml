@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 dependencies = [
-    "ansible-core>=2.16.0,<2.19.0",
+    "ansible-core>=2.16.0,<2.20.0",
     "pyyaml>=6.0.0",
     "jinja2>=3.1.0",
 ]
@@ -18,7 +18,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0,<10.0.0",
-    "pytest-cov>=4.0.0,<7.0.0",
+    "pytest-cov>=4.0.0,<8.0.0",
     "ruff>=0.9.0",
     "ansible-lint>=24.0.0",
 ]
