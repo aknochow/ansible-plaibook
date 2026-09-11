@@ -162,6 +162,56 @@ def test_pretty_and_json_from_last_run(tmp_path):
     assert document["targets"][0]["findings"][0]["severity"] == "Major"
 
 
+def test_enrich_last_run_prefers_run_scoped_summary(tmp_path):
+    canonical = tmp_path / "summary.json"
+    canonical.write_text(
+        json.dumps(
+            {
+                "verdict": "READY_FOR_HUMAN_REVIEW",
+                "score_overall": 100.0,
+                "scores": {"functionality": 100.0, "security": 100.0, "quality": 100.0},
+                "findings_count": {"critical": 0, "major": 0, "minor": 0, "nit": 0},
+                "findings": [{"severity": "Nit", "file": "other_run.py"}],
+            }
+        )
+    )
+    scoped = tmp_path / "summary.thisrun.json"
+    scoped.write_text(
+        json.dumps(
+            {
+                "verdict": "NEEDS_CHANGES",
+                "score_overall": 50.0,
+                "scores": {"functionality": 40.0, "security": 50.0, "quality": 60.0},
+                "findings_count": {"critical": 0, "major": 1, "minor": 0, "nit": 0},
+                "findings": [{"severity": "Major", "file": "this_run.py"}],
+            }
+        )
+    )
+    last_run_file = tmp_path / "last_run.thisrun.json"
+    last_run_file.write_text(
+        json.dumps(
+            {
+                "run_id": "thisrun",
+                "status": "ok",
+                "targets": [
+                    {
+                        "target": "org/repo#1",
+                        "summary_path": str(canonical),
+                        "summary_run_scoped_path": str(scoped),
+                    }
+                ],
+            }
+        )
+    )
+    document = enrich_last_run(json.loads(last_run_file.read_text()), last_run_file=last_run_file)
+    target = document["targets"][0]
+    assert target["score_overall"] == 50.0
+    assert target["scores"]["functionality"] == 40.0
+    assert target["findings_count"]["major"] == 1
+    assert target["findings"][0]["file"] == "this_run.py"
+    assert target["verdict"] == "NEEDS_CHANGES"
+
+
 def test_cmd_review_quiet_json_yaml_and_exit(tmp_path, monkeypatch, capsys):
     checkout = tmp_path / "checkout"
     checkout.mkdir()
