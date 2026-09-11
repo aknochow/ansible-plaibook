@@ -84,15 +84,16 @@ jobs:
   # freshly resolved unconstrained tree. Native lockfile support, pinned by
   # SHA, fails the job on known-vulnerable locked deps. pip-audit against
   # `uv export --frozen` is equivalent; OSV is one action pin instead of a
-  # floating CLI.
+  # floating CLI. SARIF upload stays off: it needs job-level
+  # security-events: write, which Scorecard Token-Permissions flags as a
+  # new high on this PR. fail-on-vuln still gates the job.
   lockfile-audit:
     name: Lockfile audit (OSV)
     permissions:
-      actions: read
       contents: read
-      security-events: write
     uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
     with:
       fail-on-vuln: true
+      upload-sarif: false
       scan-args: |-
         --lockfile=uv.lock
