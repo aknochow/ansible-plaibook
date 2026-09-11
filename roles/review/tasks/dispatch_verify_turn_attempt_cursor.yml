@@ -8,6 +8,8 @@
 # only via structured_tool / mcp). Built-in read + report_verdict
 # structured_tool stand in. Reachability is the model's own read of
 # control flow, not trace_reachability.py -- same gap as claude_cli.
+# Subagents cannot see structured_tool, so trusted verify text lives
+# on the parent prompt.
 #
 # Synthesize at most one report_verdict tool_use so verify_turn.yml's
 # "dispatch any other tool calls" step sees an empty other-tools list
@@ -27,19 +29,12 @@
 - name: "Cursor: dispatch the verify agent"
   aknochow.cursor.agent:
     api_key: "{{ review_cursor_api_key }}"
-    prompt: >-
-      Use the verify agent. Try to refute the finding described in its
-      instructions using read, then call report_verdict exactly once.
-      You must call report_verdict.
+    prompt: "{{ verify_system_prompt }}\n\nTry to refute the finding described above using read, then call report_verdict exactly once. You must call report_verdict."
     model: "{{ review_verify_cursor_model }}"
     effort: "{{ review_cursor_effort }}"
     cwd: "{{ review_repo_path }}"
     setting_sources: []
     tools: [read, mcp]
-    agents:
-      verify:
-        description: Adversarial single-finding verifier with trusted instructions.
-        prompt: "{{ verify_system_prompt }}"
     structured_tool:
       name: report_verdict
       description: Submit the verification verdict for this one finding.

@@ -8,8 +8,12 @@
 #
 # Module contract (measured 2026-09-06; live ping 2026-09-06 rc 0 with
 # structured present):
-# - No parent system_prompt. Trusted lens text lives in agents.*.prompt
-#   on one subagent.
+# - No parent system_prompt. The collection documents agents.*.prompt as
+#   the trusted-instruction channel, but AgentDefinition has no
+#   custom_tools: a subagent cannot call report_findings (opus 5
+#   finished without .structured; luna/sol could). Trusted lens text
+#   therefore lives on the parent prompt so the model that owns
+#   structured_tool is the one that reads the lens.
 # - No generation-time output_format: json_schema. structured_tool
 #   (report_findings) takes the same schema claude_cli passes to
 #   output_format.schema. The model may skip the tool; the asserts
@@ -34,24 +38,18 @@
       'tools: [mcp]',
       'structured_tool: report_findings (security_findings_schema)',
       '',
-      '--- subagent prompt ---',
+      '--- parent prompt ---',
       ] + security_system_prompt.split('\n') }}"
 
 - name: "Cursor: dispatch the Security agent"
   aknochow.cursor.agent:
     api_key: "{{ review_cursor_api_key }}"
-    prompt: >-
-      Use the security_lens agent, then call report_findings with its
-      findings and scores. You must call report_findings.
+    prompt: "{{ security_system_prompt }}\n\nCall report_findings with your findings and scores. You must call report_findings."
     model: "{{ review_cursor_model }}"
     effort: "{{ review_cursor_effort }}"
     cwd: "{{ review_repo_path }}"
     setting_sources: []
     tools: [mcp]
-    agents:
-      security_lens:
-        description: Security review lens with trusted instructions.
-        prompt: "{{ security_system_prompt }}"
     structured_tool:
       name: report_findings
       description: Submit the security findings and scores for this diff.
@@ -68,24 +66,18 @@
       'tools: [mcp]',
       'structured_tool: report_findings (review_findings_schema)',
       '',
-      '--- subagent prompt ---',
+      '--- parent prompt ---',
       ] + review_system_prompt.split('\n') }}"
 
 - name: "Cursor: dispatch the Review agent"
   aknochow.cursor.agent:
     api_key: "{{ review_cursor_api_key }}"
-    prompt: >-
-      Use the review_lens agent, then call report_findings with its
-      findings and scores. You must call report_findings.
+    prompt: "{{ review_system_prompt }}\n\nCall report_findings with your findings and scores. You must call report_findings."
     model: "{{ review_cursor_model }}"
     effort: "{{ review_cursor_effort }}"
     cwd: "{{ review_repo_path }}"
     setting_sources: []
     tools: [mcp]
-    agents:
-      review_lens:
-        description: Functionality and quality review lens with trusted instructions.
-        prompt: "{{ review_system_prompt }}"
     structured_tool:
       name: report_findings
       description: Submit the review findings and scores for this diff.
