@@ -16,6 +16,31 @@ def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _summary_file_for_target(target: dict[str, Any]) -> Path | None:
+    """Prefer the collision-immune sibling persist.yml also writes.
+
+    ``summary_path`` is last-write-wins for a given target/commit.
+    ``summary_run_scoped_path`` is this invocation's own file. Concurrent
+    reviews of the same SHA can overwrite the canonical path, so a CLI
+    that enriches from it can print another run's scores with no error.
+
+    If the run-scoped path is advertised but the file is missing, do not
+    fall through to the canonical path — last_run already carries this
+    run's verdict/score from persist, and using summary.json would mix
+    in another run.
+    """
+    run_scoped = target.get("summary_run_scoped_path") or ""
+    if run_scoped:
+        path = Path(run_scoped)
+        return path if path.is_file() else None
+    canonical = target.get("summary_path") or ""
+    if canonical:
+        path = Path(canonical)
+        if path.is_file():
+            return path
+    return None
+
+
 def enrich_last_run(last_run: dict[str, Any], *, last_run_file: Path) -> dict[str, Any]:
     """Pass-through last_run, attaching summary.json fields the playbook already wrote."""
     document = dict(last_run)
@@ -23,28 +48,26 @@ def enrich_last_run(last_run: dict[str, Any], *, last_run_file: Path) -> dict[st
     targets_out = []
     for target in last_run.get("targets") or []:
         entry = dict(target)
-        summary_path = target.get("summary_path") or ""
-        if summary_path:
-            path = Path(summary_path)
-            if path.is_file():
-                summary = load_json(path)
-                for key in (
-                    "scores",
-                    "score_overall",
-                    "findings_count",
-                    "findings",
-                    "commit",
-                    "branch",
-                    "date",
-                ):
-                    if key in summary and key not in entry:
-                        entry[key] = summary[key]
-                    elif key in summary and key in ("scores", "findings_count", "findings"):
-                        entry[key] = summary[key]
-                if "score" not in entry and "score_overall" in summary:
-                    entry["score"] = summary["score_overall"]
-                if "verdict" not in entry and "verdict" in summary:
-                    entry["verdict"] = summary["verdict"]
+        path = _summary_file_for_target(target)
+        if path is not None:
+            summary = load_json(path)
+            for key in (
+                "scores",
+                "score_overall",
+                "findings_count",
+                "findings",
+                "commit",
+                "branch",
+                "date",
+            ):
+                if key in summary and key not in entry:
+                    entry[key] = summary[key]
+                elif key in summary and key in ("scores", "findings_count", "findings"):
+                    entry[key] = summary[key]
+            if "score" not in entry and "score_overall" in summary:
+                entry["score"] = summary["score_overall"]
+            if "verdict" not in entry and "verdict" in summary:
+                entry["verdict"] = summary["verdict"]
         targets_out.append(entry)
     document["targets"] = targets_out
     return document

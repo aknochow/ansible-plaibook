@@ -9,7 +9,13 @@
 # Module contract (measured 2026-09-06; live ping 2026-09-06 rc 0 with
 # structured present):
 # - No parent system_prompt. Trusted lens text lives in agents.*.prompt
-#   on one subagent.
+#   (the collection's documented trusted-instruction channel).
+#   AgentDefinition has no custom_tools (cursor-sdk 1.0.31): a subagent
+#   cannot call report_findings. The parent still owns structured_tool
+#   and is told only to use the subagent then call the tool. Putting the
+#   full lens on the parent (so opus 5 could see the tool) was reverted
+#   after a dogfood Security finding: the tool-holding agent must not
+#   receive the untrusted diff in the ordinary user prompt.
 # - No generation-time output_format: json_schema. structured_tool
 #   (report_findings) takes the same schema claude_cli passes to
 #   output_format.schema. The model may skip the tool; the asserts

@@ -8,6 +8,8 @@
 # only via structured_tool / mcp). Built-in read + report_verdict
 # structured_tool stand in. Reachability is the model's own read of
 # control flow, not trace_reachability.py -- same gap as claude_cli.
+# AgentDefinition has no custom_tools; trusted verify text stays on
+# the subagent, report_verdict on the parent.
 #
 # Synthesize at most one report_verdict tool_use so verify_turn.yml's
 # "dispatch any other tool calls" step sees an empty other-tools list

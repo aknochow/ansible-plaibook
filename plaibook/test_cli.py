@@ -162,6 +162,72 @@ def test_pretty_and_json_from_last_run(tmp_path):
     assert document["targets"][0]["findings"][0]["severity"] == "Major"
 
 
+def test_enrich_prefers_run_scoped_summary_over_canonical(tmp_path):
+    canonical = tmp_path / "summary.json"
+    scoped = tmp_path / "summary.thisRunOnly0001.json"
+    canonical.write_text(
+        json.dumps(
+            {
+                "verdict": "READY_FOR_HUMAN_REVIEW",
+                "score_overall": 100.0,
+                "scores": {"functionality": 100.0, "security": 100.0, "quality": 100.0},
+                "findings_count": {"critical": 0, "major": 0, "minor": 0, "nit": 0},
+                "findings": [],
+            }
+        )
+    )
+    scoped.write_text(
+        json.dumps(
+            {
+                "verdict": "NEEDS_CHANGES",
+                "score_overall": 66.7,
+                "scores": {"functionality": 80.0, "security": 50.0, "quality": 70.0},
+                "findings_count": {"critical": 0, "major": 1, "minor": 2, "nit": 0},
+                "findings": [{"severity": "Major", "file": "x.py"}],
+            }
+        )
+    )
+    last_run_file = tmp_path / "last_run.deadbeefdeadbeef.json"
+    last_run = {
+        "run_id": "deadbeefdeadbeef",
+        "targets": [
+            {
+                "target": "org/repo#1",
+                "summary_path": str(canonical),
+                "summary_run_scoped_path": str(scoped),
+            }
+        ],
+    }
+    document = enrich_last_run(last_run, last_run_file=last_run_file)
+    target = document["targets"][0]
+    assert target["verdict"] == "NEEDS_CHANGES"
+    assert target["score_overall"] == 66.7
+    assert target["score"] == 66.7
+    assert target["findings_count"]["major"] == 1
+
+
+def test_enrich_skips_canonical_when_advertised_run_scoped_is_missing(tmp_path):
+    canonical = tmp_path / "summary.json"
+    canonical.write_text(json.dumps({"verdict": "READY_FOR_HUMAN_REVIEW", "score_overall": 100.0}))
+    last_run = {
+        "targets": [
+            {
+                "target": "org/repo#1",
+                "verdict": "NEEDS_CHANGES",
+                "score": 66.7,
+                "summary_path": str(canonical),
+                "summary_run_scoped_path": str(tmp_path / "summary.missing.json"),
+            }
+        ],
+    }
+    document = enrich_last_run(last_run, last_run_file=tmp_path / "last_run.x.json")
+    target = document["targets"][0]
+    assert target["verdict"] == "NEEDS_CHANGES"
+    assert target["score"] == 66.7
+    assert "score_overall" not in target
+    assert "scores" not in target
+
+
 def test_cmd_review_quiet_json_yaml_and_exit(tmp_path, monkeypatch, capsys):
     checkout = tmp_path / "checkout"
     checkout.mkdir()
