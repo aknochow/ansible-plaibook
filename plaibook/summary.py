@@ -16,35 +16,45 @@ def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def resolve_summary_path(target: dict[str, Any]) -> Path | None:
+    """Prefer summary_run_scoped_path when that file exists; else summary_path."""
+    for key in ("summary_run_scoped_path", "summary_path"):
+        raw = target.get(key) or ""
+        if not raw:
+            continue
+        path = Path(raw)
+        if path.is_file():
+            return path
+    return None
+
+
 def enrich_last_run(last_run: dict[str, Any], *, last_run_file: Path) -> dict[str, Any]:
-    """Pass-through last_run, attaching summary.json fields the playbook already wrote."""
+    """Pass-through last_run, attaching this run's summary fields the playbook already wrote."""
     document = dict(last_run)
     document["last_run_path"] = str(last_run_file)
     targets_out = []
     for target in last_run.get("targets") or []:
         entry = dict(target)
-        summary_path = target.get("summary_path") or ""
-        if summary_path:
-            path = Path(summary_path)
-            if path.is_file():
-                summary = load_json(path)
-                for key in (
-                    "scores",
-                    "score_overall",
-                    "findings_count",
-                    "findings",
-                    "commit",
-                    "branch",
-                    "date",
-                ):
-                    if key in summary and key not in entry:
-                        entry[key] = summary[key]
-                    elif key in summary and key in ("scores", "findings_count", "findings"):
-                        entry[key] = summary[key]
-                if "score" not in entry and "score_overall" in summary:
-                    entry["score"] = summary["score_overall"]
-                if "verdict" not in entry and "verdict" in summary:
-                    entry["verdict"] = summary["verdict"]
+        path = resolve_summary_path(target)
+        if path is not None:
+            summary = load_json(path)
+            for key in (
+                "scores",
+                "score_overall",
+                "findings_count",
+                "findings",
+                "commit",
+                "branch",
+                "date",
+            ):
+                if key in summary and key not in entry:
+                    entry[key] = summary[key]
+                elif key in summary and key in ("scores", "findings_count", "findings"):
+                    entry[key] = summary[key]
+            if "score" not in entry and "score_overall" in summary:
+                entry["score"] = summary["score_overall"]
+            if "verdict" not in entry and "verdict" in summary:
+                entry["verdict"] = summary["verdict"]
         targets_out.append(entry)
     document["targets"] = targets_out
     return document
