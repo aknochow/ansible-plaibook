@@ -18,9 +18,11 @@
   ansible.builtin.include_tasks: pipeline_stats.yml
 
 # Generate run_id once (password lookup returns fresh value each call).
-# Unconditional generation ensures fixed/run-scoped copies stay in sync.
-# tasks that consume it.
+# Skip when the caller already supplied last_run_id (the plaibook/plai CLI
+# does this so it can read last_run.<run_id>.json without scraping stdout).
+# Extra-vars still win if this task ran; the when: just avoids a wasted lookup.
 - name: Generate a unique run ID for this playbook invocation
+  when: last_run_id is not defined or (last_run_id | string | length) == 0
   ansible.builtin.set_fact:
     last_run_id: "{{ lookup('password', '/dev/null length=16 chars=ascii_letters,digits') }}"
 

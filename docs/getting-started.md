@@ -8,23 +8,37 @@ status: stable
 
 # Getting Started
 
+The short command is **`plai`**. The package and full command are
+**`plaibook`**. They share one entry point. After `uv sync` /
+`pip install -e .` from this checkout, `plai review ...` and
+`plaibook review ...` are the same program. v1 does not upload to
+PyPI; install from the checkout. AAP / execution-environment jobs keep
+calling `ansible-playbook review.yml` directly.
+
 ## Review a GitHub PR or GitLab MR
 
 ```bash
-uv run ansible-playbook review.yml -e review_targets_raw="org/repo#123"
-uv run ansible-playbook review.yml -e review_targets_raw="https://github.com/org/repo/pull/12"
-uv run ansible-playbook review.yml -e review_targets_raw="org/repo!34"
+uv run plai review org/repo#123
+uv run plaibook review org/repo#123
+uv run plai review https://github.com/org/repo/pull/12
+uv run plai review org/repo!34
 ```
 
-These assume the shell is already in the plaibook checkout. From
-anywhere else, keep the caller's cwd with
-`uv run --directory /path/to/ansible-plaibook ansible-playbook review.yml ...`.
-AAP / execution-environment runs still invoke `ansible-playbook`
-directly; `uv run` is the local, lockfile-pinned path.
+These assume the plaibook env is installed (`uv sync` from the
+checkout). The CLI locates `review.yml` itself and leaves the caller's
+cwd alone, so you can review another repo without `cd`. Override the
+checkout with `--root` / `PLAIBOOK_ROOT` if needed.
+
+AAP / execution-environment runs still invoke the playbook:
+
+```bash
+ansible-playbook review.yml -e review_targets_raw="org/repo#123"
+```
 
 `review_targets_raw` accepts a GitHub PR URL, a GitLab MR URL, or a bare
 `org/repo#N` (GitHub) / `org/repo!N` (GitLab) identifier. Pass several
-targets at once as a newline-separated string, or use the JSON-list form:
+targets at once on the playbook path as a newline-separated string, or
+use the JSON-list form:
 
 ```bash
 uv run ansible-playbook review.yml -e '{"review_targets": ["org/repo#1", "org/repo#2"]}'
@@ -33,17 +47,28 @@ uv run ansible-playbook review.yml -e '{"review_targets": ["org/repo#1", "org/re
 ## Review a single local commit: fast and cheap
 
 ```bash
-uv run ansible-playbook review.yml -e review_type=commit
-uv run ansible-playbook review.yml -e review_type=commit -e commit_sha=abc1234 -e repo_path=/path/to/repo
+uv run plai review --commit
+uv run plaibook review --commit
+uv run plai review --commit --sha abc1234 --repo /path/to/repo
 ```
 
-Both arguments are optional (`commit_sha` defaults to `HEAD`, `repo_path`
-to the current directory). This mode skips the sandbox and the
+Both arguments are optional (`--sha` defaults to `HEAD`, `--repo` to
+the current directory). This mode skips the sandbox and the
 exploration pass. It only sees the diff itself, not the surrounding
 codebase, so it's fast and inexpensive, at the cost of missing anything
-that requires reading a file outside the diff.
+that requires reading a file outside the diff. A `NEEDS_CHANGES`
+verdict with a real Critical/Major finding exits non-zero, on both
+`plai` and `plaibook`.
 
-## Reading the output
+## CLI output
+
+Default is quiet (no ansible task wall). `-v` prints full
+`ansible-playbook` output. `--json` and `--yaml` write the structured
+summary on stdout and nothing else, so skills can pipe them. The CLI
+reads `~/.cache/ansible-plaibook/last_run.<run_id>.json`; it does not
+scrape playbook stdout or recompute scores.
+
+## Reading the playbook artifacts
 
 Every run writes one predictable file, overwritten each run:
 
@@ -83,9 +108,10 @@ Every run writes one predictable file, overwritten each run:
 ```
 
 If more than one session might be reviewing at the same time, don't
-trust this shared path. Read the run-scoped copy instead (the path is
-printed as `RESULT_SUMMARY_RUN_SCOPED:` at the end of the run), since
-concurrent invocations race to overwrite the shared file.
+trust this shared path. `plai review --json` already prints the
+run-scoped copy. On the playbook path, read the run-scoped file
+(printed as `RESULT_SUMMARY_RUN_SCOPED:`) instead, since concurrent
+invocations race to overwrite the shared file.
 
 Drill into a target's `summary_path` for the full structured
 `summary.json`: verdict, per-lens scores, and every finding with its
@@ -106,5 +132,7 @@ Reviewing is safe to automate by default; posting is a write to shared
 state and requires explicit opt-in:
 
 ```bash
+uv run plai review org/repo!34 --post
+# AAP / EE:
 uv run ansible-playbook review.yml -e review_targets_raw="org/repo!34" -e post_results=true
 ```
