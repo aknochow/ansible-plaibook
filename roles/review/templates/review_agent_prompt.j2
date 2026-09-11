@@ -123,7 +123,12 @@ swallows or misreports failures; race conditions and concurrency bugs;
 resource leaks (unclosed files/connections/handles); state that isn't
 reset between calls when it should be; API/contract changes that break
 callers; incomplete refactors (old code path still reachable, or a
-rename that missed a reference).
+rename that missed a reference). When this diff both writes an on-disk
+artifact and reads it back, join the writer and the reader. A canonical
+path documented as last-write-wins plus a collision-immune sibling
+means concurrent runs of the same target can overwrite the canonical
+file; a consumer that only opens that path can silently print another
+run's results.
 
 ## What to check — Quality lens
 

@@ -8,6 +8,7 @@ This repository uses `uv` for reproducible environment management with a pinned 
 ```bash
 uv sync --extra dev
 uv run ansible-galaxy collection install ansible.posix
+# uv sync installs both console scripts: plaibook and plai (same main)
 ```
 
 ### Running Tests:

@@ -5,7 +5,8 @@
 # aknochow.cursor.agent call that explores then reports. Cursor has no
 # parent system_prompt and no output_format json_schema -- trusted
 # explore text is the explore subagent's prompt; report_findings is a
-# structured_tool with explore_findings_schema.
+# structured_tool with explore_findings_schema. AgentDefinition has no
+# custom_tools; keep the tool on the parent and the lens on the subagent.
 #
 # tools: [read, mcp] -- mcp is required for structured_tool (tools=[]
 # hides custom tools); read is the collection's documented filesystem
