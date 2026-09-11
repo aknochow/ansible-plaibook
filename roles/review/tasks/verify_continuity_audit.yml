@@ -156,12 +156,19 @@
   when: agent_family == 'cursor'
   aknochow.cursor.agent:
     api_key: "{{ review_cursor_api_key }}"
-    prompt: "{{ _continuity_audit_prompt }}\n\nCall report_continuity_audit exactly once. You must call report_continuity_audit."
+    prompt: >-
+      Use the continuity_audit agent. Assess the continuity claim
+      described in its instructions, then call report_continuity_audit
+      exactly once. You must call report_continuity_audit.
     model: "{{ review_verify_cursor_model }}"
     effort: "{{ review_cursor_effort }}"
     cwd: "{{ review_repo_path }}"
     setting_sources: []
     tools: [mcp]
+    agents:
+      continuity_audit:
+        description: Independent continuity-claim auditor with trusted instructions.
+        prompt: "{{ _continuity_audit_prompt }}"
     structured_tool:
       name: report_continuity_audit
       description: Report whether a continuity claim between two findings is plausible.
