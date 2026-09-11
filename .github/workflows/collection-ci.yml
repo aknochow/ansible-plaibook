@@ -82,18 +82,21 @@ jobs:
 
   # OSV-Scanner over uv.lock (the set `uv sync --locked` installs), not a
   # freshly resolved unconstrained tree. Native lockfile support, pinned by
-  # SHA, fails the job on known-vulnerable locked deps. pip-audit against
-  # `uv export --frozen` is equivalent; OSV is one action pin instead of a
-  # floating CLI. SARIF upload stays off: it needs job-level
-  # security-events: write, which Scorecard Token-Permissions flags as a
-  # new high on this PR. fail-on-vuln still gates the job.
+  # SHA, fails the job on known-vulnerable locked deps. Inline docker
+  # action rather than Google's nested reusable: `upload-sarif: false`
+  # there caused a workflow startup_failure, and SARIF needs
+  # security-events: write which Scorecard Token-Permissions flags.
   lockfile-audit:
     name: Lockfile audit (OSV)
+    runs-on: ubuntu-latest
     permissions:
       contents: read
-    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
-    with:
-      fail-on-vuln: true
-      upload-sarif: false
-      scan-args: |-
-        --lockfile=uv.lock
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.2.2
+
+      - name: Scan locked uv.lock with OSV-Scanner
+        uses: google/osv-scanner-action/osv-scanner-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
+        with:
+          scan-args: |-
+            --lockfile=uv.lock
