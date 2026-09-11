@@ -7,7 +7,7 @@ output, check these first:
 
 - **[docs/](docs/)**: OKF-compliant docs (`flydocs build`/`flydocs lint` to render/validate)
 - **[docs/index.md](docs/index.md)**: navigation index
-- **[.claude/skills/ansible-plaibook-review/SKILL.md](.claude/skills/ansible-plaibook-review/SKILL.md)**: how to run `review.yml`/`bug_pipeline.yml` and read `~/.cache/ansible-plaibook/last_run.json` correctly
+- **[.claude/skills/ansible-plaibook-review/SKILL.md](.claude/skills/ansible-plaibook-review/SKILL.md)**: how to run `plai review` / `plaibook review` (and the AAP path `ansible-playbook review.yml`) and read `last_run.<run_id>.json` correctly
 - **[README.md](README.md)**: project overview (separate from `docs/` for now, not flydocs-generated)
 
 ## What This Is
@@ -127,8 +127,8 @@ uv run pytest                                             # full Python unit sui
 uv run pytest action_plugins/test_foo.py                  # single file
 uv run ./scripts/run_playbook_tests.sh                    # offline Ansible playbook test suite
 uv run ansible-playbook review.yml --syntax-check
-uv run ansible-playbook review.yml -e review_type=commit         # fast, cheap, local
-uv run ansible-playbook review.yml -e review_targets_raw="org/repo!N" # full PR/MR review
-# From outside the checkout, keep the caller's cwd:
-# uv run --directory /path/to/ansible-plaibook ansible-playbook review.yml ...
+uv run plai review --commit                               # fast, cheap, local (same as plaibook review --commit)
+uv run plai review org/repo!N                             # full PR/MR review
+# AAP / EE keep ansible-playbook review.yml. From outside the checkout:
+# uv run --directory /path/to/ansible-plaibook plai review --commit
 ```

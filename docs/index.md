@@ -26,7 +26,7 @@ and tested like any other piece of infrastructure.
 
 ## Where to go next
 
-- **[Getting Started](getting-started.md)**: run your first review and read its output correctly.
+- **[Getting Started](getting-started.md)**: `plai review` / `plaibook review`, and `ansible-playbook review.yml` for AAP.
 - **[Architecture](architecture.md)**: how the pipeline is built: the review role, domain-specific steering, and the independent verification pass.
 - **[Reference](reference.md)**: every variable that controls a run.
 

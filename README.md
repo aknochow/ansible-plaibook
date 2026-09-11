@@ -10,6 +10,13 @@ every time, invocable from a terminal, a git hook, or an AAP job
 template. Expect more playbooks here over time as other harness skills
 get the same treatment.
 
+Locally, `uv sync` / `pip install -e .` from this checkout installs the
+**`plaibook`** package (not `plai`, taken on PyPI, and not
+`ansible-plaibook`) and two console scripts that share one entry point:
+`plaibook` and `plai`. `plai review --commit` is the default UX;
+`ansible-playbook review.yml` remains the AAP path. v1 does not publish
+to PyPI.
+
 ## Why Ansible?
 
 The question everyone asks first. A few concrete reasons this isn't
@@ -106,8 +113,11 @@ One playbook, `review_type` selects the mode (`pr` | `branch` |
    always knows where to look, no timestamp-guessing).
 
 ```bash
+uv run plai review org/repo#123
+uv run plaibook review org/repo#123
+uv run plai review https://gitlab.example.com/org/repo/-/merge_requests/45
+# AAP / EE / power-user path:
 uv run ansible-playbook review.yml -e review_targets_raw="org/repo#123"
-uv run ansible-playbook review.yml -e review_targets_raw="https://gitlab.example.com/org/repo/-/merge_requests/45"
 ```
 
 Runs in an OpenShell sandbox by default (`use_sandbox: true`) since
@@ -124,8 +134,9 @@ calls, just the Security + Functionality/Quality lenses against your
 working tree.
 
 ```bash
-uv run ansible-playbook review.yml -e review_type=commit
-uv run ansible-playbook review.yml -e review_type=commit -e commit_sha=abc1234 -e repo_path=/path/to/repo
+uv run plai review --commit
+uv run plaibook review --commit
+uv run plai review --commit --sha abc1234 --repo /path/to/repo
 ```
 
 Unlike `review_type: pr`/`branch` (which never fail the Ansible run
@@ -174,8 +185,8 @@ to which `resolve_target_*.yml` produced its inputs.
 - `review_type: commit` resolves/validates a local commit directly via
   git, no PR/MR API involved.
 - `review_type: branch` resolves a whole local-path/GitHub/GitLab branch
-  target; it has no CLI-wired caller yet (built ahead of a planned
-  whole-branch/codebase review capability).
+  target (`plai review --branch ...`, or `-e review_type=branch
+  -e branch_review_target=...` on the playbook path).
 
 Domain-specific review steering (tech-stack-specific guidance blocks,
 ported from harness's `domain_steering.md`) live as individual Jinja
