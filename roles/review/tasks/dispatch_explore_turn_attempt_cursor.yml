@@ -3,10 +3,10 @@
 #
 # Same shape as dispatch_explore_turn_attempt_claude_cli.yml: one
 # aknochow.cursor.agent call that explores then reports. Cursor has no
-# parent system_prompt and no output_format json_schema. Subagents cannot
-# see structured_tool (AgentDefinition has no custom_tools), so trusted
-# explore text lives on the parent prompt; report_findings is a
-# structured_tool with explore_findings_schema.
+# parent system_prompt and no output_format json_schema -- trusted
+# explore text is the explore subagent's prompt; report_findings is a
+# structured_tool with explore_findings_schema. AgentDefinition has no
+# custom_tools; keep the tool on the parent and the lens on the subagent.
 #
 # tools: [read, mcp] -- mcp is required for structured_tool (tools=[]
 # hides custom tools); read is the collection's documented filesystem
@@ -25,12 +25,20 @@
 - name: "Cursor: dispatch the explore agent"
   aknochow.cursor.agent:
     api_key: "{{ review_cursor_api_key }}"
-    prompt: "{{ explore_system_prompt }}\n\nDecide whether this change needs checking against the rest of the repo, using read if so, then call report_findings with any additional findings (or an empty list if none). You must call report_findings."
+    prompt: >-
+      Use the explore agent. Decide whether this change needs checking
+      against the rest of the repo, using read if so, then call
+      report_findings with any additional findings (or an empty list
+      if none). You must call report_findings.
     model: "{{ review_explore_cursor_model }}"
     effort: "{{ review_cursor_effort }}"
     cwd: "{{ review_repo_path }}"
     setting_sources: []
     tools: [read, mcp]
+    agents:
+      explore:
+        description: Explore beyond the diff with trusted instructions.
+        prompt: "{{ explore_system_prompt }}"
     structured_tool:
       name: report_findings
       description: Submit additional findings found outside the diff, or an empty list.

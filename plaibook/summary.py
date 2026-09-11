@@ -23,12 +23,19 @@ def _summary_file_for_target(target: dict[str, Any]) -> Path | None:
     ``summary_run_scoped_path`` is this invocation's own file. Concurrent
     reviews of the same SHA can overwrite the canonical path, so a CLI
     that enriches from it can print another run's scores with no error.
+
+    If the run-scoped path is advertised but the file is missing, do not
+    fall through to the canonical path — last_run already carries this
+    run's verdict/score from persist, and using summary.json would mix
+    in another run.
     """
-    for key in ("summary_run_scoped_path", "summary_path"):
-        raw = target.get(key) or ""
-        if not raw:
-            continue
-        path = Path(raw)
+    run_scoped = target.get("summary_run_scoped_path") or ""
+    if run_scoped:
+        path = Path(run_scoped)
+        return path if path.is_file() else None
+    canonical = target.get("summary_path") or ""
+    if canonical:
+        path = Path(canonical)
         if path.is_file():
             return path
     return None
