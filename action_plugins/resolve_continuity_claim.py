@@ -36,15 +36,38 @@ exists):
 """
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
+
 from ansible.plugins.action import ActionBase
 
 
-def resolve_continuity_claim(claim_input: dict, prior_round_findings: list[dict]) -> dict:
-    continues_finding_id = claim_input.get("continues_finding_id")
+def _coerce_finding_dict(finding) -> dict | None:
+    """Coerce a finding record into a dict, parsing JSON/stringified objects if needed."""
+    if isinstance(finding, Mapping):
+        return dict(finding)
+    if isinstance(finding, str):
+        try:
+            parsed = json.loads(finding)
+            if isinstance(parsed, Mapping):
+                return dict(parsed)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return None
+
+
+def resolve_continuity_claim(claim_input: dict, prior_round_findings: list) -> dict:
+    continues_finding_id = claim_input.get("continues_finding_id") if isinstance(claim_input, Mapping) else None
     if continues_finding_id is None:
         return {"should_audit": False, "claimed_prior_finding": None}
 
-    matches = [f for f in prior_round_findings if f.get("finding_id") == continues_finding_id]
+    coerced_findings = []
+    for f in prior_round_findings or []:
+        coerced = _coerce_finding_dict(f)
+        if coerced is not None:
+            coerced_findings.append(coerced)
+
+    matches = [f for f in coerced_findings if f.get("finding_id") == continues_finding_id]
     if not matches:
         return {"should_audit": False, "claimed_prior_finding": None}
 

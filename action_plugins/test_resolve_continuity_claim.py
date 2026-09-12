@@ -112,3 +112,24 @@ def test_action_module_requires_both_args():
     result = _run_action_module({"claim_input": {}})
     assert result["failed"] is True
     assert "prior_round_findings" in result["msg"]
+
+
+def test_string_or_tagged_str_in_prior_round_findings_coerced_cleanly():
+    import json
+
+    # JSON stringified finding (simulating Ansible template round-tripping)
+    finding_json = json.dumps({"finding_id": "prior-json", "file": "c.py", "line": 30})
+    # Plain unparseable string (should be skipped rather than crashing with AttributeError on .get)
+    malformed_str = "not a valid json finding"
+
+    findings = [malformed_str, finding_json, PRIOR_FINDINGS[0]]
+
+    # Claims matching the json-stringified finding
+    result = resolve_continuity_claim({"continues_finding_id": "prior-json"}, findings)
+    assert result["should_audit"] is True
+    assert result["claimed_prior_finding"] == {"finding_id": "prior-json", "file": "c.py", "line": 30}
+
+    # Claims matching nothing when string elements exist
+    result_none = resolve_continuity_claim({"continues_finding_id": "nonexistent"}, findings)
+    assert result_none == {"should_audit": False, "claimed_prior_finding": None}
+
