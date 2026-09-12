@@ -1,5 +1,7 @@
 # ansible-plaibook
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/aknochow/ansible-plaibook/badge)](https://scorecard.dev/viewer/?uri=github.com/aknochow/ansible-plaibook)
+
 AI-powered code review, running as a deterministic, unattended Ansible
 playbook, not a chat-based agent session. It ports the methodology of
 an interactive `code-review` skill into pure Ansible: dispatch
