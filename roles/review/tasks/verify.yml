@@ -63,7 +63,7 @@
         - name: Extract the prior round's identity-tracked findings
           ansible.builtin.set_fact:
             prior_round_findings: >-
-              {{ (_prior_summary_raw.content | b64decode | from_json).findings
+              {{ (_prior_summary_raw.content | b64decode | from_json).findings | default([])
                  | selectattr('finding_id', 'defined') | selectattr('finding_id') | list }}
       rescue:
         - name: Treat an unreadable or pre-finding-id prior summary.json as no prior structured findings
