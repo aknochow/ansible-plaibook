@@ -143,7 +143,10 @@ def test_pretty_and_json_from_last_run(tmp_path):
                         "severity": "Major",
                         "file": "plaibook/cli.py",
                         "line": 42,
-                        "description": "Default stdout only prints finding counts. A human never sees why the score dropped.",
+                        "description": (
+                            "Default stdout only prints finding counts. "
+                            "A human never sees why the score dropped."
+                        ),
                     },
                     {
                         "severity": "Minor",
