@@ -34,6 +34,7 @@ def _args(**overrides):
         verbose=False,
         as_json=False,
         as_yaml=False,
+        full=False,
         review_extra_notes=None,
         post=False,
         fail_on_regressions=None,
@@ -48,6 +49,11 @@ def test_parser_plai_help_identifies_plaibook():
     help_text = parser.format_help()
     assert "plaibook CLI" in help_text
     assert "plai" in help_text
+    assert "plai review org/repo#123" in help_text
+    assert "plai review --commit" in help_text
+    assert "plai review org/repo#123 --json" in help_text
+    assert "uv run plai" not in help_text
+    assert "/10" not in help_text
 
 
 def test_plaibook_and_plai_share_the_same_main():
@@ -132,7 +138,20 @@ def test_pretty_and_json_from_last_run(tmp_path):
                 "score_overall": 66.7,
                 "scores": {"functionality": 80.0, "security": 50.0, "quality": 70.0},
                 "findings_count": {"critical": 0, "major": 1, "minor": 2, "nit": 0},
-                "findings": [{"severity": "Major", "file": "x.py"}],
+                "findings": [
+                    {
+                        "severity": "Major",
+                        "file": "plaibook/cli.py",
+                        "line": 42,
+                        "description": "Default stdout only prints finding counts. A human never sees why the score dropped.",
+                    },
+                    {
+                        "severity": "Minor",
+                        "file": "docs/getting-started.md",
+                        "line": 86,
+                        "description": "Example score still looks like a /10 scale.",
+                    },
+                ],
             }
         )
     )
@@ -158,8 +177,19 @@ def test_pretty_and_json_from_last_run(tmp_path):
     assert "66.7%" in pretty
     assert "security 50.0%" in pretty
     assert "1 major" in pretty
+    assert "Major  plaibook/cli.py:42" in pretty
+    assert "Default stdout only prints finding counts" in pretty
+    assert "A human never sees why the score dropped" in pretty
+    assert "Example score still looks like a /10 scale." not in pretty
+    assert "2 minor" in pretty
     assert "last_run:" in pretty
+    assert "findings.md:" in pretty
     assert document["targets"][0]["findings"][0]["severity"] == "Major"
+    full = format_pretty(document, full=True)
+    assert "full rendered report" not in full  # no report field in this fixture
+    document["targets"][0]["report"] = "## Code Review\n\n### Findings\nfull rendered report"
+    assert "full rendered report" in format_pretty(document, full=True)
+    assert "full rendered report" not in format_pretty(document)
 
 
 def test_enrich_prefers_run_scoped_summary_over_canonical(tmp_path):

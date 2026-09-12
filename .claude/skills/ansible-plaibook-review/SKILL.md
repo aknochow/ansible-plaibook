@@ -17,7 +17,10 @@ as **`plai`** (same `main`). The pip/uv distribution name is `plaibook`
 (not `plai`, taken on PyPI, and not `ansible-plaibook`). After
 `uv sync` / `pip install -e .` from this checkout, `plai review ...` and
 `plaibook review ...` are equivalent. Raw `ansible-playbook review.yml`
-stays the AAP / execution-environment / power-user path.
+stays the AAP / execution-environment / power-user path. See
+[`plaibook/README.md`](../../../plaibook/README.md) for the CLI product
+page. If `.venv` is not on PATH, `uv run plai` is documented in
+CONTRIBUTING only.
 
 ## How to invoke — `plai` / `plaibook`, don't cd
 
@@ -28,24 +31,26 @@ parents) and leaves the caller's cwd alone, so `review --commit` still
 reviews the repo you are in.
 
 ```bash
-uv sync --extra dev
-uv run plai review org/repo#123
-uv run plaibook review org/repo#123          # identical
-uv run plai review --commit
-uv run plai review --commit --repo /path/to/repo --sha abc1234
-uv run plai review org/repo#123 --json       # structured summary on stdout
-uv run plai review org/repo#123 --yaml
-uv run plai review org/repo#123 -v           # full ansible-playbook output
+plai review org/repo#123
+plaibook review org/repo#123          # identical
+plai review --commit
+plai review --commit --repo /path/to/repo --sha abc1234
+plai review org/repo#123 --json       # structured last_run + summary on stdout
+plai review org/repo#123 --yaml
+plai review org/repo#123 -v           # full ansible-playbook output
+plai review org/repo#123 --full       # pretty review plus findings.md
 ```
 
-Default is quiet: ansible task spam is hidden. The pretty footer is
-verdict, overall score, per-lens scores, finding counts, cost, and the
-run-scoped `last_run.<run_id>.json` path. `--json` / `--yaml` emit only
-that structured document on stdout (no pretty block) so skills can pipe
-them. The CLI shells out to `ansible-playbook` and **reads
-`last_run.<run_id>.json`** (and `summary.json` via `summary_path`). It
-does not scrape playbook stdout for the score and does not recompute
-verdicts.
+Default stdout is a readable review: target, verdict, 0–100 scores,
+Critical/Major with file:line + title + short why; minor/nit stay as
+counts; footer is cost, run-scoped `last_run.<run_id>.json`, and the
+path to `findings.md`. A score line plus finding counts is not a
+review. `--json` / `--yaml` emit the structured document (what agents
+parse). `-v` passes through ansible-playbook. `--full` or `-v` also
+dumps the findings.md report. The CLI shells out to `ansible-playbook`
+and **reads `last_run.<run_id>.json`** (preferring
+`summary_run_scoped_path` from #40). It does not scrape playbook stdout
+or recompute verdicts.
 
 `review_type: commit` still **fails non-zero** on `NEEDS_CHANGES` with a
 real Critical/Major finding. `plai review --commit` and
@@ -61,11 +66,11 @@ per-worktree alternative; `ANSIBLE_REVIEW_AGENT_FAMILY` still works.
 None of those bake a provider into the repo. Extra-vars still win.
 
 If a given `agent_family` needs an optional extra from `pyproject.toml`
-(a provider SDK that is not in the default dependency set), pass it on
-the same `uv run` so the playbook interpreter can import it:
-`uv run --extra <name> plai review ...`. `uv run` without that extra
-will sync it *out* of `.venv`. XDG/host_vars do not install extras —
-they only set Ansible variables.
+(a provider SDK that is not in the default dependency set), install that
+extra in the checkout env (`uv sync --extra <name>`). Extra-vars still
+win. XDG/host_vars do not install extras — they only set Ansible
+variables. `uv run --extra <name> plai review ...` is the CONTRIBUTING
+path when `.venv` is not on PATH.
 
 AAP Job Templates and execution environments keep invoking
 `ansible-playbook review.yml` directly (see the playbook-form examples
@@ -82,11 +87,11 @@ handoff.ansible-plaibook-bug-fix-pipeline-deferred.yaml.)
 ### `review_type: pr` (default) — review a GitHub PR or GitLab MR
 
 ```bash
-uv run plai review org/repo#123
-uv run plai review https://github.com/org/repo/pull/12
-uv run plai review org/repo!34
+plai review org/repo#123
+plai review https://github.com/org/repo/pull/12
+plai review org/repo!34
 # AAP / EE / power-user path (same playbook):
-uv run ansible-playbook review.yml -e review_targets_raw="org/repo#123"
+ansible-playbook review.yml -e review_targets_raw="org/repo#123"
 ```
 
 - `review_targets_raw` accepts a GitHub PR URL, a GitLab MR URL, or a
@@ -101,7 +106,7 @@ uv run ansible-playbook review.yml -e review_targets_raw="org/repo#123"
   not a GitLab subgroup** (e.g. `group/subgroup/project!N`) — use the
   full URL form for a subgrouped project, which does support it.
 - For **multiple targets** in one run, use the playbook JSON-list form:
-  `uv run ansible-playbook review.yml -e '{"review_targets": ["org/repo#1", "org/repo#2"]}'`
+  `ansible-playbook review.yml -e '{"review_targets": ["org/repo#1", "org/repo#2"]}'`
 - Runs in an OpenShell sandbox by default (`use_sandbox: true` —
   `library/run_checklist.py` executes commands parsed out of a
   source-branch-controlled `CHECKLIST.md`, i.e. untrusted input). Set
@@ -119,11 +124,11 @@ uv run ansible-playbook review.yml -e review_targets_raw="org/repo#123"
 ### `review_type: commit` — fast local single-commit check
 
 ```bash
-uv run plai review --commit
-uv run plaibook review --commit
-uv run plai review --commit --sha abc1234 --repo /path/to/repo
+plai review --commit
+plaibook review --commit
+plai review --commit --sha abc1234 --repo /path/to/repo
 # AAP / EE / power-user path (same playbook):
-uv run ansible-playbook review.yml -e review_type=commit
+ansible-playbook review.yml -e review_type=commit
 ```
 
 - Both `--sha`/`--repo` (`commit_sha`/`repo_path`) are optional:
@@ -138,15 +143,15 @@ uv run ansible-playbook review.yml -e review_type=commit
   "successful" playbook run). `review_type: commit` instead **fails
   (non-zero exit)** when the verdict is `NEEDS_CHANGES` with a real
   Critical/Major finding, so a hook can gate directly on the exit code:
-  `if ! uv run plai review --commit; then ...; fi`.
+  `if ! plai review --commit; then ...; fi`.
   Set `--no-fail-on-regressions` (or `-e fail_on_regressions=false`) to
   always exit 0 regardless of verdict.
 
 ### `review_type: branch` — whole-branch/codebase audit
 
 ```bash
-uv run plai review --branch org/repo@main
-uv run ansible-playbook review.yml -e review_type=branch -e branch_review_target=org/repo@main
+plai review --branch org/repo@main
+ansible-playbook review.yml -e review_type=branch -e branch_review_target=org/repo@main
 ```
 
 `roles/review/` has always supported this; `plai review --branch` is
@@ -157,8 +162,8 @@ audit.
 
 | Situation | Command |
 |---|---|
-| Someone (or something) opened a GitHub PR or GitLab MR and it needs a review | `uv run plai review org/repo#123` (default `review_type: pr`) |
-| You just made a local commit and want a fast sanity check before pushing/opening a PR | `uv run plai review --commit` |
+| Someone (or something) opened a GitHub PR or GitLab MR and it needs a review | `plai review org/repo#123` (default `review_type: pr`) |
+| You just made a local commit and want a fast sanity check before pushing/opening a PR | `plai review --commit` |
 
 ## Reading the output — do this, not stdout-grepping
 

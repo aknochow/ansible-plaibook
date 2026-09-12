@@ -23,11 +23,18 @@ USAGE_EPILOG = """\
 plai and plaibook are the same program. The pip/uv distribution name is plaibook
 (not plai, which is taken on PyPI, and not ansible-plaibook).
 
-v1 wraps review.yml from a plaibook checkout (`uv sync` / `pip install -e .`).
-It shells out to ansible-playbook and reads last_run.<run_id>.json. It does not
-rescore findings or scrape playbook stdout for the verdict.
+v1 locates review.yml in an ansible-plaibook checkout (--root / PLAIBOOK_ROOT /
+package parents / cwd). It shells out to ansible-playbook and reads
+last_run.<run_id>.json. It does not rescore findings or scrape playbook stdout.
+It does not yet run ansible-playbook aknochow.plaibook.review (that FQCN lands
+when plaibook is a collection).
 
-AAP / execution-environment jobs keep calling ansible-playbook review.yml directly.
+Default stdout is a readable review (target, verdict, 0-100 scores,
+Critical/Major with file:line + why). --json / --yaml emit the structured
+last_run + summary fields. -v passes through ansible-playbook. --full (or -v)
+adds the findings.md report. A score line plus finding counts is not a review.
+
+AAP / execution-environment jobs keep calling ansible-playbook review.yml.
 
 Examples:
   plai review org/repo#123
@@ -37,6 +44,7 @@ Examples:
   plai review org/repo#123 --json
   plai review org/repo#123 --yaml
   plai review org/repo#123 -v
+  plai review org/repo#123 --full
 """
 
 
@@ -65,7 +73,7 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
     review = sub.add_parser(
         "review",
         help="Run review.yml (pr / commit / branch).",
-        description="Wrap ansible-playbook review.yml and print the structured summary.",
+        description="Wrap ansible-playbook review.yml and print a readable review.",
     )
     review.add_argument(
         "target",
@@ -112,6 +120,11 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
         action="store_true",
         dest="as_yaml",
         help="Write the structured summary to stdout as YAML (no pretty block).",
+    )
+    review.add_argument(
+        "--full",
+        action="store_true",
+        help="Include the full findings.md report after the pretty review.",
     )
     review.add_argument(
         "--notes",
@@ -182,7 +195,7 @@ def _emit_summary(document: dict, args: argparse.Namespace) -> None:
     if args.as_yaml:
         dump_yaml(document, sys.stdout)
         return
-    sys.stdout.write(format_pretty(document))
+    sys.stdout.write(format_pretty(document, full=bool(getattr(args, "full", False) or args.verbose)))
 
 
 def _progress_line(args: argparse.Namespace) -> str:

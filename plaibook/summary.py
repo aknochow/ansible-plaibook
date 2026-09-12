@@ -82,7 +82,12 @@ def dump_yaml(document: dict[str, Any], stream: TextIO) -> None:
     yaml.safe_dump(document, stream, sort_keys=True, default_flow_style=False)
 
 
-def format_pretty(document: dict[str, Any]) -> str:
+def format_pretty(document: dict[str, Any], *, full: bool = False) -> str:
+    """Human review: target, verdict, 0-100 scores, Critical/Major bodies.
+
+    Minor/nit stay as counts. Full findings.md is not dumped unless
+    ``full`` (``--full`` / ``-v``).
+    """
     lines: list[str] = []
     targets = document.get("targets") or []
     if not targets:
@@ -91,7 +96,7 @@ def format_pretty(document: dict[str, Any]) -> str:
         lines.append(f"status: {status}")
         if error:
             lines.append(error)
-        lines.extend(_footer(document))
+        lines.extend(_footer(document, targets))
         return "\n".join(lines) + "\n"
 
     for target in targets:
@@ -120,18 +125,65 @@ def format_pretty(document: dict[str, Any]) -> str:
             if lens_bits or extra:
                 lines.append("  " + "  ".join(lens_bits + extra))
 
+        findings = list(target.get("findings") or [])
         counts = target.get("findings_count")
-        if not counts and target.get("findings"):
-            counts = _count_findings(target["findings"])
+        if not counts and findings:
+            counts = _count_findings(findings)
         if counts:
             bits = [f"{counts.get(sev, 0)} {sev}" for sev in SEVERITY_ORDER]
             lines.append("  findings: " + ", ".join(bits))
 
-    lines.extend(_footer(document))
+        for finding in findings:
+            if str(finding.get("severity") or "").lower() not in ("critical", "major"):
+                continue
+            if str(finding.get("evidence_status") or "").lower() == "refuted":
+                continue
+            lines.extend(_format_point_finding(finding))
+
+        if full:
+            report = (target.get("report") or "").strip()
+            if report:
+                lines.append("")
+                lines.append(report)
+
+    lines.extend(_footer(document, targets))
     return "\n".join(lines) + "\n"
 
 
-def _footer(document: dict[str, Any]) -> list[str]:
+def _format_point_finding(finding: dict[str, Any]) -> list[str]:
+    sev = str(finding.get("severity") or "Finding").capitalize()
+    path = finding.get("file") or finding.get("path") or "?"
+    line = finding.get("line")
+    loc = f"{path}:{line}" if line not in (None, "") else str(path)
+    title, why = _finding_title_why(finding)
+    out = [f"  {sev}  {loc}  {title}"]
+    if why:
+        out.append(f"    {why}")
+    return out
+
+
+def _finding_title_why(finding: dict[str, Any]) -> tuple[str, str]:
+    title = str(finding.get("title") or "").strip()
+    description = str(finding.get("why") or finding.get("description") or "").strip()
+    if title:
+        why = description if description != title else ""
+        return title, _short_why(why)
+    if not description:
+        return "untitled finding", ""
+    sentence, _, rest = description.partition(". ")
+    if rest:
+        return _short_why(sentence, limit=120), _short_why(rest)
+    return _short_why(description, limit=120), ""
+
+
+def _short_why(text: str, limit: int = 200) -> str:
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[: limit - 1].rstrip() + "…"
+
+
+def _footer(document: dict[str, Any], targets: list[dict[str, Any]] | None = None) -> list[str]:
     lines: list[str] = []
     cost = document.get("cost_usd")
     if cost is not None and cost != "":
@@ -142,6 +194,12 @@ def _footer(document: dict[str, Any]) -> list[str]:
     path = document.get("last_run_path")
     if path:
         lines.append(f"  last_run: {path}")
+    for target in targets or []:
+        findings_md = (
+            target.get("findings_run_scoped_path") or target.get("findings_path") or ""
+        )
+        if findings_md:
+            lines.append(f"  findings.md: {findings_md}")
     return lines
 
 

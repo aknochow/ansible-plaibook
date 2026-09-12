@@ -11,6 +11,11 @@ uv run ansible-galaxy collection install ansible.posix
 # uv sync installs both console scripts: plaibook and plai (same main)
 ```
 
+If the project's `.venv` is not on PATH, invoke the CLI as
+`uv run plai review …` from this checkout. That is the contributor
+path, not the product. After the env is on PATH, the commands are
+`plai review org/repo#123` and `plai review --commit`.
+
 ### Running Tests:
 ```bash
 uv run pytest                                      # Python unit test suite (action plugins, modules, filters, scripts)

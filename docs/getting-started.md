@@ -12,16 +12,19 @@ The short command is **`plai`**. The package and full command are
 **`plaibook`**. They share one entry point. After `uv sync` /
 `pip install -e .` from this checkout, `plai review ...` and
 `plaibook review ...` are the same program. v1 does not upload to
-PyPI; install from the checkout. AAP / execution-environment jobs keep
+PyPI; install from the checkout. See [`plaibook/README.md`](../plaibook/README.md)
+for the CLI product page. Honest `pip install plaibook` waits on
+plaibook-as-a-collection (not done) plus provider wheels (on `main`
+now). AAP / execution-environment jobs keep
 calling `ansible-playbook review.yml` directly.
 
 ## Review a GitHub PR or GitLab MR
 
 ```bash
-uv run plai review org/repo#123
-uv run plaibook review org/repo#123
-uv run plai review https://github.com/org/repo/pull/12
-uv run plai review org/repo!34
+plai review org/repo#123
+plaibook review org/repo#123
+plai review https://github.com/org/repo/pull/12
+plai review org/repo!34
 ```
 
 These assume the plaibook env is installed (`uv sync` from the
@@ -41,15 +44,15 @@ targets at once on the playbook path as a newline-separated string, or
 use the JSON-list form:
 
 ```bash
-uv run ansible-playbook review.yml -e '{"review_targets": ["org/repo#1", "org/repo#2"]}'
+ansible-playbook review.yml -e '{"review_targets": ["org/repo#1", "org/repo#2"]}'
 ```
 
 ## Review a single local commit: fast and cheap
 
 ```bash
-uv run plai review --commit
-uv run plaibook review --commit
-uv run plai review --commit --sha abc1234 --repo /path/to/repo
+plai review --commit
+plaibook review --commit
+plai review --commit --sha abc1234 --repo /path/to/repo
 ```
 
 Both arguments are optional (`--sha` defaults to `HEAD`, `--repo` to
@@ -62,11 +65,19 @@ verdict with a real Critical/Major finding exits non-zero, on both
 
 ## CLI output
 
-Default is quiet (no ansible task wall). `-v` prints full
-`ansible-playbook` output. `--json` and `--yaml` write the structured
-summary on stdout and nothing else, so skills can pipe them. The CLI
-reads `~/.cache/ansible-plaibook/last_run.<run_id>.json`; it does not
-scrape playbook stdout or recompute scores.
+Default stdout is a readable review, not ansible TASK spam and not
+`last_run.json`. It prints the target, verdict, 0–100 scores,
+Critical/Major findings with `file:line` + title + short why, minor/nit
+as counts, then a footer (cost, run-scoped `last_run.<run_id>.json`,
+path to `findings.md`). A score line plus finding counts is not a
+review.
+
+`-v` passes through `ansible-playbook` and includes the full
+findings.md report. `--full` dumps that report without the TASK wall.
+`--json` and `--yaml` write the structured last_run + summary fields
+on stdout (what agents parse). The CLI reads
+`~/.cache/ansible-plaibook/last_run.<run_id>.json`; it does not scrape
+playbook stdout or recompute scores.
 
 ## Reading the playbook artifacts
 
@@ -83,7 +94,7 @@ Every run writes one predictable file, overwritten each run:
       "target": "org/repo#123",
       "report": "<full rendered findings.md text>",
       "verdict": "READY_FOR_HUMAN_REVIEW | NEEDS_CHANGES",
-      "score": 8.3,
+      "score": 83.0,
       "summary_path": "/path/to/summary.json",
       "findings_path": "/path/to/findings.md"
     }
@@ -132,7 +143,7 @@ Reviewing is safe to automate by default; posting is a write to shared
 state and requires explicit opt-in:
 
 ```bash
-uv run plai review org/repo!34 --post
+plai review org/repo!34 --post
 # AAP / EE:
-uv run ansible-playbook review.yml -e review_targets_raw="org/repo!34" -e post_results=true
+ansible-playbook review.yml -e review_targets_raw="org/repo!34" -e post_results=true
 ```

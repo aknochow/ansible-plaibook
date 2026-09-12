@@ -15,9 +15,11 @@ get the same treatment.
 Locally, `uv sync` / `pip install -e .` from this checkout installs the
 **`plaibook`** package (not `plai`, taken on PyPI, and not
 `ansible-plaibook`) and two console scripts that share one entry point:
-`plaibook` and `plai`. `plai review --commit` is the default UX;
+`plaibook` and `plai`. See [`plaibook/README.md`](plaibook/README.md)
+for the CLI product page. `plai review org/repo#123` is the default UX;
 `ansible-playbook review.yml` remains the AAP path. v1 does not publish
-to PyPI.
+to PyPI. Honest `pip install plaibook` waits on plaibook-as-a-collection
+(not done) plus provider wheels (already on `main`).
 
 ## Why Ansible?
 
@@ -115,11 +117,11 @@ One playbook, `review_type` selects the mode (`pr` | `branch` |
    always knows where to look, no timestamp-guessing).
 
 ```bash
-uv run plai review org/repo#123
-uv run plaibook review org/repo#123
-uv run plai review https://gitlab.example.com/org/repo/-/merge_requests/45
+plai review org/repo#123
+plaibook review org/repo#123
+plai review https://gitlab.example.com/org/repo/-/merge_requests/45
 # AAP / EE / power-user path:
-uv run ansible-playbook review.yml -e review_targets_raw="org/repo#123"
+ansible-playbook review.yml -e review_targets_raw="org/repo#123"
 ```
 
 Runs in an OpenShell sandbox by default (`use_sandbox: true`) since
@@ -136,9 +138,9 @@ calls, just the Security + Functionality/Quality lenses against your
 working tree.
 
 ```bash
-uv run plai review --commit
-uv run plaibook review --commit
-uv run plai review --commit --sha abc1234 --repo /path/to/repo
+plai review --commit
+plaibook review --commit
+plai review --commit --sha abc1234 --repo /path/to/repo
 ```
 
 Unlike `review_type: pr`/`branch` (which never fail the Ansible run
