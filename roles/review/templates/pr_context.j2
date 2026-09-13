@@ -14,7 +14,7 @@
   - FAILING: **{{ check.name }}** ({{ check.url }})
 {% endfor %}
 
-{% if _pr_context.description %}
+{% if _pr_context.description and not (review_withhold_pr_description | default(false) | bool) %}
 ## Description
 
 {{ _pr_context.description }}
