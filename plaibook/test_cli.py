@@ -18,6 +18,7 @@ from plaibook.cli import (
 )
 from plaibook.playbook import (
     build_ansible_command,
+    enrich_review_env,
     find_playbook_root,
     generate_run_id,
     last_run_path,
@@ -265,6 +266,39 @@ def test_build_ansible_command_debug_passes_vv(tmp_path):
     assert command[3] == "-e"
 
 
+def test_enrich_review_env_openshell_login_uses_sidecar_and_auth_json(tmp_path, monkeypatch):
+    class _Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc: object) -> bool:
+            return False
+
+    monkeypatch.setattr("socket.create_connection", lambda *a, **k: _Conn())
+    monkeypatch.setattr(
+        "plaibook.config.running_inside_openshell",
+        lambda env=None: True,
+    )
+    xdg = tmp_path / "xdg"
+    (xdg / "cursor").mkdir(parents=True)
+    (xdg / "cursor" / "auth.json").write_text(
+        '{"apiKey": "crsr_test_placeholder_not_a_real_key"}',
+        encoding="utf-8",
+    )
+    env = {
+        "CURSOR_API_KEY": "openshell-not-a-cursor-key",
+        "OPENSHELL_SANDBOX": "cursor-dev-2",
+        "XDG_CONFIG_HOME": str(xdg),
+        "HOME": str(tmp_path),
+    }
+    out = enrich_review_env(dict(env))
+    assert out["CURSOR_AGENT"] == "1"
+    assert out["CURSOR_API_KEY"].startswith("crsr")
+    assert out["CURSOR_BACKEND_URL"] == "http://127.0.0.1:18080"
+    assert out["NODE_USE_ENV_PROXY"] == "0"
+    assert "127.0.0.1" in out["NO_PROXY"]
+
+
 def test_find_playbook_root_prefers_env(tmp_path, monkeypatch):
     checkout = tmp_path / "ansible-plaibook"
     checkout.mkdir()
@@ -371,6 +405,22 @@ def test_pretty_explains_same_commit_cache_hit():
     assert "$0.00 is expected" in pretty
     assert "Re-run with -f to force" in pretty
     assert "$0.0000" in pretty
+
+
+def test_pretty_network_failure_notes_sidecar_and_proxy():
+    pretty = format_pretty(
+        {
+            "status": "failed",
+            "error": "Cursor agent failed to start: internal: Network request failed",
+            "cost_usd": 0,
+            "cursor_sidecar": False,
+            "cursor_http1_proxy": True,
+            "targets": [],
+        }
+    )
+    assert "Network request failed" in pretty
+    assert "cursor sidecar: no" in pretty
+    assert "local HTTP/1.1 proxy: yes" in pretty
 
 
 def test_enrich_prefers_run_scoped_summary_over_canonical(tmp_path):
@@ -712,3 +762,58 @@ def test_wait_spinner_reads_progress_file(tmp_path, monkeypatch):
     text = "".join(stream.buf)
     assert "  lenses" in text
     assert "  explore" in text
+
+
+def test_looks_like_cursor_api_key():
+    from plaibook.config import looks_like_cursor_api_key
+
+    assert looks_like_cursor_api_key("crsr_abc")
+    assert looks_like_cursor_api_key("key_abc")
+    assert not looks_like_cursor_api_key("openshell-token")
+    assert not looks_like_cursor_api_key("")
+    assert not looks_like_cursor_api_key(None)
+
+
+def test_resolve_cursor_api_key_prefers_auth_json_over_openshell_token(tmp_path, monkeypatch):
+    from plaibook.config import resolve_cursor_api_key
+
+    auth = tmp_path / "cursor" / "auth.json"
+    auth.parent.mkdir()
+    auth.write_text('{"apiKey": "crsr_from_file_xxxxxxxxxxxxxxxxxxxxx"}', encoding="utf-8")
+    env = {
+        "XDG_CONFIG_HOME": str(tmp_path),
+        "CURSOR_API_KEY": "openshell-not-a-cursor-key",
+    }
+    assert resolve_cursor_api_key(env) == "crsr_from_file_xxxxxxxxxxxxxxxxxxxxx"
+
+
+def test_resolve_cursor_api_key_keeps_real_env_key(tmp_path):
+    from plaibook.config import resolve_cursor_api_key
+
+    env = {
+        "XDG_CONFIG_HOME": str(tmp_path),
+        "CURSOR_API_KEY": "crsr_already_set_xxxxxxxxxxxxxxxxxxxxxx",
+    }
+    assert resolve_cursor_api_key(env) == "crsr_already_set_xxxxxxxxxxxxxxxxxxxxxx"
+
+
+def test_enrich_replaces_openshell_token_and_sets_cursor_agent(tmp_path, monkeypatch):
+    auth = tmp_path / "cursor" / "auth.json"
+    auth.parent.mkdir()
+    auth.write_text('{"apiKey": "crsr_from_file_xxxxxxxxxxxxxxxxxxxxx"}', encoding="utf-8")
+    monkeypatch.setattr("plaibook.config.running_inside_openshell", lambda env=None: True)
+    out = enrich_review_env(
+        {
+            "XDG_CONFIG_HOME": str(tmp_path),
+            "CURSOR_API_KEY": "openshell-not-a-cursor-key",
+            "OPENSHELL_SANDBOX": "1",
+        }
+    )
+    assert out["CURSOR_API_KEY"] == "crsr_from_file_xxxxxxxxxxxxxxxxxxxxx"
+    assert out["CURSOR_AGENT"] == "1"
+
+
+def test_enrich_does_not_force_cursor_agent_outside_openshell(monkeypatch):
+    monkeypatch.setattr("plaibook.config.running_inside_openshell", lambda env=None: False)
+    out = enrich_review_env({})
+    assert "CURSOR_AGENT" not in out

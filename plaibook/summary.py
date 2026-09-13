@@ -96,6 +96,12 @@ def format_pretty(document: dict[str, Any], *, full: bool = False) -> str:
         lines.append(f"status: {status}")
         if error:
             lines.append(error)
+            if "Network request failed" in error:
+                sidecar = "yes" if document.get("cursor_sidecar") else "no"
+                proxy = "yes" if document.get("cursor_http1_proxy") else "no"
+                lines.append(
+                    f"  cursor sidecar: {sidecar}; local HTTP/1.1 proxy: {proxy}"
+                )
         lines.extend(_footer(document, targets))
         return "\n".join(lines) + "\n"
 

@@ -1,0 +1,55 @@
+---
+# Cursor runtime for this controller: a real API key (not an OpenShell
+# token exported as CURSOR_API_KEY) and the local HTTP/1.1 proxy URL.
+# Do not probe 127.0.0.1:18080 from an ansible command module — that
+# child inherits LD_PRELOAD and can miss a healthy listener, leaving
+# the sidecar without CURSOR_BACKEND_URL ("local HTTP/1.1 proxy: no").
+# plai starts the proxy; this playbook consumes CURSOR_BACKEND_URL or
+# OpenShell and always puts the URL on the sidecar/lens environment.
+# no_log on tasks that touch the key. Keep fail_msg free of the secret.
+
+- name: Take CURSOR_BACKEND_URL from the ansible-playbook environment
+  when: lookup('ansible.builtin.env', 'CURSOR_BACKEND_URL') | length > 0
+  ansible.builtin.set_fact:
+    review_cursor_backend_url: "{{ lookup('ansible.builtin.env', 'CURSOR_BACKEND_URL') }}"
+
+- name: Use the local HTTP/1.1 proxy inside an OpenShell sandbox
+  when:
+    - review_cursor_backend_url is not defined or (review_cursor_backend_url | length == 0)
+    - >-
+        (lookup('ansible.builtin.env', 'OPENSHELL_SANDBOX') | length > 0)
+        or (lookup('ansible.builtin.env', 'OPENSHELL_SANDBOX_ID') | length > 0)
+        or (lookup('ansible.builtin.env', 'OPENSHELL_ENDPOINT') | length > 0)
+  ansible.builtin.set_fact:
+    review_cursor_backend_url: http://127.0.0.1:18080
+
+- name: Resolve Cursor API key from env or ~/.config/cursor/auth.json
+  no_log: true
+  ansible.builtin.set_fact:
+    review_cursor_api_key: "{{ _resolved_cursor_api_key }}"
+  vars:
+    _cursor_env_key: "{{ lookup('ansible.builtin.env', 'CURSOR_API_KEY') }}"
+    _cursor_auth_path: "{{ (lookup('ansible.builtin.env', 'XDG_CONFIG_HOME') | default(lookup('ansible.builtin.env', 'HOME') ~ '/.config', true)) }}/cursor/auth.json"
+    _cursor_auth_raw: "{{ lookup('ansible.builtin.file', _cursor_auth_path, errors='ignore') }}"
+    _cursor_auth_key: "{{ ((_cursor_auth_raw | from_json).apiKey | default('')) if (_cursor_auth_raw | length > 0) else '' }}"
+    _resolved_cursor_api_key: "{{ _cursor_env_key if (_cursor_env_key is match('^(crsr|key_)')) else _cursor_auth_key }}"
+
+- name: Fail if there is no Cursor API key
+  ansible.builtin.assert:
+    that:
+      - review_cursor_api_key is defined
+      - review_cursor_api_key is match('^(crsr|key_)')
+    fail_msg: >-
+      No Cursor API key. This login shell may have exported an OpenShell
+      token as CURSOR_API_KEY, which the Cursor SDK rejects as
+      "Network request failed". Sign in so ~/.config/cursor/auth.json
+      has apiKey, or export a Cursor key (crsr_... / key_...).
+
+- name: Cursor process environment for sidecar and lens modules
+  no_log: true
+  ansible.builtin.set_fact:
+    review_cursor_process_environment: "{{ _base | combine(_proxy) }}"
+  vars:
+    _base:
+      CURSOR_API_KEY: "{{ review_cursor_api_key }}"
+    _proxy: "{{ {'CURSOR_BACKEND_URL': review_cursor_backend_url, 'NODE_USE_ENV_PROXY': '0', 'no_proxy': '127.0.0.1,localhost,::1', 'NO_PROXY': '127.0.0.1,localhost,::1'} if ((review_cursor_backend_url | default('')) | length > 0) else {} }}"

@@ -20,19 +20,27 @@ run_case() {
     -u CURSOR_SDK_BRIDGE_AUTH_TOKEN \
     -u CURSOR_SDK_BRIDGE_URL_FILE \
     -u CURSOR_SDK_BRIDGE_TOKEN_FILE \
-    CURSOR_AGENT=1 \
+    -u CURSOR_AGENT \
+    -u OPENSHELL_SANDBOX \
+    -u OPENSHELL_SANDBOX_ID \
+    -u OPENSHELL_ENDPOINT \
     "$@" \
     ansible-playbook "${PLAYBOOK}" -e "expect_sidecar_wanted=${expect}"
 }
 
-run_case "no attach" true
+run_case "cursor-agent no attach" true CURSOR_AGENT=1
+run_case "openshell login no CURSOR_AGENT" true OPENSHELL_SANDBOX=cursor-dev-2
+run_case "iterm no cursor-agent no openshell" false
 run_case "URL+token" false \
-  CURSOR_SDK_BRIDGE_URL=http://127.0.0.1:9 \
-  CURSOR_SDK_BRIDGE_TOKEN=test-not-a-real-token
+    CURSOR_AGENT=1 \
+    CURSOR_SDK_BRIDGE_URL=http://127.0.0.1:9 \
+    CURSOR_SDK_BRIDGE_TOKEN=test-not-a-real-token
 run_case "URL_FILE+TOKEN_FILE" false \
-  CURSOR_SDK_BRIDGE_URL_FILE=/tmp/ansible-plaibook-test-bridge-url \
-  CURSOR_SDK_BRIDGE_TOKEN_FILE=/tmp/ansible-plaibook-test-bridge-token
+    CURSOR_AGENT=1 \
+    CURSOR_SDK_BRIDGE_URL_FILE=/tmp/ansible-plaibook-test-bridge-url \
+    CURSOR_SDK_BRIDGE_TOKEN_FILE=/tmp/ansible-plaibook-test-bridge-token
 run_case "URL_FILE only" true \
-  CURSOR_SDK_BRIDGE_URL_FILE=/tmp/ansible-plaibook-test-bridge-url
+    CURSOR_AGENT=1 \
+    CURSOR_SDK_BRIDGE_URL_FILE=/tmp/ansible-plaibook-test-bridge-url
 
 echo "All sidecar skip scenarios passed."
