@@ -1,0 +1,80 @@
+---
+# Offline regression: screen_diff_comments.yml blanks a multi-language
+# unified diff in place, writes a second artifact, and refuses to
+# proceed if line counts shift. No LLM calls.
+#
+# Usage:
+#   ansible-playbook tests/test_screen_diff_comments.yml
+
+- name: Test comment screening preserves line counts and leaves the original untouched
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    last_run_id: "screentest0000001"
+    review_screen_diff_comments: true
+    review_screen_diff_docstrings: false
+    review_full_diff: |
+      diff --git a/mod.py b/mod.py
+      --- a/mod.py
+      +++ b/mod.py
+      @@ -1,2 +1,4 @@
+      +"""Module docstring stays."""
+       value = "hash # inside"
+      +# lens must not see this
+      +keep = 1
+      diff --git a/vars.yml b/vars.yml
+      --- a/vars.yml
+      +++ b/vars.yml
+      @@ -1 +1,2 @@
+      +# yaml comment
+       url: "https://example.com/#frag"
+
+  tasks:
+    - name: Snapshot the original prepared diff
+      ansible.builtin.set_fact:
+        _original_diff: "{{ review_full_diff }}"
+        _original_line_count: "{{ review_full_diff.splitlines(true) | length }}"
+
+    - name: Run the screening task file
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: screen_diff_comments
+        public: true
+
+    - name: Assert the original prepared diff was not mutated
+      ansible.builtin.assert:
+        that:
+          - review_full_diff == _original_diff
+        fail_msg: "screen_diff_comments.yml mutated review_full_diff"
+        success_msg: "Prepared diff left intact; lenses consume the second artifact."
+
+    - name: Assert the screened copy exists, line counts match, comments are gone
+      ansible.builtin.assert:
+        that:
+          - review_lens_diff_screened | bool
+          - review_lens_diff | length > 0
+          - (review_lens_diff.splitlines(true) | length) == (_original_line_count | int)
+          - "'lens must not see this' not in review_lens_diff"
+          - "'yaml comment' not in review_lens_diff"
+          - "'Module docstring stays.' in review_lens_diff"
+          - "'hash # inside' in review_lens_diff"
+          - "'https://example.com/#frag' in review_lens_diff"
+        fail_msg: "screened lens diff failed the line-count or blanking contract"
+        success_msg: "Screened copy preserves line count, blanks comments, keeps docstrings."
+
+    - name: Assert both artifacts were written
+      ansible.builtin.stat:
+        path: "{{ lookup('env', 'HOME') }}/.cache/ansible-plaibook/{{ item }}"
+      loop:
+        - "diff.full.screentest0000001.patch"
+        - "diff.screened.screentest0000001.patch"
+      register: _screen_artifacts
+
+    - name: Assert both producer and consumer artifacts exist on disk
+      ansible.builtin.assert:
+        that:
+          - _screen_artifacts.results | map(attribute='stat') | map(attribute='exists') | list | unique == [true]
+        fail_msg: "expected paired diff.full.* and diff.screened.* artifacts"
+        success_msg: "Producer (full) and consumer (screened) artifacts both exist."
