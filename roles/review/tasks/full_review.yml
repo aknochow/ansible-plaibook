@@ -40,6 +40,11 @@
             'duration_seconds': [0, (lookup('pipe', 'date +%s') | int) - (_review_phase_started_epoch | int)] | max
           }] }}
 
+# After guardian (which must see the original, comments included) and
+# before lenses. Default off. See screen_diff_comments.yml.
+- name: Prepare the lens-phase diff (comment screening, default off)
+  ansible.builtin.include_tasks: screen_diff_comments.yml
+
 - name: Time the Security and Review lens stage
   block:
     - name: Record the lens stage start time
