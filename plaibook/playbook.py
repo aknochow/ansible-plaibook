@@ -93,16 +93,16 @@ def build_ansible_command(
     extra_vars: dict,
     playbook_root: Path,
     ansible_bin: str | None = None,
+    verbosity: int = 0,
 ) -> list[str]:
     import json
 
     playbook = playbook_root / PLAYBOOK_NAME
-    return [
-        ansible_bin or ansible_playbook_bin(),
-        str(playbook),
-        "-e",
-        json.dumps(extra_vars, separators=(",", ":")),
-    ]
+    command = [ansible_bin or ansible_playbook_bin(), str(playbook)]
+    if verbosity > 0:
+        command.append("-" + ("v" * min(int(verbosity), 4)))
+    command.extend(["-e", json.dumps(extra_vars, separators=(",", ":"))])
+    return command
 
 
 def run_ansible_playbook(

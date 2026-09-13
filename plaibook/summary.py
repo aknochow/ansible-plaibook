@@ -111,6 +111,10 @@ def format_pretty(document: dict[str, Any], *, full: bool = False) -> str:
             header = f"{header}  {name}"
         lines.append(header)
 
+        cache_line = _cache_hit_line(document, target)
+        if cache_line:
+            lines.append(cache_line)
+
         scores = target.get("scores") or {}
         if scores:
             lens_bits = []
@@ -148,6 +152,18 @@ def format_pretty(document: dict[str, Any], *, full: bool = False) -> str:
 
     lines.extend(_footer(document, targets))
     return "\n".join(lines) + "\n"
+
+
+def _cache_hit_line(document: dict[str, Any], target: dict[str, Any]) -> str | None:
+    if not target.get("cache_hit"):
+        return None
+    sha = str(target.get("commit") or document.get("commit") or "").strip()
+    if sha:
+        return (
+            f"  same-commit cache hit for {sha} "
+            "(no new agents; $0.00 is expected). Re-run with -f to force."
+        )
+    return "  same-commit cache hit (no new agents; $0.00 is expected). Re-run with -f to force."
 
 
 def _format_point_finding(finding: dict[str, Any]) -> list[str]:

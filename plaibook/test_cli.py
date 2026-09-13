@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import yaml
 
 from plaibook.cli import (
+    ansible_verbosity,
     build_parser,
     cmd_review,
     extra_vars_from_args,
@@ -35,9 +36,14 @@ def _args(**overrides):
         as_json=False,
         as_yaml=False,
         full=False,
+        force=False,
+        debug=False,
         review_extra_notes=None,
         post=False,
         fail_on_regressions=None,
+        provider=None,
+        use_sandbox=None,
+        cli_extra_vars=None,
         playbook_root=None,
     )
     defaults.update(overrides)
@@ -54,6 +60,27 @@ def test_parser_plai_help_identifies_plaibook():
     assert "plai review org/repo#123 --json" in help_text
     assert "uv run plai" not in help_text
     assert "/10" not in help_text
+    assert "spinner" in help_text.lower()
+    assert "lenses" in help_text
+    assert "--debug" in help_text
+    assert "-vv" in help_text
+
+
+def test_parser_debug_and_vv_set_ansible_verbosity():
+    parser = build_parser(prog="plai")
+    quiet = parser.parse_args(["review", "org/repo#1"])
+    assert ansible_verbosity(quiet) == 0
+    one = parser.parse_args(["review", "org/repo#1", "-v"])
+    assert one.verbose == 1
+    assert ansible_verbosity(one) == 1
+    two = parser.parse_args(["review", "org/repo#1", "-vv"])
+    assert two.verbose == 2
+    assert ansible_verbosity(two) == 2
+    debug = parser.parse_args(["review", "org/repo#1", "--debug"])
+    assert debug.debug is True
+    assert ansible_verbosity(debug) == 2
+    debug_plus = parser.parse_args(["review", "org/repo#1", "-vvv", "--debug"])
+    assert ansible_verbosity(debug_plus) == 3
 
 
 def test_plaibook_and_plai_share_the_same_main():
@@ -90,6 +117,119 @@ def test_extra_vars_commit_and_pr_and_notes():
     assert branch["branch_review_target"] == "org/repo@main"
 
 
+def test_extra_vars_sandbox_and_passthrough():
+    extras = extra_vars_from_args(
+        _args(
+            target="org/repo#1",
+            use_sandbox=False,
+            cli_extra_vars=["review_clone_url_override=file:///tmp/x.git"],
+        ),
+        "runId0123456789",
+    )
+    assert extras["use_sandbox"] is False
+    assert extras["review_clone_url_override"] == "file:///tmp/x.git"
+    extras = extra_vars_from_args(
+        _args(target="org/repo#1", cli_extra_vars=["use_sandbox=true"]),
+        "runId0123456789",
+    )
+    assert extras["use_sandbox"] is True
+
+
+def test_extra_vars_force_disables_same_commit_fast_path():
+    extras = extra_vars_from_args(_args(target="org/repo#1", force=True), "runId0123456789")
+    assert extras["review_same_commit_fast_path_enabled"] is False
+    extras = extra_vars_from_args(_args(target="org/repo#1"), "runId0123456789")
+    assert "review_same_commit_fast_path_enabled" not in extras
+
+
+def test_parser_force_short_flag():
+    parser = build_parser(prog="plai")
+    args = parser.parse_args(["review", "org/repo#1", "-f"])
+    assert args.force is True
+    help_text = parser.format_help()
+    assert "-f" in help_text
+    assert "--force" in help_text
+    assert "plai review org/repo#123 -f" in help_text
+
+
+def test_parser_provider_and_no_sandbox():
+    parser = build_parser(prog="plai")
+    args = parser.parse_args(["review", "org/repo#1", "--no-sandbox", "--provider", "cursor"])
+    assert args.use_sandbox is False
+    assert args.provider == "cursor"
+    help_text = parser.format_help()
+    assert "--provider" in help_text
+    assert "--no-sandbox" in help_text
+
+
+def test_persist_cursor_defaults(tmp_path, monkeypatch):
+    import os
+    from io import StringIO
+
+    from plaibook.config import load_vars, resolve_family
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.delenv("ANSIBLE_REVIEW_AGENT_FAMILY", raising=False)
+    err = StringIO()
+    resolve_family(
+        cli_family="cursor",
+        stdin=StringIO(""),
+        stderr=err,
+        env=os.environ,
+    )
+    saved = load_vars(env=os.environ)
+    assert saved["agent_family"] == "cursor"
+    assert saved["review_cursor_model"] == "gpt-5.6-luna"
+    assert saved["review_cursor_effort"] == "high"
+    assert "Saved provider cursor" in err.getvalue()
+
+
+def test_prompt_saves_typed_family(tmp_path, monkeypatch):
+    import os
+    from io import StringIO
+
+    from plaibook.config import load_vars, resolve_family
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.delenv("ANSIBLE_REVIEW_AGENT_FAMILY", raising=False)
+    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
+    err = StringIO()
+    resolve_family(
+        cli_family=None,
+        stdin=StringIO("cursor\n"),
+        stderr=err,
+        env=os.environ,
+        interactive=True,
+    )
+    saved = load_vars(env=os.environ)
+    assert saved["agent_family"] == "cursor"
+    assert saved["review_cursor_model"] == "gpt-5.6-luna"
+
+
+def test_sandbox_fallback_skips_when_sdk_missing(monkeypatch, capsys):
+    from plaibook.cli import _apply_sandbox_fallback
+
+    monkeypatch.setattr("plaibook.cli.openshell_available", lambda: False)
+    monkeypatch.setattr("plaibook.cli.running_inside_openshell", lambda: False)
+    extras = {"review_type": "pr", "review_targets_raw": "org/repo#1"}
+    error = _apply_sandbox_fallback(_args(target="org/repo#1"), extras)
+    assert error is None
+    assert extras["use_sandbox"] is False
+    assert "without a sandbox" in capsys.readouterr().err
+
+
+def test_sandbox_fallback_quiet_when_already_inside_openshell(monkeypatch, capsys):
+    from plaibook.cli import _apply_sandbox_fallback
+
+    monkeypatch.setattr("plaibook.cli.openshell_available", lambda: False)
+    monkeypatch.setattr("plaibook.cli.running_inside_openshell", lambda: True)
+    extras = {"review_type": "pr", "review_targets_raw": "org/repo#1"}
+    error = _apply_sandbox_fallback(_args(target="org/repo#1"), extras)
+    assert error is None
+    assert extras["use_sandbox"] is False
+    assert capsys.readouterr().err == ""
+
+
 def test_json_extra_vars_keep_colons():
     extras = extra_vars_from_args(
         _args(target="org/repo#1", review_extra_notes="Note: this is intentional"),
@@ -104,9 +244,25 @@ def test_json_extra_vars_keep_colons():
     )
     assert command[0] == "ansible-playbook"
     assert command[1].endswith("review.yml")
-    payload = json.loads(command[3])
+    payload = json.loads(command[command.index("-e") + 1])
     assert payload["review_extra_notes"] == "Note: this is intentional"
     assert payload["last_run_id"] == "idididididididid"
+
+
+def test_build_ansible_command_debug_passes_vv(tmp_path):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    (checkout / "review.yml").write_text("---\n")
+    command = build_ansible_command(
+        extra_vars={"last_run_id": "abc", "review_type": "pr"},
+        playbook_root=checkout,
+        ansible_bin="ansible-playbook",
+        verbosity=2,
+    )
+    assert command[0] == "ansible-playbook"
+    assert command[1].endswith("review.yml")
+    assert command[2] == "-vv"
+    assert command[3] == "-e"
 
 
 def test_find_playbook_root_prefers_env(tmp_path, monkeypatch):
@@ -195,6 +351,28 @@ def test_pretty_and_json_from_last_run(tmp_path):
     assert "full rendered report" not in format_pretty(document)
 
 
+def test_pretty_explains_same_commit_cache_hit():
+    pretty = format_pretty(
+        {
+            "commit": "7c4db4d",
+            "cost_usd": 0,
+            "status": "ok",
+            "targets": [
+                {
+                    "target": "org/repo#1",
+                    "verdict": "READY_FOR_HUMAN_REVIEW",
+                    "score": 100.0,
+                    "cache_hit": True,
+                }
+            ],
+        }
+    )
+    assert "same-commit cache hit for 7c4db4d" in pretty
+    assert "$0.00 is expected" in pretty
+    assert "Re-run with -f to force" in pretty
+    assert "$0.0000" in pretty
+
+
 def test_enrich_prefers_run_scoped_summary_over_canonical(tmp_path):
     canonical = tmp_path / "summary.json"
     scoped = tmp_path / "summary.thisRunOnly0001.json"
@@ -272,10 +450,10 @@ def test_cmd_review_quiet_json_yaml_and_exit(tmp_path, monkeypatch, capsys):
 
     captured = {}
 
-    def fake_run(command, *, playbook_root, verbose):
+    def fake_run(command, *, playbook_root, verbose, env=None):
         captured["command"] = command
         captured["verbose"] = verbose
-        extras = json.loads(command[3])
+        extras = json.loads(command[command.index("-e") + 1])
         path = last_run_path(extras["last_run_id"], home=home)
         path.write_text(
             json.dumps(
@@ -329,6 +507,14 @@ def test_cmd_review_quiet_json_yaml_and_exit(tmp_path, monkeypatch, capsys):
     capsys.readouterr()
     code = cmd_review(_args(commit=True, playbook_root=str(checkout), verbose=True))
     assert captured["verbose"] is True
+    assert "-v" in captured["command"]
+    assert "-vv" not in captured["command"]
+    assert code == 2
+
+    capsys.readouterr()
+    code = cmd_review(_args(commit=True, playbook_root=str(checkout), debug=True))
+    assert captured["verbose"] is True
+    assert "-vv" in captured["command"]
     assert code == 2
 
 
@@ -340,8 +526,8 @@ def test_main_plai_and_plaibook_commit_match(tmp_path, monkeypatch, capsys):
     home = tmp_path / "home"
     (home / ".cache" / "ansible-plaibook").mkdir(parents=True)
 
-    def fake_run(command, *, playbook_root, verbose):
-        extras = json.loads(command[3])
+    def fake_run(command, *, playbook_root, verbose, env=None):
+        extras = json.loads(command[command.index("-e") + 1])
         path = last_run_path(extras["last_run_id"], home=home)
         path.write_text(
             json.dumps(
@@ -380,7 +566,7 @@ def test_quiet_dumps_ansible_output_when_last_run_missing(tmp_path, monkeypatch,
     home = tmp_path / "home"
     (home / ".cache" / "ansible-plaibook").mkdir(parents=True)
 
-    def fake_run(command, *, playbook_root, verbose):
+    def fake_run(command, *, playbook_root, verbose, env=None):
         return SimpleNamespace(returncode=1, stdout="PLAY [boom]\n", stderr="ERROR: nope\n")
 
     monkeypatch.setattr("plaibook.cli.run_ansible_playbook", fake_run)
@@ -395,3 +581,134 @@ def test_quiet_dumps_ansible_output_when_last_run_missing(tmp_path, monkeypatch,
     assert code == 1
     assert "PLAY [boom]" in err
     assert "ERROR: nope" in err
+
+
+def test_format_elapsed_and_spinner_gate(monkeypatch):
+    from io import StringIO
+
+    from plaibook.wait import format_elapsed, spinner_enabled
+
+    assert format_elapsed(0) == "0s"
+    assert format_elapsed(7.9) == "7s"
+    assert format_elapsed(75) == "1:15"
+
+    quiet = StringIO()
+    monkeypatch.delenv("PLAIBOOK_SPINNER", raising=False)
+    assert spinner_enabled(quiet) is False
+
+    class Tty(StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    tty = Tty()
+    assert spinner_enabled(tty) is True
+    monkeypatch.setenv("PLAIBOOK_SPINNER", "0")
+    assert spinner_enabled(tty) is False
+
+
+def test_spinner_rgb_walks_the_hue_circle():
+    from plaibook.wait import hsv_to_rgb, spinner_rgb
+
+    assert hsv_to_rgb(0.0) == (255, 0, 0)
+    assert hsv_to_rgb(1.0 / 3.0) == (0, 255, 0)
+    assert hsv_to_rgb(2.0 / 3.0) == (0, 0, 255)
+    blue = spinner_rgb(0.0)
+    later = spinner_rgb(1.5)
+    assert blue == (0, 0, 255)
+    assert later != blue
+
+
+def test_wait_spinner_writes_frames_on_tty(monkeypatch):
+    import time
+
+    from plaibook.wait import WaitSpinner
+
+    class Tty:
+        def __init__(self) -> None:
+            self.buf: list[str] = []
+
+        def isatty(self) -> bool:
+            return True
+
+        def write(self, s: str) -> int:
+            self.buf.append(s)
+            return len(s)
+
+        def flush(self) -> None:
+            return None
+
+    stream = Tty()
+    monkeypatch.delenv("PLAIBOOK_SPINNER", raising=False)
+    monkeypatch.setenv("NO_COLOR", "1")
+    with WaitSpinner("Reviewing commit HEAD in .", stream=stream):
+        time.sleep(0.2)
+    text = "".join(stream.buf)
+    assert "Reviewing commit HEAD in ." in text
+    assert any(ch in text for ch in "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+    assert "\n" in text
+    assert "  setup" in text
+    assert "\033[?25l" in text
+    assert "\033[?25h" in text
+    assert "38;2;" not in text
+
+
+def test_wait_spinner_truecolor_when_color_enabled(monkeypatch):
+    import time
+
+    from plaibook.wait import WaitSpinner
+
+    class Tty:
+        def __init__(self) -> None:
+            self.buf: list[str] = []
+
+        def isatty(self) -> bool:
+            return True
+
+        def write(self, s: str) -> int:
+            self.buf.append(s)
+            return len(s)
+
+        def flush(self) -> None:
+            return None
+
+    stream = Tty()
+    monkeypatch.delenv("PLAIBOOK_SPINNER", raising=False)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("TERM", raising=False)
+    with WaitSpinner("Reviewing org/repo#1", stream=stream):
+        time.sleep(0.2)
+    text = "".join(stream.buf)
+    assert "38;2;" in text
+
+
+def test_wait_spinner_reads_progress_file(tmp_path, monkeypatch):
+    import time
+
+    from plaibook.wait import WaitSpinner
+
+    class Tty:
+        def __init__(self) -> None:
+            self.buf: list[str] = []
+
+        def isatty(self) -> bool:
+            return True
+
+        def write(self, s: str) -> int:
+            self.buf.append(s)
+            return len(s)
+
+        def flush(self) -> None:
+            return None
+
+    progress = tmp_path / "progress.txt"
+    progress.write_text("lenses\n")
+    stream = Tty()
+    monkeypatch.delenv("PLAIBOOK_SPINNER", raising=False)
+    monkeypatch.setenv("NO_COLOR", "1")
+    with WaitSpinner("Reviewing org/repo#1", stream=stream, progress_file=progress):
+        time.sleep(0.2)
+        progress.write_text("explore\n")
+        time.sleep(0.2)
+    text = "".join(stream.buf)
+    assert "  lenses" in text
+    assert "  explore" in text

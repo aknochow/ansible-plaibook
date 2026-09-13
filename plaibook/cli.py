@@ -5,10 +5,17 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
 from pathlib import Path
 from typing import Sequence
 
 from plaibook import __version__
+from plaibook.config import (
+    FAMILIES,
+    openshell_available,
+    resolve_family,
+    running_inside_openshell,
+)
 from plaibook.playbook import (
     PlaybookNotFoundError,
     build_ansible_command,
@@ -18,6 +25,7 @@ from plaibook.playbook import (
     run_ansible_playbook,
 )
 from plaibook.summary import dump_json, dump_yaml, enrich_last_run, format_pretty, load_json
+from plaibook.wait import WaitSpinner, spinner_enabled
 
 USAGE_EPILOG = """\
 plai and plaibook are the same program. The pip/uv distribution name is plaibook
@@ -30,9 +38,21 @@ It does not yet run ansible-playbook aknochow.plaibook.review (that FQCN lands
 when plaibook is a collection).
 
 Default stdout is a readable review (target, verdict, 0-100 scores,
-Critical/Major with file:line + why). --json / --yaml emit the structured
-last_run + summary fields. -v passes through ansible-playbook. --full (or -v)
-adds the findings.md report. A score line plus finding counts is not a review.
+Critical/Major with file:line + why). Quiet TTY waits show a spinner on
+stderr (PLAIBOOK_SPINNER=0 to disable), with a second line for the current
+stage (setup, checkout, scan, lenses, merge, explore, verify, persist).
+--json / --yaml emit the structured last_run + summary fields. -v passes
+-v to ansible-playbook (task names). -vv / --debug passes -vv (task names
+and module args) and skips the spinner. --full (or -v) adds the findings.md
+report. A score line plus finding counts is not a review.
+Same-commit cache hits print that they reused the prior review (why cost
+is $0.00). -f / --force disables that fast path and re-runs the lenses.
+
+First review with no operator config prompts for a provider and writes
+~/.config/ansible-plaibook/vars.yml. Cursor defaults to gpt-5.6-luna / high.
+PR/branch reviews skip OpenShell when this process is already inside
+an OpenShell sandbox, or when the SDK is not importable from this
+interpreter (--sandbox to require it, --no-sandbox to skip it).
 
 AAP / execution-environment jobs keep calling ansible-playbook review.yml.
 
@@ -44,7 +64,12 @@ Examples:
   plai review org/repo#123 --json
   plai review org/repo#123 --yaml
   plai review org/repo#123 -v
+  plai review org/repo#123 -vv
+  plai review org/repo#123 --debug
   plai review org/repo#123 --full
+  plai review org/repo#123 -f
+  plai review org/repo#123 --provider cursor
+  plai review org/repo#123 --no-sandbox
 """
 
 
@@ -105,8 +130,17 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
     review.add_argument(
         "-v",
         "--verbose",
+        action="count",
+        default=0,
+        help=(
+            "Pass -v to ansible-playbook (task names). Repeat for more "
+            "(-vv / --debug shows module args)."
+        ),
+    )
+    review.add_argument(
+        "--debug",
         action="store_true",
-        help="Pass through full ansible-playbook output.",
+        help="Debug mode: ansible-playbook -vv (task names and args). No spinner.",
     )
     fmt = review.add_mutually_exclusive_group()
     fmt.add_argument(
@@ -127,6 +161,15 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
         help="Include the full findings.md report after the pretty review.",
     )
     review.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help=(
+            "Force a full review even when this commit was already reviewed "
+            "(sets review_same_commit_fast_path_enabled=false)."
+        ),
+    )
+    review.add_argument(
         "--notes",
         dest="review_extra_notes",
         help="Trusted operator notes for this run (JSON extra-vars, colons are safe).",
@@ -144,11 +187,54 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
         help="Override fail_on_regressions (commit defaults to true).",
     )
     review.add_argument(
+        "--provider",
+        dest="provider",
+        metavar="FAMILY",
+        choices=list(FAMILIES),
+        help=(
+            "Set agent_family and save it to ~/.config/ansible-plaibook/vars.yml. "
+            "cursor saves gpt-5.6-luna / high when those keys are unset."
+        ),
+    )
+    review.add_argument(
+        "--sandbox",
+        dest="use_sandbox",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Run PR/branch briefing in an OpenShell sandbox. Default is on for "
+            "pr/branch when the SDK is importable and this process is not "
+            "already inside OpenShell."
+        ),
+    )
+    review.add_argument(
+        "-e",
+        "--extra-var",
+        action="append",
+        default=[],
+        dest="cli_extra_vars",
+        metavar="KEY=VALUE",
+        help="Pass extra-vars to ansible-playbook (repeatable). true/false become booleans.",
+    )
+    review.add_argument(
         "--root",
         dest="playbook_root",
         help="Plaibook checkout containing review.yml (or set PLAIBOOK_ROOT).",
     )
     return parser
+
+
+def _parse_extra_var(item: str) -> tuple[str, object]:
+    key, sep, value = item.partition("=")
+    key = key.strip()
+    if not sep or not key:
+        raise ValueError(f"extra-var {item!r} must be KEY=VALUE")
+    lowered = value.lower()
+    if lowered == "true":
+        return key, True
+    if lowered == "false":
+        return key, False
+    return key, value
 
 
 def extra_vars_from_args(args: argparse.Namespace, run_id: str) -> dict:
@@ -171,7 +257,32 @@ def extra_vars_from_args(args: argparse.Namespace, run_id: str) -> dict:
         extras["post_results"] = True
     if args.fail_on_regressions is not None:
         extras["fail_on_regressions"] = bool(args.fail_on_regressions)
+    if getattr(args, "use_sandbox", None) is not None:
+        extras["use_sandbox"] = bool(args.use_sandbox)
+    if getattr(args, "force", False):
+        extras["review_same_commit_fast_path_enabled"] = False
+    for item in getattr(args, "cli_extra_vars", None) or []:
+        key, value = _parse_extra_var(item)
+        extras[key] = value
     return extras
+
+
+def ansible_verbosity(args: argparse.Namespace) -> int:
+    """How many -v flags to pass to ansible-playbook.
+
+    ``--debug`` is at least 2 (ansible -vv). ``-v`` as a boolean (tests)
+    counts as 1.
+    """
+    raw = getattr(args, "verbose", 0)
+    if raw is True:
+        level = 1
+    elif raw is False or raw is None:
+        level = 0
+    else:
+        level = int(raw)
+    if getattr(args, "debug", False):
+        level = max(level, 2)
+    return level
 
 
 def _validate_review_args(args: argparse.Namespace) -> str | None:
@@ -188,6 +299,34 @@ def _validate_review_args(args: argparse.Namespace) -> str | None:
     return None
 
 
+def _apply_sandbox_fallback(args: argparse.Namespace, extras: dict) -> str | None:
+    """Skip nested OpenShell when we are already inside one, or the SDK is missing."""
+    if extras.get("review_type") == "commit" and "use_sandbox" not in extras:
+        return None
+    if extras.get("use_sandbox") is True and not openshell_available():
+        return (
+            "OpenShell SDK is not importable from "
+            f"{sys.executable}. Install it in this interpreter "
+            "(pip install 'openshell>=0.0.116,<0.0.120'), or pass --no-sandbox. "
+            "A copy in another venv does not count."
+        )
+    if "use_sandbox" in extras:
+        return None
+    if extras.get("review_type") == "commit":
+        return None
+    if running_inside_openshell():
+        extras["use_sandbox"] = False
+        return None
+    if openshell_available():
+        return None
+    extras["use_sandbox"] = False
+    sys.stderr.write(
+        "OpenShell SDK is not importable from this interpreter; "
+        "reviewing without a sandbox. Pass --sandbox to require it.\n"
+    )
+    return None
+
+
 def _emit_summary(document: dict, args: argparse.Namespace) -> None:
     if args.as_json:
         dump_json(document, sys.stdout)
@@ -195,7 +334,12 @@ def _emit_summary(document: dict, args: argparse.Namespace) -> None:
     if args.as_yaml:
         dump_yaml(document, sys.stdout)
         return
-    sys.stdout.write(format_pretty(document, full=bool(getattr(args, "full", False) or args.verbose)))
+    sys.stdout.write(
+        format_pretty(
+            document,
+            full=bool(getattr(args, "full", False) or ansible_verbosity(args)),
+        )
+    )
 
 
 def _progress_line(args: argparse.Namespace) -> str:
@@ -231,22 +375,72 @@ def cmd_review(args: argparse.Namespace) -> int:
         return 2
 
     run_id = generate_run_id()
-    extras = extra_vars_from_args(args, run_id)
     try:
-        command = build_ansible_command(extra_vars=extras, playbook_root=root)
+        extras = extra_vars_from_args(args, run_id)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    extras.setdefault("ansible_python_interpreter", sys.executable)
+    try:
+        resolve_family(
+            cli_family=getattr(args, "provider", None),
+            stdin=sys.stdin,
+            stderr=sys.stderr,
+        )
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    sandbox_error = _apply_sandbox_fallback(args, extras)
+    if sandbox_error:
+        print(sandbox_error, file=sys.stderr)
+        return 2
+    extras.setdefault("ansible_python_interpreter", sys.executable)
+    try:
+        command = build_ansible_command(
+            extra_vars=extras,
+            playbook_root=root,
+            verbosity=ansible_verbosity(args),
+        )
     except FileNotFoundError as exc:
         print(str(exc), file=sys.stderr)
         return 2
 
     structured = args.as_json or args.as_yaml
-    if not structured:
+    passthrough = ansible_verbosity(args) > 0
+    if passthrough:
         sys.stderr.write(_progress_line(args))
         sys.stderr.flush()
-
-    result = run_ansible_playbook(command, playbook_root=root, verbose=args.verbose)
+        result = run_ansible_playbook(command, playbook_root=root, verbose=True)
+    elif spinner_enabled(sys.stderr):
+        progress = tempfile.NamedTemporaryFile(
+            prefix="plaibook-progress-",
+            suffix=".txt",
+            delete=False,
+        )
+        try:
+            progress.write(b"setup\n")
+            progress.close()
+            with WaitSpinner(
+                _progress_line(args).rstrip("\n"),
+                stream=sys.stderr,
+                progress_file=progress.name,
+            ):
+                result = run_ansible_playbook(
+                    command,
+                    playbook_root=root,
+                    verbose=False,
+                    env={"PLAIBOOK_PROGRESS_FILE": progress.name},
+                )
+        finally:
+            Path(progress.name).unlink(missing_ok=True)
+    else:
+        if not structured:
+            sys.stderr.write(_progress_line(args))
+            sys.stderr.flush()
+        result = run_ansible_playbook(command, playbook_root=root, verbose=False)
     summary_file = last_run_path(run_id)
     if not summary_file.is_file():
-        if not args.verbose:
+        if not passthrough:
             captured = (result.stderr or "") + (result.stdout or "")
             if captured.strip():
                 sys.stderr.write(captured)

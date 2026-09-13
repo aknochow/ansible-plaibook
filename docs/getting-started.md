@@ -32,6 +32,12 @@ checkout). The CLI locates `review.yml` itself and leaves the caller's
 cwd alone, so you can review another repo without `cd`. Override the
 checkout with `--root` / `PLAIBOOK_ROOT` if needed.
 
+The first `plai review` with no operator config asks which provider to
+use and writes `~/.config/ansible-plaibook/vars.yml`. Cursor defaults
+to `gpt-5.6-luna` at effort `high`. `--provider cursor` saves that
+without a prompt. Re-reviewing the same SHA is a $0 cache hit unless
+you pass `-f` / `--force`.
+
 AAP / execution-environment runs still invoke the playbook:
 
 ```bash
@@ -72,8 +78,10 @@ as counts, then a footer (cost, run-scoped `last_run.<run_id>.json`,
 path to `findings.md`). A score line plus finding counts is not a
 review.
 
-`-v` passes through `ansible-playbook` and includes the full
-findings.md report. `--full` dumps that report without the TASK wall.
+`-v` passes `-v` to `ansible-playbook` (task names) and includes the
+full findings.md report. `-vv` / `--debug` passes `-vv` so you see
+task names and module args; there is no spinner. `--full` dumps that
+report without the TASK wall.
 `--json` and `--yaml` write the structured last_run + summary fields
 on stdout (what agents parse). The CLI reads
 `~/.cache/ansible-plaibook/last_run.<run_id>.json`; it does not scrape

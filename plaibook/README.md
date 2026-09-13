@@ -13,13 +13,24 @@ distribution name is `plaibook` (not `plai`, taken on PyPI, and not
 plai review org/repo#123
 plai review --commit
 plai review org/repo#123 --json
+plai review org/repo#123 -f
 plaibook review org/repo#123
 ```
 
-`--yaml` is the YAML form of `--json`. `-v` passes through
-`ansible-playbook`. `--full` (or `-v`) adds the findings.md report.
+`--yaml` is the YAML form of `--json`. `-v` passes `-v` to
+`ansible-playbook` (task names). `-vv` / `--debug` passes `-vv` (task
+names and module args) and skips the spinner. `--full` (or `-v`) adds
+the findings.md report.
+`-f` / `--force` re-runs lenses even when this commit was already
+reviewed. A same-commit cache hit is labeled in the pretty review so a
+$0.00 cost is not mistaken for a live run.
 `--root` / `PLAIBOOK_ROOT` select the ansible-plaibook checkout that
-contains `review.yml`.
+contains `review.yml`. First run with no operator config prompts for a
+provider and writes `~/.config/ansible-plaibook/vars.yml`. `--provider
+cursor` does the same non-interactively and defaults Cursor to
+`gpt-5.6-luna` / `high`. PR/branch reviews skip nested OpenShell when
+this process is already inside a sandbox, or when that SDK is not
+importable from this interpreter (`--no-sandbox` / `--sandbox`).
 
 ## Output sugar
 
@@ -27,7 +38,8 @@ Default stdout is a **readable review**: target, verdict, 0–100 scores,
 Critical/Major with `file:line` + title + short why. Minor/nit stay as
 counts. The footer is cost, the run-scoped `last_run.<run_id>.json`, and
 the path to `findings.md`. A score line plus finding counts is not a
-review.
+review. Quiet TTY waits show a spinner; the second line is the current
+stage (setup, checkout, scan, lenses, merge, explore, verify, persist).
 
 `--json` / `--yaml` print the structured last_run document plus
 summary fields (what agents parse). The CLI does not rescore. It does

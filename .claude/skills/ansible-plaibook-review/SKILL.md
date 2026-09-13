@@ -37,7 +37,8 @@ plai review --commit
 plai review --commit --repo /path/to/repo --sha abc1234
 plai review org/repo#123 --json       # structured last_run + summary on stdout
 plai review org/repo#123 --yaml
-plai review org/repo#123 -v           # full ansible-playbook output
+plai review org/repo#123 -v           # ansible-playbook -v (task names)
+plai review org/repo#123 --debug      # ansible-playbook -vv (task names + args)
 plai review org/repo#123 --full       # pretty review plus findings.md
 ```
 
@@ -46,7 +47,8 @@ Critical/Major with file:line + title + short why; minor/nit stay as
 counts; footer is cost, run-scoped `last_run.<run_id>.json`, and the
 path to `findings.md`. A score line plus finding counts is not a
 review. `--json` / `--yaml` emit the structured document (what agents
-parse). `-v` passes through ansible-playbook. `--full` or `-v` also
+parse). `-v` passes `-v` to ansible-playbook. `-vv` / `--debug` passes
+`-vv` (task names and module args). `--full` or `-v` also
 dumps the findings.md report. The CLI shells out to `ansible-playbook`
 and **reads `last_run.<run_id>.json`** (preferring
 `summary_run_scoped_path` from #40). It does not scrape playbook stdout
@@ -58,12 +60,16 @@ real Critical/Major finding. `plai review --commit` and
 including that exit code.
 
 Do not pass `--extra-var agent_family=...` / `-e agent_family=...` unless
-you are overriding the operator default for this one run. `review.yml`
-loads `$XDG_CONFIG_HOME/ansible-plaibook/vars.yml` (or
-`~/.config/ansible-plaibook/vars.yml`) when that file exists; a
-gitignored `host_vars/localhost.yml` in the checkout is the
-per-worktree alternative; `ANSIBLE_REVIEW_AGENT_FAMILY` still works.
-None of those bake a provider into the repo. Extra-vars still win.
+you are overriding the operator default for this one run. First `plai
+review` with no operator config prompts for a provider (TTY) or uses
+`cursor` when `CURSOR_API_KEY` is set (non-TTY) and writes
+`$XDG_CONFIG_HOME/ansible-plaibook/vars.yml` (or
+`~/.config/ansible-plaibook/vars.yml`). `--provider cursor` is the
+non-interactive form and also writes Cursor's default model
+`gpt-5.6-luna` at effort `high` when those keys are unset. A gitignored
+`host_vars/localhost.yml` in the checkout is the per-worktree
+alternative; `ANSIBLE_REVIEW_AGENT_FAMILY` still works. None of those
+bake a provider into the repo. Extra-vars still win.
 
 If a given `agent_family` needs an optional extra from `pyproject.toml`
 (a provider SDK that is not in the default dependency set), install that
@@ -109,8 +115,13 @@ ansible-playbook review.yml -e review_targets_raw="org/repo#123"
   `ansible-playbook review.yml -e '{"review_targets": ["org/repo#1", "org/repo#2"]}'`
 - Runs in an OpenShell sandbox by default (`use_sandbox: true` —
   `library/run_checklist.py` executes commands parsed out of a
-  source-branch-controlled `CHECKLIST.md`, i.e. untrusted input). Set
-  `-e use_sandbox=false` on the playbook path to skip sandboxing.
+  source-branch-controlled `CHECKLIST.md`, i.e. untrusted input).
+  `plai review --no-sandbox` skips it. Already inside OpenShell
+  (`OPENSHELL_SANDBOX` / `OPENSHELL_SANDBOX_ID`), the CLI skips nested
+  sandboxing without a warning. On a normal host it also skips when the
+  OpenShell SDK is not importable from `plai`'s interpreter (a copy in
+  another venv does not count). Playbook path:
+  `-e use_sandbox=false`.
 - `post_results` defaults to `false` — reviewing is safe to automate;
   posting the review back to the real PR/MR is a write to shared state
   and needs explicit opt-in (`plai review org/repo#123 --post`, or
@@ -364,8 +375,9 @@ fraction.
     default `true`) replays the prior result without re-dispatching
     lenses when re-reviewing an already-reviewed commit —
     `review_extra_notes` has no effect in that case. Pass
-    `-e review_same_commit_fast_path_enabled=false` to force a fresh
-    dispatch.
+    `-e review_same_commit_fast_path_enabled=false` (`plai review … -f`)
+    to force a fresh dispatch. Pretty stdout labels a cache hit so a
+    $0.00 cost is not mistaken for a live run.
 - **Sandbox teardown vs. debugging**: `review.yml` defaults
   `cleanup_sandbox_onfail=true` — a failed
   run tears its sandbox down by default. Set
