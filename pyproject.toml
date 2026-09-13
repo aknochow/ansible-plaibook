@@ -37,6 +37,9 @@ cursor = [
 [tool.setuptools.packages.find]
 include = ["plaibook*", "action_plugins*", "filter_plugins*", "library*", "roles*", "scripts*"]
 
+[tool.setuptools.package-data]
+plaibook = ["cursor_http1_proxy.js"]
+
 [tool.pytest.ini_options]
 testpaths = ["plaibook", "action_plugins", "library", "roles/review/files/pr_review", "scripts"]
 python_files = ["test_*.py"]

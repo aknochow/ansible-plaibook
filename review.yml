@@ -210,13 +210,14 @@
 
     # connection: local can otherwise auto-discover a different system
     # Python for module execution than the interpreter running ansible-
-    # playbook itself. That split is especially dangerous for provider SDKs:
-    # the preflight can pass while the first provider module fails to import.
-    # Preserve an explicit host_vars/extra-vars override, but make the
-    # default deterministic and aligned with the controller process.
+    # playbook itself. OpenShell login PATH often puts ~/.venv first, and
+    # that interpreter has plaibook but not cursor-sdk — sidecar then
+    # fails with "Unable to locate cursor-sdk-bridge". Always run
+    # localhost modules with the playbook process (plai's venv). Extra-vars
+    # still win over this set_fact if an operator passes an override.
     - name: Align local module execution with the playbook interpreter
       ansible.builtin.set_fact:
-        ansible_python_interpreter: "{{ ansible_python_interpreter | default(ansible_playbook_python) }}"
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
 
     - name: Split survey-provided newline-separated targets into a list
       when: >-
@@ -287,19 +288,34 @@
         name: review
         tasks_from: provider_preflight.yml
 
+    - name: Resolve Cursor API key and local HTTP/1.1 proxy
+      when: (agent_family | default('')) == 'cursor'
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: resolve_cursor_runtime.yml
+        public: true
+
     # Playbook-owned cursor-sdk-bridge sidecar. Must start *before* the
     # pipeline block so FILE attach paths can be put in that block's
     # environment (templated at block entry). Nested launch_bridge under
-    # a Cursor IDE agent is SIGKILL'd (137). Skip when attach env is
-    # already set (URL+token or URL_FILE+TOKEN_FILE), or when this is
-    # not a Cursor-agent session (iTerm/CI/AAP keep in-process
-    # launch_bridge). Never set_fact the token.
+    # a Cursor IDE agent is SIGKILL'd (137). OpenShell login-shell plai
+    # has no CURSOR_AGENT and in-process launch_bridge fails with
+    # "Network request failed"; start the sidecar there too. Skip when
+    # attach env is already set (URL+token or URL_FILE+TOKEN_FILE).
+    # iTerm/CI/AAP (no CURSOR_AGENT, no OpenShell) keep launch_bridge.
+    # Never set_fact the token. Keep this expression in lockstep with
+    # tests/test_cursor_sidecar_skip.yml.
     - name: Decide whether to start a playbook-owned cursor-sdk-bridge sidecar
       ansible.builtin.set_fact:
         review_cursor_sidecar_wanted: >-
           {{
             (agent_family | default('')) == 'cursor'
-            and (lookup('ansible.builtin.env', 'CURSOR_AGENT') == '1')
+            and (
+              (lookup('ansible.builtin.env', 'CURSOR_AGENT') == '1')
+              or (lookup('ansible.builtin.env', 'OPENSHELL_SANDBOX') | length > 0)
+              or (lookup('ansible.builtin.env', 'OPENSHELL_SANDBOX_ID') | length > 0)
+              or (lookup('ansible.builtin.env', 'OPENSHELL_ENDPOINT') | length > 0)
+            )
             and not (
               (
                 (lookup('ansible.builtin.env', 'CURSOR_SDK_BRIDGE_URL') | length > 0)
@@ -317,6 +333,7 @@
 
     - name: Start a playbook-owned cursor-sdk-bridge sidecar
       when: review_cursor_sidecar_wanted | bool
+      environment: "{{ review_cursor_process_environment | default({}) }}"
       aknochow.cursor.bridge:
         state: present
         rundir: "{{ review_cursor_bridge_rundir }}"
@@ -332,6 +349,14 @@
         review_cursor_bridge_url_file: "{{ _cursor_sidecar.url_file }}"
         review_cursor_bridge_token_file: "{{ _cursor_sidecar.token_file }}"
 
+    - name: Cursor pipeline environment including sidecar attach files
+      when: (agent_family | default('')) == 'cursor'
+      no_log: true
+      ansible.builtin.set_fact:
+        review_cursor_pipeline_environment: "{{ _pipeline_env }}"
+      vars:
+        _pipeline_env: "{{ (review_cursor_process_environment | default({})) | combine({'CURSOR_SDK_BRIDGE_URL_FILE': review_cursor_bridge_url_file, 'CURSOR_SDK_BRIDGE_TOKEN_FILE': review_cursor_bridge_token_file} if (review_cursor_sidecar_started | default(false) | bool) else {}) }}"
+
     # block/rescue/always so a failure anywhere in the pipeline (a bad
     # target, a broken script, an SSH hiccup, a review-engine agent-call
     # error) doesn't leak the sandbox forever and always gets a last-run
@@ -342,9 +367,7 @@
     # correctly reports as failed — cleanup shouldn't hide the actual
     # error.
     - name: Run the review pipeline (sandbox lifecycle is failure-safe)
-      environment:
-        CURSOR_SDK_BRIDGE_URL_FILE: "{{ review_cursor_bridge_url_file | default(omit) }}"
-        CURSOR_SDK_BRIDGE_TOKEN_FILE: "{{ review_cursor_bridge_token_file | default(omit) }}"
+      environment: "{{ review_cursor_pipeline_environment | default({}) }}"
       block:
         # One "skipping" notice for this whole group on an unsandboxed
         # (including every review_type: commit) run instead of three --
@@ -364,6 +387,8 @@
         - name: Review each target
           ansible.builtin.include_role:
             name: review
+            apply:
+              environment: "{{ review_cursor_pipeline_environment | default({}) }}"
           vars:
             review_target: "{{ item }}"
           loop: "{{ review_targets }}"

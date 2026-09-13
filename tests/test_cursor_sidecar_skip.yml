@@ -23,7 +23,12 @@
         review_cursor_sidecar_wanted: >-
           {{
             (agent_family | default('')) == 'cursor'
-            and (lookup('ansible.builtin.env', 'CURSOR_AGENT') == '1')
+            and (
+              (lookup('ansible.builtin.env', 'CURSOR_AGENT') == '1')
+              or (lookup('ansible.builtin.env', 'OPENSHELL_SANDBOX') | length > 0)
+              or (lookup('ansible.builtin.env', 'OPENSHELL_SANDBOX_ID') | length > 0)
+              or (lookup('ansible.builtin.env', 'OPENSHELL_ENDPOINT') | length > 0)
+            )
             and not (
               (
                 (lookup('ansible.builtin.env', 'CURSOR_SDK_BRIDGE_URL') | length > 0)

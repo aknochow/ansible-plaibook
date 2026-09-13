@@ -166,6 +166,55 @@ def running_inside_openshell(env: Mapping[str, str] | None = None) -> bool:
     return Path("/etc/openshell/auth/sandbox.jwt").is_file()
 
 
+def looks_like_cursor_api_key(value: str | None) -> bool:
+    """Cursor dashboard keys start with crsr or key_. OpenShell tokens do not."""
+    text = (value or "").strip()
+    return text.startswith(("crsr", "key_"))
+
+
+def cursor_auth_json_path(
+    *, env: Mapping[str, str] | None = None, home: Path | None = None
+) -> Path:
+    """IDE/CLI auth store: $XDG_CONFIG_HOME/cursor/auth.json or ~/.config/cursor/auth.json."""
+    environ = os.environ if env is None else env
+    xdg = (environ.get("XDG_CONFIG_HOME") or "").strip()
+    if xdg:
+        base = Path(xdg).expanduser()
+    else:
+        base = Path(home if home is not None else Path.home()) / ".config"
+    return base / "cursor" / "auth.json"
+
+
+def load_cursor_api_key_from_auth_json(
+    *, path: Path | None = None, env: Mapping[str, str] | None = None
+) -> str:
+    """Return apiKey from Cursor auth.json, or empty. Never log the value."""
+    import json
+
+    target = path if path is not None else cursor_auth_json_path(env=env)
+    if not target.is_file():
+        return ""
+    try:
+        loaded = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    if not isinstance(loaded, dict):
+        return ""
+    return str(loaded.get("apiKey") or "").strip()
+
+
+def resolve_cursor_api_key(env: Mapping[str, str] | None = None) -> str:
+    """Prefer a real Cursor key over an OpenShell token exported as CURSOR_API_KEY."""
+    environ = os.environ if env is None else env
+    current = (environ.get("CURSOR_API_KEY") or "").strip()
+    if looks_like_cursor_api_key(current):
+        return current
+    loaded = load_cursor_api_key_from_auth_json(env=environ)
+    if looks_like_cursor_api_key(loaded):
+        return loaded
+    return ""
+
+
 def resolve_family(
     *,
     cli_family: str | None,
