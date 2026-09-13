@@ -3,6 +3,7 @@
 # Ansible resolves play-level FQCNs at parse time, so a Vertex/Gemini AAP
 # EE without aknochow.cursor fails before when: can skip the sidecar.
 - name: Start a playbook-owned cursor-sdk-bridge sidecar
+  environment: "{{ review_cursor_process_environment | default({}) }}"
   aknochow.cursor.bridge:
     state: present
     rundir: "{{ review_cursor_bridge_rundir }}"

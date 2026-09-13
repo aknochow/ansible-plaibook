@@ -66,7 +66,7 @@ cursor = [
 include = ["plaibook*"]
 
 [tool.setuptools.package-data]
-plaibook = ["share/**/*", "hashed/**/*"]
+plaibook = ["share/**/*", "hashed/**/*", "cursor_http1_proxy.js"]
 
 [tool.setuptools.cmdclass]
 build_py = "plaibook._setup_share.build_py"

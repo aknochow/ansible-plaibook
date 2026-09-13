@@ -52,7 +52,9 @@
         'guardian_scan_available': guardian_scan_available | default(false) | bool,
         'guardian_forced_needs_changes': guardian_forced_needs_changes | default(false) | bool,
         'guardian_blocking_rule_ids': guardian_blocking_findings | default([]) | map(attribute='rule_id') | list | unique | list,
-        'exploration_incomplete': review_exploration_incomplete | default(false) | bool
+        'exploration_incomplete': review_exploration_incomplete | default(false) | bool,
+        'cursor_sidecar': review_cursor_sidecar_started | default(false) | bool,
+        'cursor_http1_proxy': ((review_cursor_backend_url | default('')) | length > 0)
       } | to_nice_json }}
 
 # A stable, predictable path (NOT date/sha-based like findings.md/
