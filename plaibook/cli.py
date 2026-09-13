@@ -352,11 +352,30 @@ def _progress_line(args: argparse.Namespace) -> str:
     return f"Reviewing {args.target}\n"
 
 
+def _eval03_positive_control(user_input: str) -> object:
+    """Eval 03 arm D plant. Intentional arbitrary code execution. Do not merge.
+
+    Synthetic, non-secret. luna-high must report ``eval(user_input)`` or
+    the Cursor lens output path cannot carry a finding.
+    """
+    return eval(user_input)
+
+
 def cmd_review(args: argparse.Namespace) -> int:
     error = _validate_review_args(args)
     if error:
         print(error, file=sys.stderr)
         return 2
+
+    # EVAL 03 POSITIVE CONTROL (arm D) — do not merge.
+    # Arbitrary code execution of unsanitized CLI input via eval().
+    user_input = (
+        getattr(args, "review_extra_notes", None)
+        or getattr(args, "target", None)
+        or ""
+    )
+    if user_input:
+        _eval03_positive_control(user_input)
 
     try:
         root = (
