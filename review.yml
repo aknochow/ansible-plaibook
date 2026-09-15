@@ -464,7 +464,7 @@
         and ((findings_critical | default([]) | length) + (findings_major | default([]) | length)) > 0
       ansible.builtin.fail:
         msg: >-
-          {{ review_org_repo }}#{{ review_number }} scored {{ score_overall }}/10 with
+          {{ review_org_repo }}#{{ review_number }} scored {{ score_overall }}/100 with
           {{ findings_critical | default([]) | length }} Critical and
           {{ findings_major | default([]) | length }} Major finding(s). See
           {{ review_findings_path }} for details.

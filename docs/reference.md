@@ -22,17 +22,19 @@ status: stable
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `use_sandbox` | `true` for `pr`/`branch`, `false` for `commit` | Runs the target-repo checkout and checklist execution inside an OpenShell sandbox. |
+| `use_sandbox` | `true` for `pr`/`branch` on a normal host with the OpenShell SDK; skipped inside an OpenShell sandbox | Runs the target-repo checkout and checklist execution inside an OpenShell sandbox. Nested sandboxing is skipped only when `/etc/openshell/auth/sandbox.jwt` exists. `OPENSHELL_ENDPOINT`, `OPENSHELL_SANDBOX`, and `OPENSHELL_SANDBOX_ID` are not containment. `plai review --no-sandbox` skips it. Missing SDK on a normal host fails closed. A copy of the SDK in another venv does not count. |
 | `post_results` | `false` | Posts the rendered review back to the real PR/MR. Reviewing is safe to automate; posting is a write to shared state and needs explicit opt-in. |
 | `fail_on_regressions` | `false` for `pr`/`branch`, `true` for `commit` | Whether a `NEEDS_CHANGES` verdict with a real Critical/Major finding makes the Ansible run itself exit non-zero. Lets a `commit_review` invocation gate a hook on the exit code directly. |
-| `review_same_commit_fast_path_enabled` | `true` | Skips lens dispatch, merge, and persistence entirely when the target's current commit matches the last-reviewed one, a zero-LLM-cost check before spending anything. |
+| `review_same_commit_fast_path_enabled` | `true` | Skips lens dispatch, merge, and persistence when the target's current commit matches the last-reviewed one. `plai review -f` / `--force` sets this `false`. Pretty stdout labels a cache hit so a $0.00 cost is not mistaken for a live run. |
 | `review_explore_max_turns` | `3` for `pr`/`branch`, `0` for `commit` | How many additional turns the exploration pass gets to look beyond the diff itself. |
 
 ## Model selection
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `agent_family` | `claude` (or operator config) | Provider dispatch family: `claude`, `gemini`, `openai`, or `cursor`. Committed default is `claude`. Per-machine override (none of these are in git): `$XDG_CONFIG_HOME/ansible-plaibook/vars.yml` (or `~/.config/ansible-plaibook/vars.yml`) when that file exists, else gitignored `host_vars/localhost.yml`, else `ANSIBLE_REVIEW_AGENT_FAMILY`. Extra-vars (`-e`) still win. When `agent_family=cursor` and `CURSOR_AGENT=1` with no attach env, `review.yml` starts `aknochow.cursor.bridge` (double-fork sidecar) and reaps it in `always`. Already-set `CURSOR_SDK_BRIDGE_URL`+token or `CURSOR_SDK_BRIDGE_URL_FILE`+`CURSOR_SDK_BRIDGE_TOKEN_FILE` is left alone (do not start a second sidecar). iTerm/CI/AAP keep in-process `launch_bridge`. |
+| `agent_family` | `claude` (or operator config) | Provider dispatch family: `claude`, `gemini`, `openai`, or `cursor`. Committed fallback is `claude`. First `plai review` prompts (TTY) or `--provider` writes `$XDG_CONFIG_HOME/ansible-plaibook/vars.yml` (or `~/.config/ansible-plaibook/vars.yml`); gitignored `host_vars/localhost.yml` and `ANSIBLE_REVIEW_AGENT_FAMILY` also work. Extra-vars (`-e`) still win. When `agent_family=cursor` and `CURSOR_AGENT=1` with no attach env, `review.yml` starts `aknochow.cursor.bridge` (double-fork sidecar) and reaps it in `always`. Already-set `CURSOR_SDK_BRIDGE_URL`+token or `CURSOR_SDK_BRIDGE_URL_FILE`+`CURSOR_SDK_BRIDGE_TOKEN_FILE` is left alone (do not start a second sidecar). iTerm/CI/AAP keep in-process `launch_bridge`. |
+| `review_cursor_model` | `gpt-5.6-luna` | Cursor model for lens / explore / verify when `agent_family=cursor`. |
+| `review_cursor_effort` | `high` | Cursor effort for those same Cursor calls. |
 | `review_agent_model` | `claude-opus-4-6` | Model used for the Security and Functionality/Quality lens dispatch. |
 | `review_openai_model` | `gpt-5.6` when `agent_family=openai` | OpenAI model for both lenses; the unsuffixed GPT-5.6 alias resolves to Sol. Set `OPENAI_API_KEY` for hosted OpenAI use. |
 | `review_openai_max_completion_tokens` | `16384` | Hosted OpenAI completion budget for lens, exploration, and verification calls. |

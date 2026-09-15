@@ -17,16 +17,18 @@ point: the same invocation always takes the same code path, every dollar
 spent is accounted for per call, and the pipeline can be reasoned about
 and tested like any other piece of infrastructure.
 
-## Two entry points
+## Entry point
 
 | Playbook | Purpose |
 |---|---|
 | [`review.yml`](getting-started.md) | Review a GitHub PR, GitLab MR, a branch, or a single local commit |
-| `bug_pipeline.yml` | Jira-driven autonomous bug fix (GitHub PR creation only) |
+
+`plai review` / `plaibook review` wrap `review.yml`. There is no
+`bug_pipeline.yml` on `main` and no `plai fix`.
 
 ## Where to go next
 
-- **[Getting Started](getting-started.md)**: run your first review and read its output correctly.
+- **[Getting Started](getting-started.md)**: `plai review` / `plaibook review`, and `ansible-playbook review.yml` for AAP.
 - **[Architecture](architecture.md)**: how the pipeline is built: the review role, domain-specific steering, and the independent verification pass.
 - **[Reference](reference.md)**: every variable that controls a run.
 

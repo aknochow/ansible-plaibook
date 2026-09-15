@@ -8,7 +8,13 @@ This repository uses `uv` for reproducible environment management with a pinned 
 ```bash
 uv sync --extra dev
 uv run ansible-galaxy collection install ansible.posix
+# uv sync installs both console scripts: plaibook and plai (same main)
 ```
+
+If the project's `.venv` is not on PATH, invoke the CLI as
+`uv run plai review …` from this checkout. That is the contributor
+path, not the product. After the env is on PATH, the commands are
+`plai review org/repo#123` and `plai review --commit`.
 
 ### Running Tests:
 ```bash

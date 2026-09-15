@@ -68,40 +68,6 @@ wheels = [
 ]
 
 [[package]]
-name = "ansible-plaibook"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "ansible-core" },
-    { name = "jinja2" },
-    { name = "pyyaml" },
-]
-
-[package.optional-dependencies]
-cursor = [
-    { name = "cursor-sdk" },
-]
-dev = [
-    { name = "ansible-lint" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "ansible-core", specifier = ">=2.16.0,<2.20.0" },
-    { name = "ansible-lint", marker = "extra == 'dev'", specifier = ">=24.0.0" },
-    { name = "cursor-sdk", marker = "extra == 'cursor'", specifier = ">=1.0.31,<2.0.0" },
-    { name = "jinja2", specifier = ">=3.1.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0,<10.0.0" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0.0,<8.0.0" },
-    { name = "pyyaml", specifier = ">=6.0.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9.0" },
-]
-provides-extras = ["dev", "cursor"]
-
-[[package]]
 name = "anyio"
 version = "4.15.1"
 source = { registry = "https://pypi.org/simple" }
@@ -697,6 +663,40 @@ sdist = { url = "https://files.pythonhosted.org/packages/5a/82/42f767fc1c1143d6f
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f1/d9/7fb5aa316bc299258e68c73ba3bddbc499654a07f151cba08f6153988714/pathspec-1.1.1-py3-none-any.whl", hash = "sha256:a00ce642f577bf7f473932318056212bc4f8bfdf53128c78bbd5af0b9b20b189", size = 57328, upload-time = "2026-04-27T01:46:07.06Z" },
 ]
+
+[[package]]
+name = "plaibook"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "ansible-core" },
+    { name = "jinja2" },
+    { name = "pyyaml" },
+]
+
+[package.optional-dependencies]
+cursor = [
+    { name = "cursor-sdk" },
+]
+dev = [
+    { name = "ansible-lint" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "ansible-core", specifier = ">=2.16.0,<2.20.0" },
+    { name = "ansible-lint", marker = "extra == 'dev'", specifier = ">=24.0.0" },
+    { name = "cursor-sdk", marker = "extra == 'cursor'", specifier = ">=1.0.31,<2.0.0" },
+    { name = "jinja2", specifier = ">=3.1.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0,<10.0.0" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0.0,<8.0.0" },
+    { name = "pyyaml", specifier = ">=6.0.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9.0" },
+]
+provides-extras = ["dev", "cursor"]
 
 [[package]]
 name = "platformdirs"

@@ -7,17 +7,17 @@ output, check these first:
 
 - **[docs/](docs/)**: OKF-compliant docs (`flydocs build`/`flydocs lint` to render/validate)
 - **[docs/index.md](docs/index.md)**: navigation index
-- **[.claude/skills/ansible-plaibook-review/SKILL.md](.claude/skills/ansible-plaibook-review/SKILL.md)**: how to run `review.yml`/`bug_pipeline.yml` and read `~/.cache/ansible-plaibook/last_run.json` correctly
+- **[.claude/skills/ansible-plaibook-review/SKILL.md](.claude/skills/ansible-plaibook-review/SKILL.md)**: how to run `plai review` / `plaibook review` (and the AAP path `ansible-playbook review.yml`) and read `last_run.<run_id>.json` correctly
 - **[README.md](README.md)**: project overview (separate from `docs/` for now, not flydocs-generated)
 
 ## What This Is
 
-ansible-plaibook is an **Ansible-native AI code-review and bug-fix
-pipeline**, deterministic Ansible orchestration around
-`aknochow.claude`/`aknochow.gemini`/`aknochow.openai` provider
-modules, not an interactive agent loop. Two entry points:
-`review.yml` (PR/MR/branch/commit review, `-e review_type=...`) and
-`bug_pipeline.yml` (Jira-driven autonomous fix, GitHub only).
+ansible-plaibook is an **Ansible-native AI code-review pipeline**,
+deterministic Ansible orchestration around
+`aknochow.claude`/`aknochow.gemini`/`aknochow.openai`/`aknochow.cursor`
+provider modules, not an interactive agent loop. The human entry point
+is `plai review` / `plaibook review` (same program). AAP keeps
+`ansible-playbook review.yml`. `bug_pipeline.yml` is not on `main`.
 
 ## Security & Privacy Context: Critical
 
@@ -88,16 +88,15 @@ re-deriving a claim from scratch.
   `detect_diff_domains.py`, injecting
   `roles/review/templates/domain_steering/*.md.j2` blocks. Add new
   domain guidance there, not into the universal lens prompts.
-- `bug_pipeline.yml` opens GitHub PRs only; GitLab MR creation isn't
-  implemented for that entry point yet (unlike `review.yml`'s own
-  `post_review_comment.py`, which handles both).
+- `bug_pipeline.yml` is not on `main` (parked on `wip/bug-fix-pipeline`).
+  There is no `plai fix`.
 
 ## Key Files
 
 | File | Purpose |
 |---|---|
 | `review.yml` | Entry point: PR/MR/branch/commit review |
-| `bug_pipeline.yml` | Entry point: Jira-driven autonomous bug fix |
+| `plaibook/` | CLI product (`plai` / `plaibook`); see `plaibook/README.md` |
 | `roles/review/tasks/merge.yml` | Dedup, self-refuted-finding filter, score computation |
 | `roles/review/tasks/verify.yml` / `verify_finding.yml` / `verify_turn.yml` | Independent adversarial re-check of each Critical/Major finding |
 | `action_plugins/` | Real Python for anything beyond trivial Jinja |
@@ -127,8 +126,8 @@ uv run pytest                                             # full Python unit sui
 uv run pytest action_plugins/test_foo.py                  # single file
 uv run ./scripts/run_playbook_tests.sh                    # offline Ansible playbook test suite
 uv run ansible-playbook review.yml --syntax-check
-uv run ansible-playbook review.yml -e review_type=commit         # fast, cheap, local
-uv run ansible-playbook review.yml -e review_targets_raw="org/repo!N" # full PR/MR review
-# From outside the checkout, keep the caller's cwd:
-# uv run --directory /path/to/ansible-plaibook ansible-playbook review.yml ...
+plai review --commit                                      # fast, cheap, local (same as plaibook review --commit)
+plai review org/repo!N                                    # full PR/MR review
+# AAP / EE keep ansible-playbook review.yml.
+# If .venv is not on PATH, uv run plai is the CONTRIBUTING invocation.
 ```
