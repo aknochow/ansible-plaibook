@@ -23,6 +23,7 @@ PLAYBOOKS=(
   "tests/test_pr_merge_base_diff.yml"
   "tests/test_resolve_target_pr_parsing.yml"
   "tests/test_sandbox_unreachable_teardown.yml"
+  "tests/test_screen_diff_comments.yml"
   "tests/test_verify_score_recompute.yml"
 )
 
