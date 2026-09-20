@@ -56,16 +56,32 @@ def _is_hunk_body_line(line: str) -> bool:
     return body.startswith(("+", "-", " "))
 
 
+def _unquote_git_path(path: str) -> str:
+    path = path.strip()
+    if len(path) >= 2 and path[0] == '"' and path[-1] == '"':
+        return path[1:-1]
+    return path
+
+
+def _path_from_plus_plus_line(line: str) -> str | None:
+    """New-file path from ``+++ b/path``. Prefer this over ``diff --git``."""
+    body, _ = _line_parts(line)
+    if not body.startswith("+++ "):
+        return None
+    rest = body[4:]
+    if rest == "/dev/null":
+        return ""
+    if rest.startswith("b/"):
+        return _unquote_git_path(rest[2:])
+    return _unquote_git_path(rest)
+
+
 def _path_from_diff_header(header_body: str) -> str:
-    # diff --git a/path b/path  (paths may contain spaces rarely; take b/)
+    """``diff --git a/<path> b/<path>``. Do not rfind `` b/`` (paths may contain it)."""
     rest = header_body[len(_DIFF_FILE_PREFIX) :]
-    marker = " b/"
-    idx = rest.rfind(marker)
-    if idx >= 0:
-        return rest[idx + len(marker) :]
     if rest.startswith("a/") and " b/" in rest:
-        return rest.split(" b/", 1)[1]
-    return rest.split(" ", 1)[-1]
+        return _unquote_git_path(rest.split(" b/", 1)[1])
+    return _unquote_git_path(rest.split(" ", 1)[-1])
 
 
 def language_for_path(path: str) -> str:
@@ -273,9 +289,16 @@ def _screen_markdown_line(content: str, state: _ScreenState) -> str:
     return "".join(out)
 
 
+_SCREEN_LANG_ORDER = ("jinja", "markdown", "python", "yaml")
+
+
 def screen_content_line(content: str, languages: list[str], state: _ScreenState, screen_docstrings: bool) -> str:
+    """Mask Jinja/HTML comments before base-language lexers see their contents."""
     text = content
-    for lang in languages:
+    active = set(languages)
+    for lang in _SCREEN_LANG_ORDER:
+        if lang not in active:
+            continue
         if lang == "python":
             text = _screen_python_line(text, state, screen_docstrings)
         elif lang == "yaml":
@@ -310,6 +333,28 @@ def screen_hunk_body_line(line: str, languages: list[str], new_state: _ScreenSta
     return prefix + screened + ending
 
 
+def screen_hunk_header_line(line: str, languages: list[str], screen_docstrings: bool) -> str:
+    """Keep ``@@ -l,s +l,s @@`` ranges; blank comment text in the source suffix."""
+    body, ending = _line_parts(line)
+    first = body.find("@@")
+    second = body.find("@@", first + 2) if first >= 0 else -1
+    if first < 0 or second < 0:
+        return line
+    ranges = body[: second + 2]
+    suffix = body[second + 2 :]
+    if not suffix:
+        return line
+    lead = ""
+    rest = suffix
+    if rest.startswith(" "):
+        lead = " "
+        rest = rest[1:]
+    if not rest or not languages:
+        return line
+    screened = screen_content_line(rest, languages, _ScreenState(), screen_docstrings)
+    return ranges + lead + screened + ending
+
+
 def _iter_file_sections(lines: list[str]) -> list[tuple[str, list[str]]]:
     if not lines:
         return []
@@ -328,6 +373,9 @@ def _iter_file_sections(lines: list[str]) -> list[tuple[str, list[str]]]:
             current_path = _path_from_diff_header(body)
             current = [line]
         elif current:
+            plus_path = _path_from_plus_plus_line(line)
+            if plus_path:
+                current_path = plus_path
             current.append(line)
         else:
             preamble.append(line)
@@ -355,12 +403,19 @@ def screen_unified_diff(diff_content: str, *, screen_docstrings: bool = False) -
         old_state = _ScreenState()
         out_section: list[str] = []
         for line in section:
-            if languages and _is_hunk_body_line(line) and not _is_hunk_header(line):
+            if languages and _is_hunk_header(line):
+                # Omitted lines between hunks are not in the diff: do not
+                # carry lexer state across them. The suffix after the second
+                # @@ is source context (often a function line + inline comment).
+                new_state = _ScreenState()
+                old_state = _ScreenState()
+                out_section.append(screen_hunk_header_line(line, languages, screen_docstrings))
+            elif languages and _is_hunk_body_line(line):
                 out_section.append(
                     screen_hunk_body_line(line, languages, new_state, old_state, screen_docstrings)
                 )
             else:
-                # Diff metadata, hunk headers, binary notices, unknown langs.
+                # Diff metadata, binary notices, unknown langs.
                 out_section.append(line)
         per_file.append(
             {
