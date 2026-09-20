@@ -125,19 +125,20 @@ def test_markdown_html_comments_blanked_heading_kept():
     assert "Hello" in screened
 
 
-def test_hunk_headers_and_diff_metadata_with_hash_are_untouched():
+def test_hunk_header_ranges_kept_source_suffix_screened():
     diff = (
         "diff --git a/foo#bar.py b/foo#bar.py\n"
         "index abc#def..123#456 100644\n"
         "--- a/foo#bar.py\n"
         "+++ b/foo#bar.py\n"
-        "@@ -1,1 +1,2 @@ def foo():  # hunk header must stay\n"
+        "@@ -1,1 +1,2 @@ def foo():  # hunk header must not reach the lens\n"
         " value = 1\n"
         "+# real comment\n"
     )
     result = screen_unified_diff(diff, screen_docstrings=False)
     assert result["line_counts_match"] is True
-    assert "@@ -1,1 +1,2 @@ def foo():  # hunk header must stay" in result["screened_diff"]
+    assert "@@ -1,1 +1,2 @@" in result["screened_diff"]
+    assert "hunk header must not reach the lens" not in result["screened_diff"]
     assert "diff --git a/foo#bar.py b/foo#bar.py" in result["screened_diff"]
     assert "index abc#def..123#456 100644" in result["screened_diff"]
     assert "real comment" not in result["screened_diff"]
@@ -230,3 +231,52 @@ def test_assignment_triple_quote_is_not_a_docstring():
     )
     stripped = screen_unified_diff(diff, screen_docstrings=True)
     assert "keep this contract" in stripped["screened_diff"]
+
+
+def test_plus_plus_header_wins_when_path_contains_space_b_slash():
+    diff = (
+        "diff --git a/foo b/bar.py b/foo b/bar.py\n"
+        "--- a/foo b/bar.py\n"
+        "+++ b/foo b/bar.py\n"
+        "@@ -0,0 +1,1 @@\n"
+        "+# inject\n"
+    )
+    result = screen_unified_diff(diff, screen_docstrings=False)
+    assert result["per_file"][0]["path"] == "foo b/bar.py"
+    assert result["line_counts_match"] is True
+    assert "inject" not in result["screened_diff"]
+
+
+def test_jinja_comment_with_quote_does_not_poison_yaml_lexer():
+    diff = (
+        "diff --git a/roles/review/templates/x.yml.j2 b/roles/review/templates/x.yml.j2\n"
+        "--- a/roles/review/templates/x.yml.j2\n"
+        "+++ b/roles/review/templates/x.yml.j2\n"
+        "@@ -0,0 +1,3 @@\n"
+        '+{# " unmatched quote #}\n'
+        "+keep: 1\n"
+        "+# yaml comment after jinja\n"
+    )
+    result = screen_unified_diff(diff, screen_docstrings=False)
+    assert result["line_counts_match"] is True
+    assert "unmatched quote" not in result["screened_diff"]
+    assert "yaml comment after jinja" not in result["screened_diff"]
+    assert "+keep: 1\n" in result["screened_diff"]
+
+
+def test_lexer_state_does_not_carry_across_hunk_headers():
+    diff = (
+        "diff --git a/roles/review/templates/x.j2 b/roles/review/templates/x.j2\n"
+        "--- a/roles/review/templates/x.j2\n"
+        "+++ b/roles/review/templates/x.j2\n"
+        "@@ -1,1 +1,2 @@\n"
+        "+{# unclosed in this hunk\n"
+        " keep_hunk_1\n"
+        "@@ -8,1 +8,2 @@\n"
+        "+visible_code\n"
+        " keep_hunk_2\n"
+    )
+    result = screen_unified_diff(diff, screen_docstrings=False)
+    assert result["line_counts_match"] is True
+    assert "unclosed in this hunk" not in result["screened_diff"]
+    assert "+visible_code\n" in result["screened_diff"]
