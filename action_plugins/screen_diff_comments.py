@@ -103,6 +103,11 @@ def language_for_path(path: str) -> str:
         lang = "jinja"
     else:
         lang = "unknown"
+    # Ansible YAML is Jinja-templated even without a .j2 suffix
+    # (playbooks, role tasks/defaults/vars). A `{# #}` in those files
+    # is a comment the lens must not see.
+    if lang == "yaml":
+        return "yaml+jinja"
     if jinja and lang != "jinja":
         return f"{lang}+jinja"
     return lang
@@ -112,6 +117,7 @@ class _ScreenState:
     __slots__ = (
         "py_triple",
         "py_triple_is_docstring",
+        "py_quote",
         "jinja_comment",
         "html_comment",
         "yaml_single",
@@ -121,6 +127,7 @@ class _ScreenState:
     def __init__(self) -> None:
         self.py_triple: str | None = None
         self.py_triple_is_docstring = False
+        self.py_quote: str | None = None
         self.jinja_comment = False
         self.html_comment = False
         self.yaml_single = False
@@ -131,6 +138,40 @@ def _python_docstring_prefix_ok(prefix: str) -> bool:
     # A docstring is a triple-quoted string that is the first statement on
     # the line (optional whitespace only). Assignments and call args are not.
     return prefix.strip() == ""
+
+
+def _emit_python_string(content: str, i: int, state: _ScreenState, out: list[str]) -> int:
+    """Scan an ordinary (non-triple) Python string starting at ``i``.
+
+    Persists ``state.py_quote`` across physical lines only when the line
+    ends with an odd number of backslashes (backslash-newline continuation).
+    An unclosed string without continuation does not poison the next line.
+    """
+    n = len(content)
+    quote = state.py_quote
+    if quote is None:
+        return i
+    while i < n:
+        c = content[i]
+        out.append(c)
+        i += 1
+        if c == "\\":
+            if i < n:
+                out.append(content[i])
+                i += 1
+            continue
+        if c == quote:
+            state.py_quote = None
+            break
+    else:
+        trail = 0
+        j = len(out) - 1
+        while j >= 0 and out[j] == "\\":
+            trail += 1
+            j -= 1
+        if trail % 2 == 0:
+            state.py_quote = None
+    return i
 
 
 def _screen_python_line(content: str, state: _ScreenState, screen_docstrings: bool) -> str:
@@ -169,21 +210,16 @@ def _screen_python_line(content: str, state: _ScreenState, screen_docstrings: bo
             i += 3
             continue
 
+        if state.py_quote:
+            i = _emit_python_string(content, i, state, out)
+            continue
+
         ch = content[i]
         if ch in ("'", '"'):
-            quote = ch
+            state.py_quote = ch
             out.append(ch)
             i += 1
-            while i < n:
-                c = content[i]
-                out.append(c)
-                i += 1
-                if c == "\\" and i < n:
-                    out.append(content[i])
-                    i += 1
-                    continue
-                if c == quote:
-                    break
+            i = _emit_python_string(content, i, state, out)
             continue
 
         if ch == "#":
