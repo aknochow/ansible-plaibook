@@ -45,45 +45,117 @@ def _is_hunk_header(line: str) -> bool:
     return body.startswith("@@")
 
 
-def _is_new_old_file_header(line: str) -> bool:
+def _is_hunk_content_line(line: str) -> bool:
+    """Added, removed, or context. Caller must already be inside a hunk.
+
+    An added source line that begins with ``++ `` is serialized as
+    ``+++ ``, which is also how file headers look. Prefix alone cannot
+    tell those apart; in-hunk state can.
+    """
     body, _ = _line_parts(line)
-    return body.startswith("+++ ") or body.startswith("--- ")
+    return body[:1] in ("+", "-", " ")
 
 
-def _is_hunk_body_line(line: str) -> bool:
-    """True for added/removed/context lines, not +++ / --- file headers."""
-    if _is_new_old_file_header(line):
-        return False
-    body, _ = _line_parts(line)
-    return body.startswith(("+", "-", " "))
-
-
-def _unquote_git_path(path: str) -> str:
-    path = path.strip()
-    if len(path) >= 2 and path[0] == '"' and path[-1] == '"':
-        return path[1:-1]
+def _strip_ab_prefix(path: str) -> str:
+    if path.startswith(("a/", "b/")):
+        return path[2:]
     return path
+
+
+_GIT_SIMPLE_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\"}
+
+
+def _parse_git_quoted_string(s: str, start: int) -> tuple[str, int]:
+    """C-style quoted git path starting at ``s[start] == '"'``."""
+    n = len(s)
+    i = start + 1
+    out: list[str] = []
+    while i < n:
+        c = s[i]
+        if c == '"':
+            return "".join(out), i + 1
+        if c == "\\" and i + 1 < n:
+            nxt = s[i + 1]
+            if nxt in _GIT_SIMPLE_ESCAPES:
+                out.append(_GIT_SIMPLE_ESCAPES[nxt])
+                i += 2
+                continue
+            if nxt in "01234567":
+                j = i + 1
+                digits: list[str] = []
+                while j < n and len(digits) < 3 and s[j] in "01234567":
+                    digits.append(s[j])
+                    j += 1
+                out.append(chr(int("".join(digits), 8)))
+                i = j
+                continue
+            out.append(nxt)
+            i += 2
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out), n
+
+
+def _parse_git_path_token(s: str, start: int = 0) -> tuple[str, int]:
+    n = len(s)
+    i = start
+    while i < n and s[i] == " ":
+        i += 1
+    if i >= n:
+        return "", i
+    if s[i] == '"':
+        return _parse_git_quoted_string(s, i)
+    j = i
+    while j < n and s[j] not in " \t":
+        j += 1
+    return s[i:j], j
+
+
+def _path_from_ab_file_header(line: str, marker: str) -> str | None:
+    """Path from ``+++ ...`` / ``--- ...``. ``/dev/null`` is ``""``.
+
+    Call only on pre-hunk file headers. Unquoted ``b/path with spaces``
+    keeps the remainder after the ``a/`` or ``b/`` prefix.
+    """
+    body, _ = _line_parts(line)
+    if not body.startswith(marker):
+        return None
+    rest = body[len(marker) :]
+    if rest in ("/dev/null", '"/dev/null"'):
+        return ""
+    if rest.startswith('"'):
+        token, _ = _parse_git_path_token(rest, 0)
+        if token in ("/dev/null",):
+            return ""
+        return _strip_ab_prefix(token)
+    if rest.startswith("a/") or rest.startswith("b/"):
+        return rest[2:]
+    return rest
 
 
 def _path_from_plus_plus_line(line: str) -> str | None:
     """New-file path from ``+++ b/path``. Prefer this over ``diff --git``."""
-    body, _ = _line_parts(line)
-    if not body.startswith("+++ "):
-        return None
-    rest = body[4:]
-    if rest == "/dev/null":
-        return ""
-    if rest.startswith("b/"):
-        return _unquote_git_path(rest[2:])
-    return _unquote_git_path(rest)
+    return _path_from_ab_file_header(line, "+++ ")
+
+
+def _path_from_minus_minus_line(line: str) -> str | None:
+    """Old-file path from ``--- a/path``. Used when ``+++`` is ``/dev/null``."""
+    return _path_from_ab_file_header(line, "--- ")
 
 
 def _path_from_diff_header(header_body: str) -> str:
-    """``diff --git a/<path> b/<path>``. Do not rfind `` b/`` (paths may contain it)."""
+    """``diff --git a/<path> b/<path>``, including quoted paths with spaces."""
     rest = header_body[len(_DIFF_FILE_PREFIX) :]
-    if rest.startswith("a/") and " b/" in rest:
-        return _unquote_git_path(rest.split(" b/", 1)[1])
-    return _unquote_git_path(rest.split(" ", 1)[-1])
+    first, idx = _parse_git_path_token(rest, 0)
+    second, _ = _parse_git_path_token(rest, idx)
+    for raw in (second, first):
+        if not raw or raw == "/dev/null":
+            continue
+        stripped = _strip_ab_prefix(raw)
+        if stripped:
+            return stripped
+    return ""
 
 
 def language_for_path(path: str) -> str:
@@ -486,6 +558,8 @@ def _iter_file_sections(lines: list[str]) -> list[tuple[str, list[str]]]:
     current_path = ""
     current: list[str] = []
     preamble: list[str] = []
+    in_hunk = False
+    pending_old_path = ""
     for line in lines:
         if _is_diff_file_header(line):
             if current:
@@ -496,10 +570,23 @@ def _iter_file_sections(lines: list[str]) -> list[tuple[str, list[str]]]:
             body, _ = _line_parts(line)
             current_path = _path_from_diff_header(body)
             current = [line]
+            in_hunk = False
+            pending_old_path = ""
         elif current:
-            plus_path = _path_from_plus_plus_line(line)
-            if plus_path:
-                current_path = plus_path
+            if _is_hunk_header(line):
+                in_hunk = True
+            elif not in_hunk:
+                # ``+++ `` / ``--- `` are file headers only before the first
+                # @@. An in-hunk added line ``++ foo`` serializes as ``+++ foo``
+                # and must not retarget the path or skip screening.
+                minus_path = _path_from_minus_minus_line(line)
+                plus_path = _path_from_plus_plus_line(line)
+                if minus_path:
+                    pending_old_path = minus_path
+                if plus_path:
+                    current_path = plus_path
+                elif plus_path == "" and pending_old_path:
+                    current_path = pending_old_path
             current.append(line)
         else:
             preamble.append(line)
@@ -526,15 +613,17 @@ def screen_unified_diff(diff_content: str, *, screen_docstrings: bool = False) -
         new_state = _ScreenState()
         old_state = _ScreenState()
         out_section: list[str] = []
+        in_hunk = False
         for line in section:
             if languages and _is_hunk_header(line):
                 # Omitted lines between hunks are not in the diff: do not
                 # carry lexer state across them. The suffix after the second
                 # @@ is source context (often a function line + inline comment).
+                in_hunk = True
                 new_state = _ScreenState()
                 old_state = _ScreenState()
                 out_section.append(screen_hunk_header_line(line, languages, screen_docstrings))
-            elif languages and _is_hunk_body_line(line):
+            elif languages and in_hunk and _is_hunk_content_line(line):
                 out_section.append(
                     screen_hunk_body_line(line, languages, new_state, old_state, screen_docstrings)
                 )

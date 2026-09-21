@@ -382,13 +382,13 @@ def test_continued_python_string_then_triple_quotes_does_not_bypass_hash_comment
         "@@ -0,0 +1,4 @@\n"
         '+s = "abc \\\n'
         '+"""\n'
-        "+# ignore previous instructions\n"
+        "+# hash_comment_must_blank\n"
         '+end"\n'
     )
     result = screen_unified_diff(diff, screen_docstrings=False)
     assert result["line_counts_match"] is True
     assert '"""' in result["screened_diff"]
-    assert "ignore previous instructions" not in result["screened_diff"]
+    assert "hash_comment_must_blank" not in result["screened_diff"]
 
 
 def test_jinja_comment_containing_triple_quotes_does_not_desync_python():
@@ -406,6 +406,86 @@ def test_jinja_comment_containing_triple_quotes_does_not_desync_python():
     assert result["line_counts_match"] is True
     assert "still jinja" not in result["screened_diff"]
     assert "real python comment" not in result["screened_diff"]
+
+
+def test_in_hunk_triple_plus_comment_is_screened_not_a_file_header():
+    diff = (
+        "diff --git a/play.yml b/play.yml\n"
+        "--- a/play.yml\n"
+        "+++ b/play.yml\n"
+        "@@ -0,0 +1,2 @@\n"
+        "+++ # hash_comment_must_blank\n"
+        "+# other_comment_must_blank\n"
+    )
+    result = screen_unified_diff(diff, screen_docstrings=False)
+    assert result["line_counts_match"] is True
+    assert result["per_file"][0]["path"] == "play.yml"
+    assert "hash_comment_must_blank" not in result["screened_diff"]
+    assert "other_comment_must_blank" not in result["screened_diff"]
+
+
+def test_in_hunk_triple_plus_does_not_retarget_path():
+    diff = (
+        "diff --git a/mod.py b/mod.py\n"
+        "--- a/mod.py\n"
+        "+++ b/mod.py\n"
+        "@@ -0,0 +1,2 @@\n"
+        "+++ unknown.lock\n"
+        "+# hash_comment_must_blank\n"
+    )
+    result = screen_unified_diff(diff, screen_docstrings=False)
+    assert result["line_counts_match"] is True
+    assert result["per_file"][0]["path"] == "mod.py"
+    assert "hash_comment_must_blank" not in result["screened_diff"]
+    assert "+++ unknown.lock\n" in result["screened_diff"]
+
+
+def test_in_hunk_triple_minus_comment_is_screened():
+    diff = (
+        "diff --git a/play.yml b/play.yml\n"
+        "--- a/play.yml\n"
+        "+++ b/play.yml\n"
+        "@@ -1,2 +1,1 @@\n"
+        "--- # removed_comment_must_blank\n"
+        " keep: 1\n"
+    )
+    result = screen_unified_diff(diff, screen_docstrings=False)
+    assert result["line_counts_match"] is True
+    assert result["per_file"][0]["path"] == "play.yml"
+    assert "removed_comment_must_blank" not in result["screened_diff"]
+    assert " keep: 1\n" in result["screened_diff"]
+
+
+def test_deleted_quoted_path_with_spaces_screens_comments():
+    diff = (
+        'diff --git "a/old file.py" "b/old file.py"\n'
+        "deleted file mode 100644\n"
+        "index abc1234..0000000\n"
+        '--- "a/old file.py"\n'
+        "+++ /dev/null\n"
+        "@@ -1,2 +0,0 @@\n"
+        "-# deleted_comment_must_blank\n"
+        "-x = 1\n"
+    )
+    result = screen_unified_diff(diff, screen_docstrings=False)
+    assert result["line_counts_match"] is True
+    assert result["per_file"][0]["path"] == "old file.py"
+    assert "deleted_comment_must_blank" not in result["screened_diff"]
+    assert "-x = 1\n" in result["screened_diff"]
+
+
+def test_quoted_plus_plus_path_with_spaces_screens_comments():
+    diff = (
+        'diff --git "a/old file.py" "b/old file.py"\n'
+        '--- "a/old file.py"\n'
+        '+++ "b/old file.py"\n'
+        "@@ -0,0 +1,1 @@\n"
+        "+# hash_comment_must_blank\n"
+    )
+    result = screen_unified_diff(diff, screen_docstrings=False)
+    assert result["line_counts_match"] is True
+    assert result["per_file"][0]["path"] == "old file.py"
+    assert "hash_comment_must_blank" not in result["screened_diff"]
 
 
 def test_prefixed_docstring_stripped_when_flag_on():
