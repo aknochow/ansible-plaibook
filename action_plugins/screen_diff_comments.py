@@ -192,6 +192,7 @@ class _ScreenState:
     __slots__ = (
         "py_triple",
         "py_triple_is_docstring",
+        "py_triple_escape",
         "py_quote",
         "jinja_comment",
         "html_comment",
@@ -205,6 +206,7 @@ class _ScreenState:
     def __init__(self) -> None:
         self.py_triple: str | None = None
         self.py_triple_is_docstring = False
+        self.py_triple_escape = False
         self.py_quote: str | None = None
         self.jinja_comment = False
         self.html_comment = False
@@ -259,6 +261,13 @@ def _emit_python_string(content: str, i: int, state: _ScreenState, out: list[str
     return i
 
 
+def _emit_python_triple_char(ch: str, state: _ScreenState, screen_docstrings: bool, out: list[str]) -> None:
+    if screen_docstrings and state.py_triple_is_docstring:
+        out.append(" " if ch != "\t" else "\t")
+    else:
+        out.append(ch)
+
+
 def _screen_python_line(content: str, state: _ScreenState, screen_docstrings: bool) -> str:
     out: list[str] = []
     i = 0
@@ -266,6 +275,20 @@ def _screen_python_line(content: str, state: _ScreenState, screen_docstrings: bo
     while i < n:
         if state.py_triple:
             closer = state.py_triple
+            if state.py_triple_escape:
+                _emit_python_triple_char(content[i], state, screen_docstrings, out)
+                i += 1
+                state.py_triple_escape = False
+                continue
+            if content[i] == "\\":
+                _emit_python_triple_char("\\", state, screen_docstrings, out)
+                i += 1
+                if i < n:
+                    _emit_python_triple_char(content[i], state, screen_docstrings, out)
+                    i += 1
+                else:
+                    state.py_triple_escape = True
+                continue
             if content.startswith(closer, i):
                 if screen_docstrings and state.py_triple_is_docstring:
                     out.append(" " * len(closer))
@@ -274,11 +297,9 @@ def _screen_python_line(content: str, state: _ScreenState, screen_docstrings: bo
                 i += len(closer)
                 state.py_triple = None
                 state.py_triple_is_docstring = False
+                state.py_triple_escape = False
                 continue
-            if screen_docstrings and state.py_triple_is_docstring:
-                out.append(" " if content[i] != "\t" else "\t")
-            else:
-                out.append(content[i])
+            _emit_python_triple_char(content[i], state, screen_docstrings, out)
             i += 1
             continue
 
@@ -308,6 +329,7 @@ def _screen_python_line(content: str, state: _ScreenState, screen_docstrings: bo
             is_doc = _python_docstring_prefix_ok(prefix)
             state.py_triple = quote
             state.py_triple_is_docstring = is_doc
+            state.py_triple_escape = False
             if screen_docstrings and is_doc:
                 out.append(" " * 3)
             else:
@@ -514,18 +536,33 @@ def _languages_for(lang: str) -> list[str]:
     return [lang]
 
 
+def _merge_comment_masks(original: str, new_screened: str, old_screened: str) -> str:
+    """Blank a character if either stream treated it as comment text."""
+    if not (len(original) == len(new_screened) == len(old_screened)):
+        return new_screened
+    out: list[str] = []
+    for orig, new_ch, old_ch in zip(original, new_screened, old_screened):
+        if new_ch != orig:
+            out.append(new_ch)
+        elif old_ch != orig:
+            out.append(old_ch)
+        else:
+            out.append(orig)
+    return "".join(out)
+
+
 def screen_hunk_body_line(line: str, languages: list[str], new_state: _ScreenState, old_state: _ScreenState, screen_docstrings: bool) -> str:
     body, ending = _line_parts(line)
     prefix = body[0]
     content = body[1:]
     if prefix == "-":
         screened = screen_content_line(content, languages, old_state, screen_docstrings)
-    else:
-        # '+' added and ' ' context follow the new-file stream.
+    elif prefix == "+":
         screened = screen_content_line(content, languages, new_state, screen_docstrings)
-        if prefix == " ":
-            # Keep old-file tokenizer in step on context lines.
-            screen_content_line(content, languages, old_state, screen_docstrings)
+    else:
+        new_screened = screen_content_line(content, languages, new_state, screen_docstrings)
+        old_screened = screen_content_line(content, languages, old_state, screen_docstrings)
+        screened = _merge_comment_masks(content, new_screened, old_screened)
     return prefix + screened + ending
 
 

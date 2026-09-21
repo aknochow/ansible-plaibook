@@ -523,3 +523,36 @@ def test_prefixed_docstring_stripped_when_flag_on():
     assert "keep this contract" in kept["screened_diff"]
     assert "keep this contract" not in stripped["screened_diff"]
     assert "keep assignment" in stripped["screened_diff"]
+
+
+def test_context_line_blanked_when_old_stream_still_in_multiline_comment():
+    diff = (
+        "diff --git a/roles/review/templates/x.j2 b/roles/review/templates/x.j2\n"
+        "--- a/roles/review/templates/x.j2\n"
+        "+++ b/roles/review/templates/x.j2\n"
+        "@@ -1,4 +1,2 @@\n"
+        "-{#\n"
+        " context_marker_must_blank\n"
+        "-#}\n"
+        " keep\n"
+    )
+    result = screen_unified_diff(diff, screen_docstrings=False)
+    assert result["line_counts_match"] is True
+    assert "context_marker_must_blank" not in result["screened_diff"]
+    assert " keep\n" in result["screened_diff"]
+
+
+def test_escaped_triple_quote_does_not_close_python_string():
+    diff = (
+        "diff --git a/mod.py b/mod.py\n"
+        "--- a/mod.py\n"
+        "+++ b/mod.py\n"
+        "@@ -0,0 +1,3 @@\n"
+        '+s = """foo\\"""\n'
+        "+# hash_in_string_must_keep\n"
+        '+bar"""\n'
+    )
+    result = screen_unified_diff(diff, screen_docstrings=False)
+    assert result["line_counts_match"] is True
+    assert "hash_in_string_must_keep" in result["screened_diff"]
+    assert 'bar"""' in result["screened_diff"]
