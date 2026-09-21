@@ -14,6 +14,8 @@ playbook: a unit test is not a substitute for the pipeline invariant.
 """
 from __future__ import annotations
 
+import re
+
 from ansible.plugins.action import ActionBase
 
 _DIFF_FILE_PREFIX = "diff --git "
@@ -104,10 +106,12 @@ def language_for_path(path: str) -> str:
     else:
         lang = "unknown"
     # Ansible YAML is Jinja-templated even without a .j2 suffix
-    # (playbooks, role tasks/defaults/vars). A `{# #}` in those files
-    # is a comment the lens must not see.
-    if lang == "yaml":
-        return "yaml+jinja"
+    # (playbooks, role tasks/defaults/vars). Markdown docs and templates
+    # can carry `{# #}` the same way. Do not add Jinja to ordinary
+    # `.py`: the Jinja pass runs before the Python string lexer and
+    # would blank `{# #}` inside string literals.
+    if lang in ("yaml", "markdown"):
+        return f"{lang}+jinja"
     if jinja and lang != "jinja":
         return f"{lang}+jinja"
     return lang
@@ -122,6 +126,9 @@ class _ScreenState:
         "html_comment",
         "yaml_single",
         "yaml_double",
+        "yaml_block",
+        "yaml_block_header_indent",
+        "yaml_block_content_indent",
     )
 
     def __init__(self) -> None:
@@ -132,6 +139,9 @@ class _ScreenState:
         self.html_comment = False
         self.yaml_single = False
         self.yaml_double = False
+        self.yaml_block = False
+        self.yaml_block_header_indent = 0
+        self.yaml_block_content_indent: int | None = None
 
 
 def _python_docstring_prefix_ok(prefix: str) -> bool:
@@ -232,8 +242,47 @@ def _screen_python_line(content: str, state: _ScreenState, screen_docstrings: bo
     return "".join(out)
 
 
-def _screen_yaml_line(content: str, state: _ScreenState) -> str:
-    # YAML comments: `#` at column 0 or preceded by whitespace, outside quotes.
+_YAML_BLOCK_HEADER = re.compile(
+    r"^(?P<indent>[ \t]*)"
+    r"(?:"
+    r"(?:- [ \t]*)*(?:[^:#\n][^:\n]*:[ \t]*)"
+    r"|"
+    r"(?:- [ \t]*)"
+    r")"
+    r"[>|][+-]?(?:\d+)?"
+    r"[ \t]*(?:#.*)?$"
+)
+
+
+def _yaml_leading_ws(content: str) -> int:
+    i = 0
+    n = len(content)
+    while i < n and content[i] in " \t":
+        i += 1
+    return i
+
+
+def _is_yaml_block_header(content: str) -> bool:
+    return _YAML_BLOCK_HEADER.match(content) is not None
+
+
+def _yaml_in_block_content(content: str, state: _ScreenState) -> bool:
+    """True when this line is still inside a `|` / `>` scalar (data, not comments)."""
+    stripped = content.lstrip(" \t")
+    if stripped == "":
+        return True
+    indent = _yaml_leading_ws(content)
+    if state.yaml_block_content_indent is None:
+        if indent <= state.yaml_block_header_indent:
+            return False
+        state.yaml_block_content_indent = indent
+        return True
+    return indent >= state.yaml_block_content_indent
+
+
+def _screen_yaml_flow_line(content: str, state: _ScreenState) -> str:
+    # YAML comments: `#` at column 0 or preceded by whitespace, outside quotes
+    # and outside block scalars (handled by the caller).
     out: list[str] = []
     i = 0
     n = len(content)
@@ -275,6 +324,21 @@ def _screen_yaml_line(content: str, state: _ScreenState) -> str:
         out.append(ch)
         i += 1
     return "".join(out)
+
+
+def _screen_yaml_line(content: str, state: _ScreenState) -> str:
+    in_quotes = state.yaml_single or state.yaml_double
+    if not in_quotes and state.yaml_block:
+        if _yaml_in_block_content(content, state):
+            return content
+        state.yaml_block = False
+        state.yaml_block_content_indent = None
+    screened = _screen_yaml_flow_line(content, state)
+    if not (state.yaml_single or state.yaml_double) and _is_yaml_block_header(content):
+        state.yaml_block = True
+        state.yaml_block_header_indent = _yaml_leading_ws(content)
+        state.yaml_block_content_indent = None
+    return screened
 
 
 def _screen_jinja_line(content: str, state: _ScreenState) -> str:
