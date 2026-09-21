@@ -357,6 +357,27 @@ def test_yaml_block_scalar_hash_is_data_not_comment():
     assert "keep: visible" in result["screened_diff"]
 
 
+def test_yaml_block_scalar_indent_then_chomp_keeps_hash_data():
+    """YAML allows `|2-` (indent indicator, then chomping), not only `|-2`."""
+    diff = (
+        "diff --git a/roles/review/tasks/main.yml b/roles/review/tasks/main.yml\n"
+        "--- a/roles/review/tasks/main.yml\n"
+        "+++ b/roles/review/tasks/main.yml\n"
+        "@@ -0,0 +1,5 @@\n"
+        "+script: |2-\n"
+        "+  # hash_data_must_keep\n"
+        "+  echo hi\n"
+        "+# real_yaml_comment_must_blank\n"
+        "+keep: visible\n"
+    )
+    result = screen_unified_diff(diff, screen_docstrings=False)
+    assert result["line_counts_match"] is True
+    assert "hash_data_must_keep" in result["screened_diff"]
+    assert "echo hi" in result["screened_diff"]
+    assert "real_yaml_comment_must_blank" not in result["screened_diff"]
+    assert "keep: visible" in result["screened_diff"]
+
+
 def test_jinja_comments_in_python_outside_strings_only():
     diff = (
         "diff --git a/mod.py b/mod.py\n"
