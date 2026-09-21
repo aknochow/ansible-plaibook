@@ -358,7 +358,10 @@ _YAML_BLOCK_HEADER = re.compile(
     r"|"
     r"(?:- [ \t]*)"
     r")"
-    r"(?:(?:![^\s]+|&[^\s]+)[ \t]*)*"
+    # Tag (`!foo` / `!!str`) and/or anchor (`&id`), either order. Names
+    # cannot include `!` or `&`, and the group is bounded, so this cannot
+    # exponential-backtrack on `!!!!` / `!&!&`.
+    r"(?:(?:!!?[^\s!]+|&[^\s!&]+)[ \t]*){0,2}"
     r"[>|](?:[+-](?:\d+)?|\d+[+-]?)?"
     r"[ \t]*(?:#.*)?$"
 )
