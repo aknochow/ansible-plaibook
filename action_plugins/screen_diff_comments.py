@@ -220,7 +220,7 @@ def _python_docstring_prefix_ok(prefix: str) -> bool:
     s = prefix.strip()
     if s == "":
         return True
-    return s.lower() in {"r", "u", "f", "b", "fr", "rf", "br", "rb", "ur", "ru"}
+    return s.lower() in {"r", "u", "ur", "ru"}
 
 
 def _emit_python_string(content: str, i: int, state: _ScreenState, out: list[str]) -> int:
@@ -358,6 +358,7 @@ _YAML_BLOCK_HEADER = re.compile(
     r"|"
     r"(?:- [ \t]*)"
     r")"
+    r"(?:(?:![^\s]+|&[^\s]+)[ \t]*)*"
     r"[>|](?:[+-](?:\d+)?|\d+[+-]?)?"
     r"[ \t]*(?:#.*)?$"
 )
@@ -573,9 +574,15 @@ def screen_hunk_header_line(
     line: str,
     new_languages: list[str],
     old_languages: list[str],
+    new_state: _ScreenState,
+    old_state: _ScreenState,
     screen_docstrings: bool,
 ) -> str:
-    """Keep ``@@ -l,s +l,s @@`` ranges; blank comment text in the source suffix."""
+    """Keep ``@@ -l,s +l,s @@`` ranges; blank comment text in the source suffix.
+
+    Uses the hunk's lexer states so a multiline comment opened in the
+    suffix stays open for the following body lines.
+    """
     body, ending = _line_parts(line)
     first = body.find("@@")
     second = body.find("@@", first + 2) if first >= 0 else -1
@@ -592,8 +599,8 @@ def screen_hunk_header_line(
         rest = rest[1:]
     if not rest or not (new_languages or old_languages):
         return line
-    new_screened = screen_content_line(rest, new_languages, _ScreenState(), screen_docstrings)
-    old_screened = screen_content_line(rest, old_languages, _ScreenState(), screen_docstrings)
+    new_screened = screen_content_line(rest, new_languages, new_state, screen_docstrings)
+    old_screened = screen_content_line(rest, old_languages, old_state, screen_docstrings)
     screened = _merge_comment_masks(rest, new_screened, old_screened)
     return ranges + lead + screened + ending
 
@@ -670,7 +677,9 @@ def screen_unified_diff(diff_content: str, *, screen_docstrings: bool = False) -
                 new_state = _ScreenState()
                 old_state = _ScreenState()
                 out_section.append(
-                    screen_hunk_header_line(line, new_languages, old_languages, screen_docstrings)
+                    screen_hunk_header_line(
+                        line, new_languages, old_languages, new_state, old_state, screen_docstrings
+                    )
                 )
             elif languages and in_hunk and _is_hunk_content_line(line):
                 out_section.append(
