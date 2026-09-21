@@ -556,3 +556,24 @@ def test_escaped_triple_quote_does_not_close_python_string():
     assert result["line_counts_match"] is True
     assert "hash_in_string_must_keep" in result["screened_diff"]
     assert 'bar"""' in result["screened_diff"]
+
+
+def test_rename_py_to_txt_screens_removed_python_comments():
+    diff = (
+        "diff --git a/old.py b/new.txt\n"
+        "rename from old.py\n"
+        "rename to new.txt\n"
+        "--- a/old.py\n"
+        "+++ b/new.txt\n"
+        "@@ -1,2 +1,2 @@\n"
+        "-# removed_comment_must_blank\n"
+        "-x = 1\n"
+        "+plain text\n"
+        "+more\n"
+    )
+    result = screen_unified_diff(diff, screen_docstrings=False)
+    assert result["line_counts_match"] is True
+    assert result["per_file"][0]["path"] == "new.txt"
+    assert "removed_comment_must_blank" not in result["screened_diff"]
+    assert "+plain text\n" in result["screened_diff"]
+    assert "-x = 1\n" in result["screened_diff"]
