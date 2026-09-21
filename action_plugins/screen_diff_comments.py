@@ -144,18 +144,14 @@ def _path_from_minus_minus_line(line: str) -> str | None:
     return _path_from_ab_file_header(line, "--- ")
 
 
-def _path_from_diff_header(header_body: str) -> str:
-    """``diff --git a/<path> b/<path>``, including quoted paths with spaces."""
+def _paths_from_diff_header(header_body: str) -> tuple[str, str]:
+    """``diff --git a/<old> b/<new>``, including quoted paths with spaces."""
     rest = header_body[len(_DIFF_FILE_PREFIX) :]
     first, idx = _parse_git_path_token(rest, 0)
     second, _ = _parse_git_path_token(rest, idx)
-    for raw in (second, first):
-        if not raw or raw == "/dev/null":
-            continue
-        stripped = _strip_ab_prefix(raw)
-        if stripped:
-            return stripped
-    return ""
+    old = _strip_ab_prefix(first) if first and first != "/dev/null" else ""
+    new = _strip_ab_prefix(second) if second and second != "/dev/null" else ""
+    return old, new
 
 
 def language_for_path(path: str) -> str:
@@ -551,22 +547,34 @@ def _merge_comment_masks(original: str, new_screened: str, old_screened: str) ->
     return "".join(out)
 
 
-def screen_hunk_body_line(line: str, languages: list[str], new_state: _ScreenState, old_state: _ScreenState, screen_docstrings: bool) -> str:
+def screen_hunk_body_line(
+    line: str,
+    new_languages: list[str],
+    old_languages: list[str],
+    new_state: _ScreenState,
+    old_state: _ScreenState,
+    screen_docstrings: bool,
+) -> str:
     body, ending = _line_parts(line)
     prefix = body[0]
     content = body[1:]
     if prefix == "-":
-        screened = screen_content_line(content, languages, old_state, screen_docstrings)
+        screened = screen_content_line(content, old_languages, old_state, screen_docstrings)
     elif prefix == "+":
-        screened = screen_content_line(content, languages, new_state, screen_docstrings)
+        screened = screen_content_line(content, new_languages, new_state, screen_docstrings)
     else:
-        new_screened = screen_content_line(content, languages, new_state, screen_docstrings)
-        old_screened = screen_content_line(content, languages, old_state, screen_docstrings)
+        new_screened = screen_content_line(content, new_languages, new_state, screen_docstrings)
+        old_screened = screen_content_line(content, old_languages, old_state, screen_docstrings)
         screened = _merge_comment_masks(content, new_screened, old_screened)
     return prefix + screened + ending
 
 
-def screen_hunk_header_line(line: str, languages: list[str], screen_docstrings: bool) -> str:
+def screen_hunk_header_line(
+    line: str,
+    new_languages: list[str],
+    old_languages: list[str],
+    screen_docstrings: bool,
+) -> str:
     """Keep ``@@ -l,s +l,s @@`` ranges; blank comment text in the source suffix."""
     body, ending = _line_parts(line)
     first = body.find("@@")
@@ -582,33 +590,34 @@ def screen_hunk_header_line(line: str, languages: list[str], screen_docstrings: 
     if rest.startswith(" "):
         lead = " "
         rest = rest[1:]
-    if not rest or not languages:
+    if not rest or not (new_languages or old_languages):
         return line
-    screened = screen_content_line(rest, languages, _ScreenState(), screen_docstrings)
+    new_screened = screen_content_line(rest, new_languages, _ScreenState(), screen_docstrings)
+    old_screened = screen_content_line(rest, old_languages, _ScreenState(), screen_docstrings)
+    screened = _merge_comment_masks(rest, new_screened, old_screened)
     return ranges + lead + screened + ending
 
 
-def _iter_file_sections(lines: list[str]) -> list[tuple[str, list[str]]]:
+def _iter_file_sections(lines: list[str]) -> list[tuple[str, str, list[str]]]:
     if not lines:
         return []
-    sections: list[tuple[str, list[str]]] = []
-    current_path = ""
+    sections: list[tuple[str, str, list[str]]] = []
+    old_path = ""
+    new_path = ""
     current: list[str] = []
     preamble: list[str] = []
     in_hunk = False
-    pending_old_path = ""
     for line in lines:
         if _is_diff_file_header(line):
             if current:
-                sections.append((current_path, current))
+                sections.append((old_path, new_path, current))
             elif preamble:
-                sections.append(("", preamble))
+                sections.append(("", "", preamble))
                 preamble = []
             body, _ = _line_parts(line)
-            current_path = _path_from_diff_header(body)
+            old_path, new_path = _paths_from_diff_header(body)
             current = [line]
             in_hunk = False
-            pending_old_path = ""
         elif current:
             if _is_hunk_header(line):
                 in_hunk = True
@@ -618,19 +627,17 @@ def _iter_file_sections(lines: list[str]) -> list[tuple[str, list[str]]]:
                 # and must not retarget the path or skip screening.
                 minus_path = _path_from_minus_minus_line(line)
                 plus_path = _path_from_plus_plus_line(line)
-                if minus_path:
-                    pending_old_path = minus_path
-                if plus_path:
-                    current_path = plus_path
-                elif plus_path == "" and pending_old_path:
-                    current_path = pending_old_path
+                if minus_path is not None:
+                    old_path = minus_path
+                if plus_path is not None:
+                    new_path = plus_path
             current.append(line)
         else:
             preamble.append(line)
     if current:
-        sections.append((current_path, current))
+        sections.append((old_path, new_path, current))
     elif preamble:
-        sections.append(("", preamble))
+        sections.append(("", "", preamble))
     return sections
 
 
@@ -645,8 +652,11 @@ def screen_unified_diff(diff_content: str, *, screen_docstrings: bool = False) -
     screened_lines: list[str] = []
     per_file: list[dict] = []
 
-    for path, section in _iter_file_sections(original_lines):
-        languages = _languages_for(language_for_path(path)) if path else []
+    for old_path, new_path, section in _iter_file_sections(original_lines):
+        path = new_path or old_path
+        new_languages = _languages_for(language_for_path(new_path)) if new_path else []
+        old_languages = _languages_for(language_for_path(old_path)) if old_path else []
+        languages = new_languages or old_languages
         new_state = _ScreenState()
         old_state = _ScreenState()
         out_section: list[str] = []
@@ -659,10 +669,14 @@ def screen_unified_diff(diff_content: str, *, screen_docstrings: bool = False) -
                 in_hunk = True
                 new_state = _ScreenState()
                 old_state = _ScreenState()
-                out_section.append(screen_hunk_header_line(line, languages, screen_docstrings))
+                out_section.append(
+                    screen_hunk_header_line(line, new_languages, old_languages, screen_docstrings)
+                )
             elif languages and in_hunk and _is_hunk_content_line(line):
                 out_section.append(
-                    screen_hunk_body_line(line, languages, new_state, old_state, screen_docstrings)
+                    screen_hunk_body_line(
+                        line, new_languages, old_languages, new_state, old_state, screen_docstrings
+                    )
                 )
             else:
                 # Diff metadata, binary notices, unknown langs.
