@@ -59,7 +59,7 @@ def _line_count(text: str) -> int:
 
 
 def test_language_for_path():
-    assert language_for_path("plaibook/cli.py") == "python"
+    assert language_for_path("plaibook/cli.py") == "python+jinja"
     assert language_for_path("roles/review/defaults/main.yml") == "yaml+jinja"
     assert language_for_path("playbook.yaml") == "yaml+jinja"
     assert language_for_path("roles/review/templates/x.md.j2") == "markdown+jinja"
@@ -355,3 +355,20 @@ def test_yaml_block_scalar_hash_is_data_not_comment():
     assert "echo hi" in result["screened_diff"]
     assert "real yaml comment" not in result["screened_diff"]
     assert "keep: visible" in result["screened_diff"]
+
+
+def test_jinja_comments_in_python_outside_strings_only():
+    diff = (
+        "diff --git a/mod.py b/mod.py\n"
+        "--- a/mod.py\n"
+        "+++ b/mod.py\n"
+        "@@ -0,0 +1,3 @@\n"
+        "+{# lens must not see this in python #}\n"
+        '+kept = "{# keep inside string #}"\n'
+        "+x = 1\n"
+    )
+    result = screen_unified_diff(diff, screen_docstrings=False)
+    assert result["line_counts_match"] is True
+    assert "lens must not see this in python" not in result["screened_diff"]
+    assert '{# keep inside string #}' in result["screened_diff"]
+    assert "+x = 1\n" in result["screened_diff"]

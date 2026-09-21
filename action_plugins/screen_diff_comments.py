@@ -105,12 +105,11 @@ def language_for_path(path: str) -> str:
         lang = "jinja"
     else:
         lang = "unknown"
-    # Ansible YAML is Jinja-templated even without a .j2 suffix
-    # (playbooks, role tasks/defaults/vars). Markdown docs and templates
-    # can carry `{# #}` the same way. Do not add Jinja to ordinary
-    # `.py`: the Jinja pass runs before the Python string lexer and
-    # would blank `{# #}` inside string literals.
-    if lang in ("yaml", "markdown"):
+    # Ansible YAML is Jinja-templated even without a .j2 suffix.
+    # Markdown and ordinary Python can carry `{# #}` the same way.
+    # Python Jinja comments are applied inside the Python lexer so
+    # `{# #}` inside string literals is kept.
+    if lang in ("yaml", "markdown", "python"):
         return f"{lang}+jinja"
     if jinja and lang != "jinja":
         return f"{lang}+jinja"
@@ -222,6 +221,22 @@ def _screen_python_line(content: str, state: _ScreenState, screen_docstrings: bo
 
         if state.py_quote:
             i = _emit_python_string(content, i, state, out)
+            continue
+
+        if state.jinja_comment:
+            if content.startswith("#}", i):
+                out.append("  ")
+                i += 2
+                state.jinja_comment = False
+                continue
+            out.append(" " if content[i] != "\t" else "\t")
+            i += 1
+            continue
+
+        if content.startswith("{#", i):
+            out.append("  ")
+            i += 2
+            state.jinja_comment = True
             continue
 
         ch = content[i]
@@ -393,9 +408,14 @@ _SCREEN_LANG_ORDER = ("jinja", "markdown", "python", "yaml")
 
 
 def screen_content_line(content: str, languages: list[str], state: _ScreenState, screen_docstrings: bool) -> str:
-    """Mask Jinja/HTML comments before base-language lexers see their contents."""
+    """Mask comments per language. Jinja/HTML run before YAML so `{# #}`
+    cannot poison YAML quotes. Python applies `{# #}` itself outside
+    strings, so the standalone Jinja pass is skipped for Python files.
+    """
     text = content
     active = set(languages)
+    if "python" in active:
+        active.discard("jinja")
     for lang in _SCREEN_LANG_ORDER:
         if lang not in active:
             continue
