@@ -144,9 +144,13 @@ class _ScreenState:
 
 
 def _python_docstring_prefix_ok(prefix: str) -> bool:
-    # A docstring is a triple-quoted string that is the first statement on
-    # the line (optional whitespace only). Assignments and call args are not.
-    return prefix.strip() == ""
+    # A docstring is a triple-quoted string that is the first statement
+    # on the line, optionally with a string prefix (r/u/f/b and the
+    # usual two-letter combinations). Assignments and call args are not.
+    s = prefix.strip()
+    if s == "":
+        return True
+    return s.lower() in {"r", "u", "f", "b", "fr", "rf", "br", "rb", "ur", "ru"}
 
 
 def _emit_python_string(content: str, i: int, state: _ScreenState, out: list[str]) -> int:
@@ -206,19 +210,6 @@ def _screen_python_line(content: str, state: _ScreenState, screen_docstrings: bo
             i += 1
             continue
 
-        if content.startswith(('"""', "'''"), i):
-            quote = content[i : i + 3]
-            prefix = "".join(out)
-            is_doc = _python_docstring_prefix_ok(prefix)
-            state.py_triple = quote
-            state.py_triple_is_docstring = is_doc
-            if screen_docstrings and is_doc:
-                out.append(" " * 3)
-            else:
-                out.append(quote)
-            i += 3
-            continue
-
         if state.py_quote:
             i = _emit_python_string(content, i, state, out)
             continue
@@ -237,6 +228,19 @@ def _screen_python_line(content: str, state: _ScreenState, screen_docstrings: bo
             out.append("  ")
             i += 2
             state.jinja_comment = True
+            continue
+
+        if content.startswith(('"""', "'''"), i):
+            quote = content[i : i + 3]
+            prefix = "".join(out)
+            is_doc = _python_docstring_prefix_ok(prefix)
+            state.py_triple = quote
+            state.py_triple_is_docstring = is_doc
+            if screen_docstrings and is_doc:
+                out.append(" " * 3)
+            else:
+                out.append(quote)
+            i += 3
             continue
 
         ch = content[i]
