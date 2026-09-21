@@ -577,3 +577,51 @@ def test_rename_py_to_txt_screens_removed_python_comments():
     assert "removed_comment_must_blank" not in result["screened_diff"]
     assert "+plain text\n" in result["screened_diff"]
     assert "-x = 1\n" in result["screened_diff"]
+
+
+def test_hunk_header_open_jinja_comment_carries_into_body():
+    diff = (
+        "diff --git a/roles/review/templates/x.j2 b/roles/review/templates/x.j2\n"
+        "--- a/roles/review/templates/x.j2\n"
+        "+++ b/roles/review/templates/x.j2\n"
+        "@@ -0,0 +1,1 @@ {#\n"
+        "+payload_must_blank\n"
+    )
+    result = screen_unified_diff(diff, screen_docstrings=False)
+    assert result["line_counts_match"] is True
+    assert "payload_must_blank" not in result["screened_diff"]
+
+
+def test_fstring_and_bytes_not_stripped_as_docstrings():
+    diff = (
+        "diff --git a/mod.py b/mod.py\n"
+        "--- a/mod.py\n"
+        "+++ b/mod.py\n"
+        "@@ -0,0 +1,2 @@\n"
+        '+f"""keep_fstring"""\n'
+        '+b"""keep_bytes"""\n'
+    )
+    stripped = screen_unified_diff(diff, screen_docstrings=True)
+    assert stripped["line_counts_match"] is True
+    assert "keep_fstring" in stripped["screened_diff"]
+    assert "keep_bytes" in stripped["screened_diff"]
+
+
+def test_yaml_tagged_block_scalar_hash_is_data():
+    diff = (
+        "diff --git a/roles/review/tasks/main.yml b/roles/review/tasks/main.yml\n"
+        "--- a/roles/review/tasks/main.yml\n"
+        "+++ b/roles/review/tasks/main.yml\n"
+        "@@ -0,0 +1,5 @@\n"
+        "+script: !!str |\n"
+        "+  # hash_data_must_keep\n"
+        "+  echo hi\n"
+        "+# real_yaml_comment_must_blank\n"
+        "+keep: visible\n"
+    )
+    result = screen_unified_diff(diff, screen_docstrings=False)
+    assert result["line_counts_match"] is True
+    assert "hash_data_must_keep" in result["screened_diff"]
+    assert "echo hi" in result["screened_diff"]
+    assert "real_yaml_comment_must_blank" not in result["screened_diff"]
+    assert "keep: visible" in result["screened_diff"]
