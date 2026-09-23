@@ -1,6 +1,6 @@
 [project]
 name = "ansible-plaibook"
-description = "An Ansible-native AI code-review and bug-fix pipeline."
+description = "An Ansible-native AI code-review pipeline."
 docs_dir = "docs"
 site_dir = "public"
 

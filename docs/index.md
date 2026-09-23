@@ -1,15 +1,15 @@
 ---
 type: Concept
 title: ansible-plaibook
-description: An Ansible-native AI code-review and bug-fix pipeline, deterministic orchestration around Claude/Gemini/Qwen, not an interactive agent loop.
+description: An Ansible-native AI code-review pipeline, deterministic orchestration around Claude/Gemini/Qwen, not an interactive agent loop.
 tags: [overview, review-pipeline, ansible]
 status: stable
 ---
 
 # ansible-plaibook
 
-ansible-plaibook is an **Ansible-native AI code-review and bug-fix pipeline**.
-It runs the same review/fix logic a human would perform by hand (reading a
+ansible-plaibook is an **Ansible-native AI code-review pipeline**.
+It runs the same review logic a human would perform by hand (reading a
 diff, checking it against known-good and known-bad patterns, verifying
 findings before trusting them) as a deterministic Ansible playbook rather
 than an open-ended interactive agent session. That determinism is the
