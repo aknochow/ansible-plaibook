@@ -148,24 +148,66 @@ def test_quote_prefixed_github_user_mention_is_not_a_git_credential():
 
 def test_blocking_guardian_findings_keeps_credentials_in_git_url():
     mod = _filter()
+    noisy = [
+        "env-variable",
+        "exported-env-variable",
+        "generic-password-assignment",
+        "very-long-base64-secret",
+        "base64-secret-with-context",
+        "json-token",
+    ]
     findings = [
         {
             "rule_id": "SECRET-001",
             "message": "Secret detected: Credentials In Git Url",
+            "details": {"secret_type": "credentials-in-git-url"},
             "file_path": "ansible.xxx-ai-guardian-input.txt",
         },
         {
             "rule_id": "SECRET-001",
             "message": "Secret detected: GitHub Personal Access Token",
+            "details": {"secret_type": "github-personal-token"},
             "file_path": "config.py",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+            "file_path": "includes/test_image_vertex.sh",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Password/Secret Assignment",
+            "details": {"secret_type": "generic-password-assignment"},
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Long Base64 Secret",
+            "details": {"secret_type": "very-long-base64-secret"},
         },
         {"rule_id": "PROMPT-INJECTION-001", "message": "Prompt injection detected"},
     ]
-    blocking = mod.blocking_guardian_findings(findings, ["SECRET-001"])
-    assert [item["message"] for item in blocking] == [
-        "Secret detected: Credentials In Git Url",
-        "Secret detected: GitHub Personal Access Token",
+    blocking = mod.blocking_guardian_findings(findings, ["SECRET-001"], noisy)
+    assert [item["details"]["secret_type"] for item in blocking] == [
+        "credentials-in-git-url",
+        "github-personal-token",
     ]
+
+
+def test_blocking_guardian_findings_uses_message_when_details_missing():
+    mod = _filter()
+    findings = [
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Credentials In Git Url",
+        },
+    ]
+    blocking = mod.blocking_guardian_findings(findings, ["SECRET-001"], ["env-variable"])
+    assert [item["message"] for item in blocking] == ["Secret detected: Credentials In Git Url"]
 
 
 def test_placeholder_userinfo_is_preserved():

@@ -100,6 +100,14 @@
       line_number: 2
       snippet: null
       details: {secret_type: "test-placeholder"}
+    fake_env_secret_finding:
+      rule_id: "SECRET-001"
+      level: "error"
+      message: "Secret detected: Environment Variable"
+      file_path: "includes/test_image_vertex.sh"
+      line_number: 23
+      snippet: null
+      details: {secret_type: "env-variable"}
 
   tasks:
     - name: Check whether ai-guardian is actually on PATH
@@ -317,3 +325,32 @@
           false. forced={{ guardian_forced_needs_changes | default('undefined') }},
           verdict={{ review_verdict }}
         success_msg: "review_guardian_scan_blocking_enabled=false correctly surfaces without blocking."
+
+    - name: "Case 9: env-variable SECRET-001 stays informational and does not force the verdict"
+      block:
+        - name: Classify an env-variable SECRET-001 the same way guardian_scan.yml does
+          ansible.builtin.set_fact:
+            review_verdict: "READY_FOR_HUMAN_REVIEW"
+            guardian_scan_available: true
+            guardian_findings: "{{ [fake_env_secret_finding] }}"
+            guardian_blocking_findings: "{{ [fake_env_secret_finding] | blocking_guardian_findings(review_guardian_blocking_rule_ids, review_guardian_informational_secret_types) }}"
+
+        - name: Run guardian_scan_enforce_verdict.yml against the env-variable finding
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: guardian_scan_enforce_verdict.yml
+
+    - name: Assert the env-variable finding did not steal the lens verdict
+      ansible.builtin.assert:
+        that:
+          - guardian_findings | length == 1
+          - guardian_blocking_findings == []
+          - not (guardian_forced_needs_changes | bool)
+          - review_verdict == 'READY_FOR_HUMAN_REVIEW'
+        fail_msg: >-
+          Expected env-variable SECRET-001 to stay informational.
+          blocking={{ guardian_blocking_findings }},
+          forced={{ guardian_forced_needs_changes | default('undefined') }},
+          verdict={{ review_verdict }}
+        success_msg: "env-variable SECRET-001 correctly stayed informational-only."
+

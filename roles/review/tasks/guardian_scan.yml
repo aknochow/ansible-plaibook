@@ -581,7 +581,7 @@
     # not whether it gets computed.
     - name: Determine which findings (if any) are in a blocking rule_id category
       ansible.builtin.set_fact:
-        guardian_blocking_findings: "{{ guardian_findings | blocking_guardian_findings(review_guardian_blocking_rule_ids) }}"
+        guardian_blocking_findings: "{{ guardian_findings | blocking_guardian_findings(review_guardian_blocking_rule_ids, review_guardian_informational_secret_types | default([])) }}"
 
     - name: Clean up the temporary input and findings files
       ansible.builtin.file:

@@ -44,12 +44,54 @@ def prepare_guardian_scan_input(text: str) -> str:
     return neutralize_host_mentions(text)
 
 
+_SECRET_DETECTED_PREFIX = re.compile(r"(?i)^secret detected:\s*")
+# Display-name slugs from get_secret_type_display() when details.secret_type
+# is missing. Canonical ids are the secrets.toml rule ids.
+_SECRET_TYPE_ALIASES = {
+    "environment-variable": "env-variable",
+    "exported-environment-variable": "exported-env-variable",
+    "password-secret-assignment": "generic-password-assignment",
+    "long-hex-secret": "very-long-hex-secret",
+    "long-base64-secret": "very-long-base64-secret",
+    "hex-secret": "hex-secret-with-context",
+    "base64-secret": "base64-secret-with-context",
+    "credentials-embedded-in-git-remote-url": "credentials-in-git-url",
+}
+
+
+def _secret_type_slug(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    text = _SECRET_DETECTED_PREFIX.sub("", text)
+    text = re.sub(r"\s*\(.*\)$", "", text).strip()
+    slug = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+    return _SECRET_TYPE_ALIASES.get(slug, slug)
+
+
+def guardian_secret_type(finding: dict) -> str:
+    """ai-guardian SECRET-001 subtype (toml rule id), or empty."""
+    details = finding.get("details")
+    if isinstance(details, dict):
+        raw = details.get("secret_type") or details.get("rule_id")
+        slug = _secret_type_slug(raw)
+        if slug:
+            return slug
+    return _secret_type_slug(finding.get("message"))
+
+
 def blocking_guardian_findings(
     findings: Any,
     rule_ids: Any,
+    informational_secret_types: Any = None,
 ) -> list[dict]:
-    """Findings whose rule_id is configured to force NEEDS_CHANGES."""
+    """Findings whose rule_id is configured to force NEEDS_CHANGES.
+
+    SECRET-001 is one engine-agnostic bucket. Generic assignment / env /
+    long-blob rules fire on ordinary CI scripts (Vertex SA key plumbing,
+    ``export FOO=...``) and must not steal the verdict. credentials-in-git-url
+    and prefix-backed tokens still block.
+    """
     ids = {str(item) for item in (rule_ids or []) if item}
+    noisy = {_secret_type_slug(item) for item in (informational_secret_types or []) if item}
     out: list[dict] = []
     if not isinstance(findings, list):
         return out
@@ -57,6 +99,9 @@ def blocking_guardian_findings(
         if not isinstance(finding, dict):
             continue
         if str(finding.get("rule_id") or "") not in ids:
+            continue
+        secret_type = guardian_secret_type(finding)
+        if secret_type and secret_type in noisy:
             continue
         out.append(finding)
     return out
@@ -67,5 +112,6 @@ class FilterModule:
         return {
             "neutralize_host_mentions": neutralize_host_mentions,
             "prepare_guardian_scan_input": prepare_guardian_scan_input,
+            "guardian_secret_type": guardian_secret_type,
             "blocking_guardian_findings": blocking_guardian_findings,
         }
