@@ -174,16 +174,19 @@ def test_blocking_guardian_findings_keeps_credentials_in_git_url():
             "message": "Secret detected: Environment Variable",
             "details": {"secret_type": "env-variable"},
             "file_path": "includes/test_image_vertex.sh",
+            "snippet": "export VERTEX_SA_KEY=${VERTEX_SA_KEY}",
         },
         {
             "rule_id": "SECRET-001",
             "message": "Secret detected: Password/Secret Assignment",
             "details": {"secret_type": "generic-password-assignment"},
+            "snippet": 'password = "${DB_PASSWORD}"',
         },
         {
             "rule_id": "SECRET-001",
             "message": "Secret detected: Long Base64 Secret",
             "details": {"secret_type": "very-long-base64-secret"},
+            "snippet": "payload=${CI_PAYLOAD}",
         },
         {"rule_id": "PROMPT-INJECTION-001", "message": "Prompt injection detected"},
     ]
@@ -225,6 +228,7 @@ def test_credential_shaped_literal_blocks_and_placeholder_does_not():
             "rule_id": "SECRET-001",
             "message": "Secret detected: Environment Variable",
             "details": {"secret_type": "env-variable"},
+            "snippet": "export TOKEN=${TOKEN}",
         },
     ]
     blocking = mod.blocking_guardian_findings(
@@ -279,6 +283,7 @@ def test_blocking_guardian_findings_uses_message_when_details_missing():
         {
             "rule_id": "SECRET-001",
             "message": "Secret detected: Environment Variable",
+            "snippet": "export FOO=${FOO}",
         },
         {
             "rule_id": "SECRET-001",

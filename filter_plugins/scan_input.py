@@ -156,13 +156,15 @@ def blocking_guardian_findings(
 ) -> list[dict]:
     """Findings whose rule_id is configured to force NEEDS_CHANGES.
 
-    SECRET-001 is one engine-agnostic bucket. Low-precision rules
-    (env assignment, generic password assignment, unbounded hex/base64)
-    are informational. Credential-shaped rules still block unless the
-    captured value is a placeholder or a variable reference.
+    SECRET-001 is one engine-agnostic bucket. Subtype alone does not
+    demote a finding. A hit is informational only when the captured
+    value is a placeholder or a variable reference. Prefix-backed
+    tokens and PEM keys block even when the value sits in an env
+    assignment or a long blob. ``informational_secret_types`` is
+    accepted for callers and is not an unconditional bypass.
     """
     ids = {str(item) for item in (rule_ids or []) if item}
-    noisy = {_secret_type_slug(item) for item in (informational_secret_types or []) if item}
+    _ = informational_secret_types
     out: list[dict] = []
     if not isinstance(findings, list):
         return out
@@ -173,9 +175,6 @@ def blocking_guardian_findings(
             continue
         if finding_has_prefix_token(finding):
             out.append(finding)
-            continue
-        secret_type = guardian_secret_type(finding)
-        if secret_type and secret_type in noisy:
             continue
         if secret_value_is_placeholder(finding):
             continue

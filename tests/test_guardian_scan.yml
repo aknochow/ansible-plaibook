@@ -106,7 +106,7 @@
       message: "Secret detected: Environment Variable"
       file_path: "includes/test_image_vertex.sh"
       line_number: 23
-      snippet: null
+      snippet: "export VERTEX_SA_KEY=${VERTEX_SA_KEY}"
       details: {secret_type: "env-variable"}
 
   tasks:

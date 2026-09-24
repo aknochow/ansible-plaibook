@@ -569,14 +569,13 @@ review_guardian_pip_timeout_seconds: 60
 # the detector from guardian_blocking_findings: a real git userinfo URL
 # uses the same SECRET-001 message.
 #
-# SECRET-001 is also the bucket for generic assignment / env / long-blob
-# rules. Those fire on ordinary CI (Vertex SA key plumbing, export
-# FOO=base64) and stay informational. Bearer headers, API-key headers,
-# and JSON/YAML credential fields stay blocking. A hit of any blocking
-# type is demoted only when the captured value is a placeholder or a
+# Subtype alone does not demote a SECRET-001 hit. A finding is
+# informational only when the captured value is a placeholder or a
 # variable reference (${VAR}, lookup('env'), os.environ, PASSWORD).
-# Prefix-backed tokens (ghp_, glpat-, sk-ant-, AKIA, PEM private keys)
-# still force NEEDS_CHANGES.
+# A literal env assignment, password assignment, hex/base64 blob,
+# bearer header, or JSON/YAML credential still blocks. Prefix-backed
+# tokens (ghp_, glpat-, sk-ant-, AKIA, PEM private keys) block even
+# when the surrounding text is an env assignment.
 #
 # A list, not a single hardcoded value, so adding another confirmed-
 # reliable blocking category later is a config change, not a code
