@@ -104,11 +104,11 @@ def guardian_secret_type(finding: dict) -> str:
 # A captured value that is a reference or a stock placeholder, not a literal.
 _PLACEHOLDER_SECRET_RE = re.compile(
     r"(?i)^(?:"
-    r"<[^>]+>|"
-    r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*|%[_A-Za-z0-9]+%|\{\{[^}]+\}\}|"
-    r"lookup\s*\(\s*['\"]env['\"][^)]*\)|"
-    r"os\.environ(?:\.[A-Za-z_]+|\[[^\]]+\])?|"
-    r"environ\.get\([^)]*\)"
+    r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*|%[_A-Za-z0-9]+%|"
+    r"\{\{\s*[A-Za-z_][A-Za-z0-9_]*\s*\}\}|"
+    r"lookup\s*\(\s*['\"]env['\"]\s*,\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)|"
+    r"os\.environ(?:\.[A-Za-z_]+|\[['\"][A-Za-z_][A-Za-z0-9_]*['\"]\])?|"
+    r"environ\.get\(\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)"
     r")$"
 )
 _BEARER_VALUE_RE = re.compile(r"(?i)\bbearer\s+(\S+)")
@@ -116,9 +116,9 @@ _ASSIGNED_VALUE_RE = re.compile(r"""[:=]\s*['\"]([^'\"]*)['\"]""")
 _UNQUOTED_REF_RE = re.compile(
     r"(?i)[:=]\s*("
     r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*|"
-    r"lookup\s*\([^)]*\)|"
-    r"os\.environ(?:\.[A-Za-z_]+|\[[^\]]+\])?|"
-    r"environ\.get\([^)]*\)"
+    r"lookup\s*\(\s*['\"]env['\"]\s*,\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)|"
+    r"os\.environ(?:\.[A-Za-z_]+|\[['\"][A-Za-z_][A-Za-z0-9_]*['\"]\])?|"
+    r"environ\.get\(\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)"
     r")"
 )
 # Prefix-backed credentials still block when a generic subtype reported them.

@@ -571,7 +571,7 @@ review_guardian_pip_timeout_seconds: 60
 #
 # Subtype alone does not demote a SECRET-001 hit. A finding is
 # informational only when the captured value is a placeholder or a
-# variable reference (${VAR}, lookup('env'), os.environ, PASSWORD).
+# variable reference (${VAR}, lookup('env', 'NAME'), os.environ.NAME).
 # A literal env assignment, password assignment, hex/base64 blob,
 # bearer header, or JSON/YAML credential still blocks. Prefix-backed
 # tokens (ghp_, glpat-, sk-ant-, AKIA, PEM private keys) block even
@@ -592,6 +592,11 @@ review_guardian_informational_secret_types:
   - very-long-hex-secret
   - base64-secret-with-context
   - very-long-base64-secret
+  - json-api-key
+  - json-token
+  - json-password
+  - json-secret
+  - yaml-password
 # Separate from review_guardian_scan_enabled (which controls whether
 # the scan runs at all): set false to keep scanning and surfacing
 # findings without letting any of them force a verdict, independent of
