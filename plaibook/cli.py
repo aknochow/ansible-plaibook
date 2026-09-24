@@ -42,6 +42,19 @@ from plaibook.summary import (
     load_json,
     sanitize_display_line,
 )
+from plaibook.update import (
+    NetworkError,
+    UpdateError,
+    VersionError,
+    current_version,
+    download_pypi_wheel,
+    fetch_pypi_latest_version,
+    pip_install_from_path,
+    pip_install_git_ref,
+    prompt_confirm,
+    update_cache_dir,
+    verify_installation,
+)
 from plaibook.wait import WaitSpinner, spinner_enabled
 
 USAGE_EPILOG = """\
@@ -97,6 +110,10 @@ Examples:
   plai review org/repo/123 -f
   plai review org/repo/123 --provider cursor
   plai review org/repo/123 --no-sandbox
+  plai update
+  plai update --check
+  plai update --branch main
+  plai update --branch v0.1.26
 """
 
 
@@ -246,6 +263,29 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
         dest="playbook_root",
         help="Use a local playbook checkout instead of this pip install.",
     )
+
+    update = sub.add_parser(
+        "update",
+        help="Update plaibook to the latest version (or specific branch).",
+        description="Reinstall plaibook from PyPI or a GitHub branch/ref without relying on pip's git clone into /tmp.",
+    )
+    update.add_argument(
+        "--branch",
+        metavar="REF",
+        help="Install from a GitHub ref (branch, tag, or commit SHA) instead of PyPI.",
+    )
+    update.add_argument(
+        "--check",
+        action="store_true",
+        help="Check for updates without installing.",
+    )
+    update.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Skip confirmation prompt.",
+    )
+
     return parser
 
 
@@ -525,13 +565,151 @@ def cmd_review(args: argparse.Namespace) -> int:
     return result.returncode
 
 
+def cmd_update(args: argparse.Namespace) -> int:
+    """Handle the update command for PyPI and GitHub branch installs."""
+    current = current_version()
+
+    # Check mode: just report available version
+    if args.check:
+        if args.branch:
+            print(f"Current version: {current}", file=sys.stderr)
+            print(
+                f"--check with --branch would install from GitHub ref: {args.branch}",
+                file=sys.stderr,
+            )
+            return 0
+
+        try:
+            latest = fetch_pypi_latest_version()
+        except NetworkError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+
+        print(f"Current version: {current}", file=sys.stderr)
+        print(f"Latest version:  {latest}", file=sys.stderr)
+        if current == latest:
+            print("plaibook is already up to date.", file=sys.stderr)
+            return 0
+        else:
+            print(f"Update available: {current} → {latest}", file=sys.stderr)
+            return 0
+
+    # GitHub branch install (issue #61: use git+https, not tarball)
+    if args.branch:
+        try:
+            if not args.yes:
+                if not prompt_confirm(
+                    f"Install plaibook from git ref '{args.branch}'?"
+                ):
+                    print("Update cancelled.", file=sys.stderr)
+                    return 1
+
+            print(f"Installing plaibook from git ref: {args.branch}", file=sys.stderr)
+            print("(pip will clone from git+https://github.com/aknochow/ansible-plaibook.git)", file=sys.stderr)
+
+            from plaibook.update import _exclusive_update_lock
+            with _exclusive_update_lock():
+                result = pip_install_git_ref(args.branch, stderr=sys.stderr)
+
+                if result.returncode != 0:
+                    print("pip install failed:", file=sys.stderr)
+                    stderr_tail = result.stderr[-2000:] if result.stderr else ""
+                    if stderr_tail:
+                        print(stderr_tail, file=sys.stderr)
+                    return 2
+
+                if not verify_installation():
+                    print(
+                        "Installation completed but version verification failed. "
+                        "Please check installation.",
+                        file=sys.stderr,
+                    )
+                    return 2
+
+                # Get the installed version for success message
+                try:
+                    from importlib.metadata import version
+                    installed_version = version("plaibook")
+                    print(
+                        f"Successfully installed plaibook from '{args.branch}' (version {installed_version})",
+                        file=sys.stderr,
+                    )
+                except Exception:
+                    print(
+                        f"Successfully installed plaibook from '{args.branch}'",
+                        file=sys.stderr,
+                    )
+                return 0
+
+        except (UpdateError, NetworkError, VersionError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+
+    # PyPI install (default)
+    try:
+        latest = fetch_pypi_latest_version()
+    except NetworkError as exc:
+        print(str(exc), file=sys.stderr)
+        print(
+            "Cannot check for updates. Use --branch to install from GitHub instead.",
+            file=sys.stderr,
+        )
+        return 2
+
+    if current == latest:
+        print(f"plaibook is already up to date ({current}).", file=sys.stderr)
+        return 0
+
+    try:
+        cache_dir = update_cache_dir()
+        print(f"Update available: {current} → {latest}", file=sys.stderr)
+
+        from plaibook.update import _exclusive_update_lock
+        with _exclusive_update_lock():
+            if not args.yes:
+                if not prompt_confirm(f"Update plaibook from {current} to {latest}?"):
+                    print("Update cancelled.", file=sys.stderr)
+                    return 1
+
+            print(f"Downloading plaibook {latest} from PyPI...", file=sys.stderr)
+            wheel_path = download_pypi_wheel(latest, cache_dir)
+
+            print(f"Installing plaibook {latest}...", file=sys.stderr)
+            result = pip_install_from_path(wheel_path, stderr=sys.stderr)
+
+            if result.returncode != 0:
+                print("pip install failed:", file=sys.stderr)
+                stderr_tail = result.stderr[-2000:] if result.stderr else ""
+                if stderr_tail:
+                    print(stderr_tail, file=sys.stderr)
+                return 2
+
+            if not verify_installation(latest):
+                print(
+                    f"Installation completed but version verification failed. "
+                    f"Expected {latest}, please check installation.",
+                    file=sys.stderr,
+                )
+                return 2
+
+            print(f"Successfully updated plaibook to {latest}", file=sys.stderr)
+            return 0
+
+    except (UpdateError, NetworkError, VersionError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
-    if args.command != "review":
+    if args.command == "review":
+        return cmd_review(args)
+    elif args.command == "update":
+        return cmd_update(args)
+    else:
         parser.print_help()
         return 2
-    return cmd_review(args)
 
 
 if __name__ == "__main__":
