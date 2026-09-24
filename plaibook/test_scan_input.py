@@ -180,7 +180,7 @@ def test_blocking_guardian_findings_keeps_credentials_in_git_url():
             "rule_id": "SECRET-001",
             "message": "Secret detected: Password/Secret Assignment",
             "details": {"secret_type": "generic-password-assignment"},
-            "snippet": 'password = "${DB_PASSWORD}"',
+            "snippet": 'credential = "${DB_PASSWORD}"',
         },
         {
             "rule_id": "SECRET-001",
@@ -270,7 +270,7 @@ def test_unquoted_references_are_placeholders_and_prefixes_still_block():
             "rule_id": "SECRET-001",
             "message": "Secret detected: Password Assignment",
             "details": {"secret_type": "generic-password-assignment"},
-            "snippet": 'password = "changeme"',
+            "snippet": 'credential = "changeme"',
         },
         {
             "rule_id": "SECRET-001",
