@@ -78,6 +78,56 @@ def guardian_secret_type(finding: dict) -> str:
     return _secret_type_slug(finding.get("message"))
 
 
+# A captured value that is a reference or a stock placeholder, not a literal.
+_PLACEHOLDER_SECRET_RE = re.compile(
+    r"(?i)^(?:"
+    r"password|passwd|token|secret|redacted|changeme|xxx+|x{8,}|your[_-]?token|"
+    r"<[^>]+>|"
+    r"\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*|%[_A-Za-z0-9]+%|\{\{[^}]+\}\}|"
+    r"lookup\s*\(\s*['\"]env['\"][^)]*\)|"
+    r"os\.environ(?:\.[A-Za-z_]+|\[[^\]]+\])?|"
+    r"environ\.get\([^)]*\)"
+    r")$"
+)
+_BEARER_VALUE_RE = re.compile(r"(?i)\bbearer\s+(\S+)")
+_ASSIGNED_VALUE_RE = re.compile(r"""[:=]\s*['\"]([^'\"]*)['\"]""")
+
+
+def _captured_secret(text: str) -> str:
+    bearer = _BEARER_VALUE_RE.search(text)
+    if bearer:
+        return bearer.group(1).strip().strip("'\"")
+    assigned = _ASSIGNED_VALUE_RE.search(text)
+    if assigned:
+        return assigned.group(1).strip()
+    return text.strip().strip("'\"")
+
+
+def _finding_secret_text(finding: dict) -> str:
+    details = finding.get("details")
+    if isinstance(details, dict):
+        for key in ("match", "secret", "value", "raw"):
+            raw = details.get(key)
+            if isinstance(raw, str) and raw.strip():
+                return raw.strip()
+    snippet = finding.get("snippet")
+    if isinstance(snippet, str) and snippet.strip():
+        return snippet.strip()
+    return ""
+
+
+def secret_value_is_placeholder(finding: dict) -> bool:
+    """True when the captured secret is a reference or a stock placeholder.
+
+    No captured text is not a placeholder: a credential-shaped rule with
+    no value still blocks.
+    """
+    text = _finding_secret_text(finding)
+    if not text:
+        return False
+    return _PLACEHOLDER_SECRET_RE.match(_captured_secret(text)) is not None
+
+
 def blocking_guardian_findings(
     findings: Any,
     rule_ids: Any,
@@ -85,10 +135,10 @@ def blocking_guardian_findings(
 ) -> list[dict]:
     """Findings whose rule_id is configured to force NEEDS_CHANGES.
 
-    SECRET-001 is one engine-agnostic bucket. Generic assignment / env /
-    long-blob rules fire on ordinary CI scripts (Vertex SA key plumbing,
-    ``export FOO=...``) and must not steal the verdict. credentials-in-git-url
-    and prefix-backed tokens still block.
+    SECRET-001 is one engine-agnostic bucket. Low-precision rules
+    (env assignment, generic password assignment, unbounded hex/base64)
+    are informational. Credential-shaped rules still block unless the
+    captured value is a placeholder or a variable reference.
     """
     ids = {str(item) for item in (rule_ids or []) if item}
     noisy = {_secret_type_slug(item) for item in (informational_secret_types or []) if item}
@@ -103,6 +153,8 @@ def blocking_guardian_findings(
         secret_type = guardian_secret_type(finding)
         if secret_type and secret_type in noisy:
             continue
+        if secret_value_is_placeholder(finding):
+            continue
         out.append(finding)
     return out
 
@@ -113,5 +165,6 @@ class FilterModule:
             "neutralize_host_mentions": neutralize_host_mentions,
             "prepare_guardian_scan_input": prepare_guardian_scan_input,
             "guardian_secret_type": guardian_secret_type,
+            "secret_value_is_placeholder": secret_value_is_placeholder,
             "blocking_guardian_findings": blocking_guardian_findings,
         }

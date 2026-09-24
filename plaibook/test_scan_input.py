@@ -194,6 +194,48 @@ def test_blocking_guardian_findings_keeps_credentials_in_git_url():
     ]
 
 
+def test_credential_shaped_literal_blocks_and_placeholder_does_not():
+    mod = _filter()
+    findings = [
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: JSON Token",
+            "details": {"secret_type": "json-token"},
+            "snippet": '{"token": "ya29.literal-secret-value"}',
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: JSON Token",
+            "details": {"secret_type": "json-token"},
+            "snippet": '{"token": "${CI_JOB_TOKEN}"}',
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Bearer Token",
+            "details": {"secret_type": "bearer-token"},
+            "snippet": "Authorization: Bearer ${TOKEN}",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: API Key Header",
+            "details": {"secret_type": "api-key-header"},
+            "snippet": 'x-api-key: "PASSWORD"',
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+        },
+    ]
+    blocking = mod.blocking_guardian_findings(
+        findings,
+        ["SECRET-001"],
+        ["env-variable"],
+    )
+    assert [item["details"]["secret_type"] for item in blocking] == ["json-token"]
+    assert blocking[0]["snippet"].endswith('literal-secret-value"}')
+
+
 def test_blocking_guardian_findings_uses_message_when_details_missing():
     mod = _filter()
     findings = [
