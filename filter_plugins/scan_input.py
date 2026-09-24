@@ -91,6 +91,18 @@ _PLACEHOLDER_SECRET_RE = re.compile(
 )
 _BEARER_VALUE_RE = re.compile(r"(?i)\bbearer\s+(\S+)")
 _ASSIGNED_VALUE_RE = re.compile(r"""[:=]\s*['\"]([^'\"]*)['\"]""")
+_UNQUOTED_REF_RE = re.compile(
+    r"(?i)[:=]\s*("
+    r"\$\{[^}\s]+\}|\$[A-Za-z_][A-Za-z0-9_]*|"
+    r"lookup\s*\([^)]*\)|"
+    r"os\.environ(?:\.[A-Za-z_]+|\[[^\]]+\])?|"
+    r"environ\.get\([^)]*\)"
+    r")"
+)
+# Prefix-backed credentials still block when a generic subtype reported them.
+_PREFIX_TOKEN_RE = re.compile(
+    r"(ghp_[A-Za-z0-9]|github_pat_|glpat-|sk-ant-|AKIA[0-9A-Z]{16}|-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----)"
+)
 
 
 def _captured_secret(text: str) -> str:
@@ -100,7 +112,16 @@ def _captured_secret(text: str) -> str:
     assigned = _ASSIGNED_VALUE_RE.search(text)
     if assigned:
         return assigned.group(1).strip()
+    unquoted = _UNQUOTED_REF_RE.search(text)
+    if unquoted:
+        return unquoted.group(1).strip()
     return text.strip().strip("'\"")
+
+
+def finding_has_prefix_token(finding: dict) -> bool:
+    """True when the finding text contains a known token prefix or a PEM key."""
+    parts = [_finding_secret_text(finding), str(finding.get("message") or "")]
+    return _PREFIX_TOKEN_RE.search("\n".join(parts)) is not None
 
 
 def _finding_secret_text(finding: dict) -> str:
@@ -150,6 +171,9 @@ def blocking_guardian_findings(
             continue
         if str(finding.get("rule_id") or "") not in ids:
             continue
+        if finding_has_prefix_token(finding):
+            out.append(finding)
+            continue
         secret_type = guardian_secret_type(finding)
         if secret_type and secret_type in noisy:
             continue
@@ -166,5 +190,6 @@ class FilterModule:
             "prepare_guardian_scan_input": prepare_guardian_scan_input,
             "guardian_secret_type": guardian_secret_type,
             "secret_value_is_placeholder": secret_value_is_placeholder,
+            "finding_has_prefix_token": finding_has_prefix_token,
             "blocking_guardian_findings": blocking_guardian_findings,
         }

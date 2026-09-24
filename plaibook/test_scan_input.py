@@ -236,6 +236,43 @@ def test_credential_shaped_literal_blocks_and_placeholder_does_not():
     assert blocking[0]["snippet"].endswith('literal-secret-value"}')
 
 
+def test_unquoted_references_are_placeholders_and_prefixes_still_block():
+    mod = _filter()
+    findings = [
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: API Key Header",
+            "details": {"secret_type": "api-key-header"},
+            "snippet": "x-api-key: ${API_KEY}",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: JSON Token",
+            "details": {"secret_type": "json-token"},
+            "snippet": "token: os.environ['TOKEN']",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: JSON Token",
+            "details": {"secret_type": "json-token"},
+            "snippet": "lookup('env', 'TOKEN')",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+            "snippet": "export GITHUB_TOKEN=ghp_exampletokenvalue",
+        },
+    ]
+    blocking = mod.blocking_guardian_findings(
+        findings,
+        ["SECRET-001"],
+        ["env-variable", "generic-password-assignment", "very-long-base64-secret"],
+    )
+    assert len(blocking) == 1
+    assert blocking[0]["details"]["secret_type"] == "env-variable"
+
+
 def test_blocking_guardian_findings_uses_message_when_details_missing():
     mod = _filter()
     findings = [
