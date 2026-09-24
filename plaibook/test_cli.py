@@ -1250,6 +1250,106 @@ def test_wait_spinner_reads_progress_file(tmp_path, monkeypatch):
     assert "  explore" in text
 
 
+def test_clip_plain_and_visible_width():
+    from plaibook.wait import clip_plain, visible_width
+
+    assert clip_plain("abc", 10) == "abc"
+    assert clip_plain("abcdef", 4) == "abc…"
+    assert clip_plain("ab", 1) == "…"
+    assert clip_plain("x", 0) == ""
+    assert clip_plain("", 8) == ""
+    assert visible_width("hi") == 2
+    assert visible_width("\033[2mhi\033[0m") == 2
+    assert visible_width("\033[38;2;0;0;255m⠋\033[0m") == 1
+
+
+def test_wait_spinner_clips_long_gitlab_url_to_terminal_width(monkeypatch):
+    import time
+
+    from plaibook.wait import WaitSpinner, visible_width
+
+    class Tty:
+        def __init__(self) -> None:
+            self.buf: list[str] = []
+
+        def isatty(self) -> bool:
+            return True
+
+        def write(self, s: str) -> int:
+            self.buf.append(s)
+            return len(s)
+
+        def flush(self) -> None:
+            return None
+
+    columns = 40
+    monkeypatch.setattr("plaibook.wait.terminal_columns", lambda stream=None: columns)
+    monkeypatch.delenv("PLAIBOOK_SPINNER", raising=False)
+    monkeypatch.setenv("NO_COLOR", "1")
+    label = "Reviewing https://gitlab.cee.redhat.com/atat/carbonite/-/merge_requests/285"
+    stream = Tty()
+    with WaitSpinner(label, stream=stream, detail="checkout (https://gitlab.cee.redhat.com/atat/carbonite.git)"):
+        time.sleep(0.2)
+
+    frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    paints = [chunk for chunk in stream.buf if "\n" in chunk and any(ch in chunk for ch in frames)]
+    assert paints, "expected two-line spinner paints"
+    max_visible = columns - 1
+    saw_elapsed_unit = False
+    for chunk in paints:
+        body = chunk.replace("\r", "").replace("\033[2K", "").replace("\033[1A", "")
+        line1, line2 = body.split("\n", 1)
+        assert visible_width(line1) <= max_visible
+        assert visible_width(line2) <= max_visible
+        assert "…" in line1
+        assert label not in line1
+        assert line1.rstrip().endswith("s")
+        saw_elapsed_unit = True
+        assert not line1.rstrip().endswith(("  0", "  1", "  2"))
+    assert saw_elapsed_unit
+
+
+def test_wait_spinner_clips_when_truecolor(monkeypatch):
+    import time
+
+    from plaibook.wait import WaitSpinner, visible_width
+
+    class Tty:
+        def __init__(self) -> None:
+            self.buf: list[str] = []
+
+        def isatty(self) -> bool:
+            return True
+
+        def write(self, s: str) -> int:
+            self.buf.append(s)
+            return len(s)
+
+        def flush(self) -> None:
+            return None
+
+    columns = 40
+    monkeypatch.setattr("plaibook.wait.terminal_columns", lambda stream=None: columns)
+    monkeypatch.delenv("PLAIBOOK_SPINNER", raising=False)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("TERM", raising=False)
+    label = "Reviewing https://gitlab.cee.redhat.com/atat/carbonite/-/merge_requests/285"
+    stream = Tty()
+    with WaitSpinner(label, stream=stream):
+        time.sleep(0.2)
+
+    frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    paints = [chunk for chunk in stream.buf if "\n" in chunk and any(ch in chunk for ch in frames)]
+    assert paints
+    max_visible = columns - 1
+    for chunk in paints:
+        body = chunk.replace("\r", "").replace("\033[2K", "").replace("\033[1A", "")
+        line1, line2 = body.split("\n", 1)
+        assert visible_width(line1) <= max_visible
+        assert visible_width(line2) <= max_visible
+        assert "38;2;" in line1
+
+
 def test_cmd_review_pr_fails_closed_without_openshell(tmp_path, monkeypatch, capsys):
     checkout = tmp_path / "checkout"
     checkout.mkdir()
