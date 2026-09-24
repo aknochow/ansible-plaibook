@@ -1,0 +1,54 @@
+---
+# Event-Driven Ansible adapter when GitHub Actions is not enough.
+#
+# GitHub cannot point a repository webhook at another repo's Actions
+# workflow: the payload shape is a PushEvent, not repository_dispatch.
+# A GitHub App (or one webhook on each collection repo) POSTs here;
+# this rulebook turns a default-branch push into the same pin-bump
+# job template that .github/workflows/bump-collection-pins.yml runs.
+#
+# Install the App on ansible-plaibook plus:
+#   aknochow/ansible-cursor, ansible-openai, ansible-claude,
+#   ansible-gemini, ansible-openshell
+# Subscribe to `push`. Webhook URL is the AAP event-stream endpoint.
+# HMAC secret is the GitHub webhook / App webhook secret.
+#
+# The job template should check out ansible-plaibook, run
+#   python3 scripts/bump_collection_pins.py --write --pr-body ...
+# and open or update chore/bump-collection-git-pins (same as the
+# GitHub Action). Replace the job template name/org before activating.
+
+- name: Bump plaibook collection pins on sibling default-branch push
+  hosts: all
+  sources:
+    - name: github
+      eda.builtin.webhook:
+        host: 0.0.0.0
+        port: 5000
+        hmac_secret: "{{ github_webhook_secret }}"
+        hmac_algo: sha256
+        hmac_header: x-hub-signature-256
+        hmac_format: hex
+      filters:
+        - ansible.eda.dashes_to_underscores:
+  rules:
+    - name: Default-branch push on a watched collection repo
+      condition: >-
+        event.meta.headers.X_GitHub_Event == "push"
+        and event.payload.ref == "refs/heads/main"
+        and event.payload.repository.full_name in [
+          "aknochow/ansible-cursor",
+          "aknochow/ansible-openai",
+          "aknochow/ansible-claude",
+          "aknochow/ansible-gemini",
+          "aknochow/ansible-openshell"
+        ]
+      action:
+        run_job_template:
+          name: bump-plaibook-collection-pins
+          organization: Default
+          job_args:
+            extra_vars:
+              source_repository: "{{ event.payload.repository.full_name }}"
+              source_sha: "{{ event.payload.after }}"
+              source_ref: "{{ event.payload.ref }}"

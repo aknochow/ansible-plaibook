@@ -1,9 +1,15 @@
 name: Bump collection git pins
 
 # Dependabot cannot update collections-requirements.yml (no Ansible ecosystem).
-# This weekly job is the stand-in for aknochow SHA-pinned type: git
-# collections (openai / cursor / openshell / claude / gemini).
-# ansible-collections release SHAs are left alone.
+# This job is the stand-in for aknochow SHA-pinned type: git collections
+# (openai / cursor / openshell / claude / gemini). ansible-collections
+# release SHAs are left alone.
+#
+# GitHub Actions cannot subscribe to another repository's events. Sibling
+# default-branch pushes reach this workflow via repository_dispatch
+# (see notify-plaibook-pin-bump.yml). A GitHub webhook URL cannot POST
+# the dispatch payload; that adapter is either the sibling workflow or
+# EDA (eda/collection-pin-bump.yml).
 #
 # PRs opened with GITHUB_TOKEN do not trigger new workflow runs. This job
 # only rewrites SHAs; merge after a human retriggers CI or reviews the
@@ -13,6 +19,8 @@ on:
   schedule:
     - cron: "17 12 * * 1"
   workflow_dispatch:
+  repository_dispatch:
+    types: [collection-pin-bump]
 
 permissions:
   contents: write
@@ -35,6 +43,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python3 scripts/bump_collection_pins.py --write --pr-body /tmp/collection-pin-pr.md
 
+      - name: Record dispatch source
+        if: github.event_name == 'repository_dispatch'
+        run: |
+          {
+            echo ""
+            echo "Triggered by \`${{ github.event.client_payload.repository || 'unknown' }}\` \`${{ github.event.client_payload.sha || 'unknown' }}\`."
+          } >> /tmp/collection-pin-pr.md
+
       - name: Open or update the pin bump PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -50,7 +66,8 @@ jobs:
           git commit -s -m "chore(deps): bump SHA-pinned git collections"
           git fetch origin chore/bump-collection-git-pins || true
           git push --force-with-lease origin chore/bump-collection-git-pins
-          existing="$(gh pr list --head chore/bump-collection-git-pins --json number --jq '.[0].number // empty')"
+          # REST: gh pr list uses GraphQL.
+          existing="$(gh api "repos/${GITHUB_REPOSITORY}/pulls?head=${GITHUB_REPOSITORY_OWNER}:chore/bump-collection-git-pins&state=open" --jq '.[0].number // empty')"
           if [ -n "${existing}" ]; then
             echo "Updated existing PR #${existing}"
             exit 0

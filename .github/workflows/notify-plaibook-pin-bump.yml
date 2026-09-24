@@ -1,0 +1,35 @@
+name: Notify plaibook pin bump
+
+# Called from aknochow collection repos on push to their default branch.
+# GITHUB_TOKEN in those repos cannot create a workflow run here, so the
+# caller passes PLAIBOOK_DISPATCH_TOKEN (fine-grained PAT or GitHub App
+# installation token with actions:write on ansible-plaibook).
+# If the secret is empty, this is a no-op so collection CI stays green.
+
+on:
+  workflow_call:
+    secrets:
+      dispatch_token:
+        required: false
+
+jobs:
+  dispatch:
+    name: repository_dispatch collection-pin-bump
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch ansible-plaibook pin bump
+        env:
+          GH_TOKEN: ${{ secrets.dispatch_token }}
+          SOURCE_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_REF: ${{ github.ref }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "PLAIBOOK_DISPATCH_TOKEN is unset; plaibook keeps the weekly schedule"
+            exit 0
+          fi
+          gh api repos/aknochow/ansible-plaibook/dispatches \
+            -f event_type=collection-pin-bump \
+            -f "client_payload[repository]=${SOURCE_REPO}" \
+            -f "client_payload[sha]=${SOURCE_SHA}" \
+            -f "client_payload[ref]=${SOURCE_REF}"

@@ -23,15 +23,15 @@ collections:
     # Must be an ancestor of ansible-openai origin/main — galaxy clones
     # the default branch, then checks out this SHA. 60a9cc1 had the same
     # tree but is not on current main (history rewrite).
-    version: 0df6de7215c55aca40938a59fb700a18abe33dae
+    version: 2a45ada8cf145149f6b63a769410cbf541c1384e
   - name: https://github.com/aknochow/ansible-cursor.git
     type: git
     # Pin the interface this role calls (effort mapping, structured_tool
     # / mcp coupling, playbook-owned sidecar, structured_tool_calls with
     # parent vs nested caller, WaitLiveRun-after-drain flake fix). Moving
     # main can silently change module arguments. SHA is ansible-cursor
-    # cursor/fix-named-lens-stream-edab (WaitLiveRun / subagent tools).
-    version: 7b487fd7571b1f17e160072bb4834d890d896591
+    # #22 on main (WaitLiveRun drain + child-tool scoping).
+    version: 9aa1141661ea1a015e8bc1be692dd2b00e10f22a
   # GitHub clones, not Galaxy FQCNs. version is the commit SHA of a
   # release tag (tags move). First-run install uses git + ansible-galaxy
   # install --no-deps and never calls galaxy.ansible.com (Python OpenSSL
