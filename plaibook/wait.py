@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import os
+import re
+import shutil
 import sys
 import threading
 import time
@@ -20,6 +22,8 @@ _CLEAR_LINE = "\r\033[2K"
 _UP1 = "\033[1A"
 _DIM = "\033[2m"
 _RESET = "\033[0m"
+# Own CSI only (glyph truecolor + dim). Used to measure painted width.
+_ANSI_CSI_RE = re.compile(r"\033\[[0-9;?]*[A-Za-z]")
 
 
 def spinner_enabled(stream: TextIO | None = None) -> bool:
@@ -44,6 +48,39 @@ def format_elapsed(seconds: float) -> str:
     if minutes:
         return f"{minutes}:{secs:02d}"
     return f"{secs}s"
+
+
+def terminal_columns(stream: TextIO | None = None) -> int:
+    """Visible columns for spinner paint. Never wrap: \\033[1A is one physical row."""
+    fileno = getattr(stream, "fileno", None)
+    if callable(fileno):
+        try:
+            columns = os.get_terminal_size(fileno()).columns
+            if columns > 0:
+                return max(20, columns)
+        except (OSError, ValueError, AttributeError):
+            pass
+    try:
+        columns = shutil.get_terminal_size(fallback=(80, 24)).columns
+    except OSError:
+        columns = 80
+    return max(20, columns)
+
+
+def visible_width(text: str) -> int:
+    return len(_ANSI_CSI_RE.sub("", text or ""))
+
+
+def clip_plain(text: str, width: int) -> str:
+    """Truncate a single-width-character string to *width* columns."""
+    if width <= 0:
+        return ""
+    raw = text or ""
+    if len(raw) <= width:
+        return raw
+    if width == 1:
+        return "…"
+    return raw[: width - 1] + "…"
 
 
 def hsv_to_rgb(h: float, s: float = 1.0, v: float = 1.0) -> tuple[int, int, int]:
@@ -85,7 +122,13 @@ def _safe_wait_text(text: str) -> str:
 
 
 class WaitSpinner:
-    """Rewrite two stderr lines: spinner + label + elapsed, then the current stage."""
+    """Rewrite two stderr lines: spinner + label + elapsed, then the current stage.
+
+    Each line is clipped to the terminal width. A long GitLab URL that wraps
+    makes \\033[1A land on the wrapped remainder, so frames stack and the
+    trailing ``s`` of ``0s`` is eaten. That is the "sometimes" quirk: short
+    targets fit, full ``https://gitlab.../merge_requests/N`` URLs often do not.
+    """
 
     def __init__(
         self,
@@ -147,14 +190,18 @@ class WaitSpinner:
             now = time.monotonic()
             elapsed = format_elapsed(now - self._started)
             detail = self._read_detail() or "setup"
+            width = terminal_columns(self.stream) - 1
+            # spinner + space + label + two spaces + elapsed
+            label = clip_plain(self.label, max(1, width - (1 + 1 + 2 + len(elapsed))))
+            stage = clip_plain(detail, max(1, width - 2))
             if color:
                 r, g, b = spinner_rgb(now - self._started)
                 glyph = f"\033[38;2;{r};{g};{b}m{frame}{_RESET}"
-                line1 = f"{glyph} {self.label}  {_DIM}{elapsed}{_RESET}"
-                line2 = f"  {_DIM}{detail}{_RESET}"
+                line1 = f"{glyph} {label}  {_DIM}{elapsed}{_RESET}"
+                line2 = f"  {_DIM}{stage}{_RESET}"
             else:
-                line1 = f"{frame} {self.label}  {elapsed}"
-                line2 = f"  {detail}"
+                line1 = f"{frame} {label}  {elapsed}"
+                line2 = f"  {stage}"
             self.stream.write(_CLEAR_LINE + line1 + "\n" + _CLEAR_LINE + line2 + _UP1)
             self.stream.flush()
             self._painted_two_lines = True
