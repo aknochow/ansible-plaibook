@@ -58,9 +58,23 @@ either bump the SHA by hand or run:
 uv run python scripts/bump_collection_pins.py --write
 ```
 
-`.github/workflows/bump-collection-pins.yml` does the same weekly (and
-on `workflow_dispatch`) and opens a PR. ansible-collections release SHAs stay on the tagged
-commit — the bumper does not float those to default-branch HEAD.
+`.github/workflows/bump-collection-pins.yml` does the same weekly, on
+`workflow_dispatch`, and on `repository_dispatch` type
+`collection-pin-bump`. GitHub Actions cannot subscribe to another
+repository's events, and a GitHub webhook cannot POST
+`repository_dispatch` itself (wrong payload). Sibling default-branch
+pushes notify plaibook by calling
+`.github/workflows/notify-plaibook-pin-bump.yml` with secret
+`PLAIBOOK_DISPATCH_TOKEN` (fine-grained PAT or GitHub App installation
+token with `actions:write` on `aknochow/ansible-plaibook`). ansible-collections
+release SHAs stay on the tagged commit — the bumper does not float those
+to default-branch HEAD.
+
+To watch every family repo without a workflow in each one, point a
+GitHub App (push events) at Event-Driven Ansible. The starter rulebook
+is `eda/collection-pin-bump.yml`; it still needs an AAP event stream
+URL, webhook HMAC secret, and a job template that runs the same bumper.
+
 
 ## Commit Standards
 

@@ -35,3 +35,5 @@ exclude_paths:
   # CI / local `ansible-galaxy -p` dest inside the checkout. Lint the
   # playbook, not the installed collection trees.
   - .galaxy-collections/
+  # Event-Driven Ansible rulebooks are not playbooks.
+  - eda/
