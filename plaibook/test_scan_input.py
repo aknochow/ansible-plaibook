@@ -276,7 +276,7 @@ def test_unquoted_references_are_placeholders_and_prefixes_still_block():
             "rule_id": "SECRET-001",
             "message": "Secret detected: Environment Variable",
             "details": {"secret_type": "env-variable"},
-            "snippet": "export GITHUB_TOKEN=ghp_exampletokenvalue",
+            "snippet": "export GITHUB_TOKEN=ghp_x",
         },
     ]
     blocking = mod.blocking_guardian_findings(
