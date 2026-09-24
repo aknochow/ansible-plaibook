@@ -104,7 +104,6 @@ def guardian_secret_type(finding: dict) -> str:
 # A captured value that is a reference or a stock placeholder, not a literal.
 _PLACEHOLDER_SECRET_RE = re.compile(
     r"(?i)^(?:"
-    r"redacted|changeme|xxx+|x{8,}|your[_-]?token|"
     r"<[^>]+>|"
     r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*|%[_A-Za-z0-9]+%|\{\{[^}]+\}\}|"
     r"lookup\s*\(\s*['\"]env['\"][^)]*\)|"
@@ -201,11 +200,6 @@ def blocking_guardian_findings(
             continue
         secret_type = guardian_secret_type(finding)
         if secret_type and secret_type in noisy and secret_value_is_placeholder(finding):
-            continue
-        if secret_type and secret_value_is_placeholder(finding) and secret_type not in {
-            "credentials-in-git-url",
-            "github-personal-token",
-        }:
             continue
         out.append(finding)
     return out

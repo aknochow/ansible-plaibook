@@ -238,6 +238,8 @@ def test_credential_shaped_literal_blocks_and_placeholder_does_not():
     )
     assert [item["details"]["secret_type"] for item in blocking] == [
         "json-token",
+        "json-token",
+        "bearer-token",
         "api-key-header",
     ]
     assert blocking[0]["snippet"].endswith('literal-secret-value"}')
@@ -249,20 +251,26 @@ def test_unquoted_references_are_placeholders_and_prefixes_still_block():
         {
             "rule_id": "SECRET-001",
             "message": "Secret detected: API Key Header",
-            "details": {"secret_type": "api-key-header"},
+            "details": {"secret_type": "env-variable"},
             "snippet": "x-api-key: ${API_KEY}",
         },
         {
             "rule_id": "SECRET-001",
-            "message": "Secret detected: JSON Token",
-            "details": {"secret_type": "json-token"},
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
             "snippet": "token: os.environ['TOKEN']",
         },
         {
             "rule_id": "SECRET-001",
-            "message": "Secret detected: JSON Token",
-            "details": {"secret_type": "json-token"},
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
             "snippet": "lookup('env', 'TOKEN')",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Password Assignment",
+            "details": {"secret_type": "generic-password-assignment"},
+            "snippet": 'password = "changeme"',
         },
         {
             "rule_id": "SECRET-001",
@@ -276,8 +284,10 @@ def test_unquoted_references_are_placeholders_and_prefixes_still_block():
         ["SECRET-001"],
         ["env-variable", "generic-password-assignment", "very-long-base64-secret"],
     )
-    assert len(blocking) == 1
-    assert blocking[0]["details"]["secret_type"] == "env-variable"
+    assert [item["details"]["secret_type"] for item in blocking] == [
+        "generic-password-assignment",
+        "env-variable",
+    ]
 
 
 def test_blocking_guardian_findings_uses_message_when_details_missing():
