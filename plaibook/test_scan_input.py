@@ -236,7 +236,10 @@ def test_credential_shaped_literal_blocks_and_placeholder_does_not():
         ["SECRET-001"],
         ["env-variable"],
     )
-    assert [item["details"]["secret_type"] for item in blocking] == ["json-token"]
+    assert [item["details"]["secret_type"] for item in blocking] == [
+        "json-token",
+        "api-key-header",
+    ]
     assert blocking[0]["snippet"].endswith('literal-secret-value"}')
 
 

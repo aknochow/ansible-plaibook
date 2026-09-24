@@ -57,6 +57,25 @@ _SECRET_TYPE_ALIASES = {
     "base64-secret": "base64-secret-with-context",
     "credentials-embedded-in-git-remote-url": "credentials-in-git-url",
 }
+_KNOWN_SECRET_TYPES = set(_SECRET_TYPE_ALIASES.values()) | {
+    "env-variable",
+    "exported-env-variable",
+    "generic-password-assignment",
+    "hex-secret-with-context",
+    "very-long-hex-secret",
+    "base64-secret-with-context",
+    "very-long-base64-secret",
+    "credentials-in-git-url",
+    "github-personal-token",
+    "json-api-key",
+    "json-token",
+    "json-password",
+    "json-secret",
+    "yaml-password",
+    "bearer-token",
+    "api-key-header",
+    "auth-token-header",
+}
 
 
 def _secret_type_slug(value: Any) -> str:
@@ -64,7 +83,11 @@ def _secret_type_slug(value: Any) -> str:
     text = _SECRET_DETECTED_PREFIX.sub("", text)
     text = re.sub(r"\s*\(.*\)$", "", text).strip()
     slug = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
-    return _SECRET_TYPE_ALIASES.get(slug, slug)
+    if slug in _SECRET_TYPE_ALIASES:
+        return _SECRET_TYPE_ALIASES[slug]
+    if slug in _KNOWN_SECRET_TYPES:
+        return slug
+    return ""
 
 
 def guardian_secret_type(finding: dict) -> str:
@@ -81,9 +104,9 @@ def guardian_secret_type(finding: dict) -> str:
 # A captured value that is a reference or a stock placeholder, not a literal.
 _PLACEHOLDER_SECRET_RE = re.compile(
     r"(?i)^(?:"
-    r"password|passwd|token|secret|redacted|changeme|xxx+|x{8,}|your[_-]?token|"
+    r"redacted|changeme|xxx+|x{8,}|your[_-]?token|"
     r"<[^>]+>|"
-    r"\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*|%[_A-Za-z0-9]+%|\{\{[^}]+\}\}|"
+    r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*|%[_A-Za-z0-9]+%|\{\{[^}]+\}\}|"
     r"lookup\s*\(\s*['\"]env['\"][^)]*\)|"
     r"os\.environ(?:\.[A-Za-z_]+|\[[^\]]+\])?|"
     r"environ\.get\([^)]*\)"
@@ -93,7 +116,7 @@ _BEARER_VALUE_RE = re.compile(r"(?i)\bbearer\s+(\S+)")
 _ASSIGNED_VALUE_RE = re.compile(r"""[:=]\s*['\"]([^'\"]*)['\"]""")
 _UNQUOTED_REF_RE = re.compile(
     r"(?i)[:=]\s*("
-    r"\$\{[^}\s]+\}|\$[A-Za-z_][A-Za-z0-9_]*|"
+    r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*|"
     r"lookup\s*\([^)]*\)|"
     r"os\.environ(?:\.[A-Za-z_]+|\[[^\]]+\])?|"
     r"environ\.get\([^)]*\)"
@@ -164,7 +187,7 @@ def blocking_guardian_findings(
     accepted for callers and is not an unconditional bypass.
     """
     ids = {str(item) for item in (rule_ids or []) if item}
-    _ = informational_secret_types
+    noisy = {_secret_type_slug(item) for item in (informational_secret_types or []) if item}
     out: list[dict] = []
     if not isinstance(findings, list):
         return out
@@ -176,7 +199,13 @@ def blocking_guardian_findings(
         if finding_has_prefix_token(finding):
             out.append(finding)
             continue
-        if secret_value_is_placeholder(finding):
+        secret_type = guardian_secret_type(finding)
+        if secret_type and secret_type in noisy and secret_value_is_placeholder(finding):
+            continue
+        if secret_type and secret_value_is_placeholder(finding) and secret_type not in {
+            "credentials-in-git-url",
+            "github-personal-token",
+        }:
             continue
         out.append(finding)
     return out
