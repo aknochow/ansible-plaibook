@@ -1,0 +1,66 @@
+---
+# Produce a second, comment-screened copy of the prepared diff for the
+# lens phase. Never mutates review_full_diff: verify, findings.md, and
+# summary.json line citations must map to the real files.
+#
+# Default off (see defaults/main.yml). When off, review_lens_diff is
+# just an alias of review_full_diff so lenses.yml has one consumer.
+
+- name: Use the original prepared diff for lenses when comment screening is off
+  when: not (review_screen_diff_comments | bool)
+  ansible.builtin.set_fact:
+    review_lens_diff: "{{ review_full_diff }}"
+    review_lens_diff_screened: false
+    review_lens_diff_screen_docstrings: false
+
+- name: Screen comments from a copy of the prepared diff for the lens phase
+  when: review_screen_diff_comments | bool
+  block:
+    - name: Blank comments in place (never delete lines)
+      screen_diff_comments:
+        diff_content: "{{ review_full_diff }}"
+        screen_docstrings: "{{ review_screen_diff_docstrings | bool }}"
+      register: _screened_diff_result
+
+    - name: Assert screened diff preserves total and per-file line counts
+      ansible.builtin.assert:
+        that:
+          - _screened_diff_result.line_counts_match | bool
+          - (_screened_diff_result.screened_diff.splitlines(true) | length) == (review_full_diff.splitlines(true) | length)
+          - _screened_diff_result.failed is not defined or not (_screened_diff_result.failed | bool)
+        fail_msg: >-
+          screen_diff_comments shifted line counts
+          (original={{ review_full_diff.splitlines(true) | length }}
+          screened={{ _screened_diff_result.screened_diff.splitlines(true) | length }}
+          per_file={{ _screened_diff_result.per_file | default([]) }}).
+          Refusing to dispatch lenses on an unmappable diff — findings
+          would cite the wrong lines and post_review_comment.py would
+          post inline PR comments on the wrong lines.
+        success_msg: >-
+          Comment-screened lens diff preserves
+          {{ _screened_diff_result.original_line_count }} lines across
+          {{ _screened_diff_result.per_file | length }} file section(s).
+
+    - name: Point lenses at the screened copy; verify keeps the original
+      ansible.builtin.set_fact:
+        review_lens_diff: "{{ _screened_diff_result.screened_diff }}"
+        review_lens_diff_screened: true
+        review_lens_diff_screen_docstrings: "{{ review_screen_diff_docstrings | bool }}"
+
+    - name: Ensure the plaibook cache dir exists for the paired diff artifacts
+      ansible.builtin.file:
+        path: "{{ lookup('env', 'HOME') }}/.cache/ansible-plaibook"
+        state: directory
+        mode: "0700"
+
+    - name: "Write the original prepared diff (consumer: verify, findings, summary)"
+      ansible.builtin.copy:
+        content: "{{ review_full_diff }}"
+        dest: "{{ lookup('env', 'HOME') }}/.cache/ansible-plaibook/diff.full.{{ last_run_id | default('unknown') }}.patch"
+        mode: "0600"
+
+    - name: "Write the comment-screened lens diff (consumer: lens prompts)"
+      ansible.builtin.copy:
+        content: "{{ review_lens_diff }}"
+        dest: "{{ lookup('env', 'HOME') }}/.cache/ansible-plaibook/diff.screened.{{ last_run_id | default('unknown') }}.patch"
+        mode: "0600"

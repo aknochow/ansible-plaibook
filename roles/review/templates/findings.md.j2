@@ -207,7 +207,14 @@ No findings — clean scan.
 
 ### Limitations
 This review was performed by an AI agent via a deterministic Ansible
-pipeline (aknochow.claude + aknochow.openshell) — a port of the
+pipeline ({% if agent_family | default('') == 'claude_cli' %}aknochow.claude{% elif agent_family | default('') %}aknochow.{{ agent_family }}{% else %}aknochow.claude{% endif %}{% if use_sandbox | default(false) | bool %} + aknochow.openshell{% endif %}) — a port of the
 harness `code-review` skill's methodology, not the interactive Claude
 Code skill itself. It is a first pass, not a final approval. Final
 approval belongs to human maintainers.
+{% if review_lens_diff_screened | default(false) | bool %}
+
+The lens phase saw a comment-screened copy of the prepared diff
+(comments blanked in place, line numbers preserved, docstrings
+{{ 'blanked' if (review_lens_diff_screen_docstrings | default(false) | bool) else 'kept' }}).
+Verify and this report cite the original unscreened diff.
+{% endif %}
