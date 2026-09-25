@@ -22,8 +22,11 @@ Same-line userinfo and split-across-lines userinfo both still match.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
+
+_LOG = logging.getLogger("ansible.plugins.filter.scan_input")
 
 # Newline is not a mention prefix: "password\\n@github.com" is a split
 # credential, not a review comment. @github.com is a git host even when
@@ -87,6 +90,8 @@ def _secret_type_slug(value: Any) -> str:
         return _SECRET_TYPE_ALIASES[slug]
     if slug in _KNOWN_SECRET_TYPES:
         return slug
+    if slug:
+        _LOG.warning("unrecognized ai-guardian secret type %r", slug)
     return ""
 
 
@@ -134,6 +139,23 @@ def _strip_wrapping_quotes(value: str) -> str:
     return value
 
 
+_TRAILING_STRUCT_RE = re.compile(r"^[\s,}\]]*$")
+
+
+def _assigned_value(rhs: str) -> str:
+    """Take one quoted scalar, allowing only JSON/YAML punctuation after it."""
+    rhs = rhs.strip()
+    if rhs[:1] in "'\"":
+        quote = rhs[0]
+        end = rhs.find(quote, 1)
+        if end != -1:
+            rest = rhs[end + 1 :]
+            if _TRAILING_STRUCT_RE.fullmatch(rest):
+                return rhs[1:end]
+            return rhs
+    return _strip_wrapping_quotes(rhs)
+
+
 def _captured_secret(text: str) -> str:
     """Return the whole assigned value, not a reference prefix inside it."""
     stripped = text.strip()
@@ -142,7 +164,7 @@ def _captured_secret(text: str) -> str:
         return bearer.group(1).strip().strip("'\"")
     assigned = re.search(r"[:=]\s*(.*)$", stripped)
     if assigned:
-        return _strip_wrapping_quotes(assigned.group(1).strip())
+        return _assigned_value(assigned.group(1))
     return _strip_wrapping_quotes(stripped)
 
 

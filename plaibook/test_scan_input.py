@@ -323,6 +323,47 @@ def test_reference_suffix_blocks_and_jinja_lookup_does_not():
     ]
 
 
+def test_json_wrapped_reference_is_placeholder_and_unknown_type_warns():
+    import logging
+
+    mod = _filter()
+    findings = [
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: JSON Token",
+            "details": {"secret_type": "json-token"},
+            "snippet": '{"token": "${CI_JOB_TOKEN}"}',
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: JSON Token",
+            "details": {"secret_type": "json-token"},
+            "snippet": '{"token": "${CI_JOB_TOKEN}"}extra',
+        },
+    ]
+    blocking = mod.blocking_guardian_findings(
+        findings,
+        ["SECRET-001"],
+        ["json-token"],
+    )
+    assert [item["snippet"] for item in blocking] == ['{"token": "${CI_JOB_TOKEN}"}extra']
+    records = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            records.append(record.getMessage())
+
+    handler = _Capture()
+    logger = logging.getLogger("ansible.plugins.filter.scan_input")
+    logger.addHandler(handler)
+    logger.setLevel(logging.WARNING)
+    try:
+        assert mod.guardian_secret_type({"message": "Secret detected: Not A Real Rule"}) == ""
+    finally:
+        logger.removeHandler(handler)
+    assert any("not-a-real-rule" in message for message in records)
+
+
 def test_blocking_guardian_findings_uses_message_when_details_missing():
     mod = _filter()
     findings = [
