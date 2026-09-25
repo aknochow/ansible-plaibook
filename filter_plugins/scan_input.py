@@ -106,6 +106,7 @@ _PLACEHOLDER_SECRET_RE = re.compile(
     r"(?i)^(?:"
     r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*|%[_A-Za-z0-9]+%|"
     r"\{\{\s*[A-Za-z_][A-Za-z0-9_]*\s*\}\}|"
+    r"\{\{\s*lookup\s*\(\s*['\"]env['\"]\s*,\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)\s*\}\}|"
     r"lookup\s*\(\s*['\"]env['\"]\s*,\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)|"
     r"os\.environ(?:\.[A-Za-z_]+|\[['\"][A-Za-z_][A-Za-z0-9_]*['\"]\])?|"
     r"environ\.get\(\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)"
@@ -127,17 +128,22 @@ _PREFIX_TOKEN_RE = re.compile(
 )
 
 
+def _strip_wrapping_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        return value[1:-1]
+    return value
+
+
 def _captured_secret(text: str) -> str:
-    bearer = _BEARER_VALUE_RE.search(text)
-    if bearer:
+    """Return the whole assigned value, not a reference prefix inside it."""
+    stripped = text.strip()
+    bearer = _BEARER_VALUE_RE.search(stripped)
+    if bearer and not stripped[bearer.end():].strip():
         return bearer.group(1).strip().strip("'\"")
-    assigned = _ASSIGNED_VALUE_RE.search(text)
+    assigned = re.search(r"[:=]\s*(.*)$", stripped)
     if assigned:
-        return assigned.group(1).strip()
-    unquoted = _UNQUOTED_REF_RE.search(text)
-    if unquoted:
-        return unquoted.group(1).strip()
-    return text.strip().strip("'\"")
+        return _strip_wrapping_quotes(assigned.group(1).strip())
+    return _strip_wrapping_quotes(stripped)
 
 
 def finding_has_prefix_token(finding: dict) -> bool:

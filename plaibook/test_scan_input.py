@@ -290,6 +290,39 @@ def test_unquoted_references_are_placeholders_and_prefixes_still_block():
     ]
 
 
+def test_reference_suffix_blocks_and_jinja_lookup_does_not():
+    mod = _filter()
+    findings = [
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Password Assignment",
+            "details": {"secret_type": "generic-password-assignment"},
+            "snippet": "credential=${PASSWORD}hardcoded",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Password Assignment",
+            "details": {"secret_type": "generic-password-assignment"},
+            "snippet": 'credential="${PASSWORD}"hardcoded',
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+            "snippet": "credential: \"{{ lookup('env', 'TOKEN') }}\"",
+        },
+    ]
+    blocking = mod.blocking_guardian_findings(
+        findings,
+        ["SECRET-001"],
+        ["env-variable", "generic-password-assignment"],
+    )
+    assert [item["snippet"] for item in blocking] == [
+        "credential=${PASSWORD}hardcoded",
+        'credential="${PASSWORD}"hardcoded',
+    ]
+
+
 def test_blocking_guardian_findings_uses_message_when_details_missing():
     mod = _filter()
     findings = [
