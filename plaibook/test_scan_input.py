@@ -361,7 +361,11 @@ def test_json_wrapped_reference_is_placeholder_and_unknown_type_warns():
             "snippet": 'token: "${CI_JOB_TOKEN}" # supplied by CI',
         },
     ]
-    assert mod.blocking_guardian_findings(more, ["SECRET-001"], ["json-token"]) == []
+    assert [item["snippet"] for item in mod.blocking_guardian_findings(more, ["SECRET-001"], ["json-token"])] == [
+        '{"token": "${CI_JOB_TOKEN}", "kind": "oauth"}',
+    ]
+    comment_only = [more[1]]
+    assert mod.blocking_guardian_findings(comment_only, ["SECRET-001"], ["json-token"]) == []
     leading = [
         {
             "rule_id": "SECRET-001",
@@ -376,7 +380,19 @@ def test_json_wrapped_reference_is_placeholder_and_unknown_type_warns():
             "snippet": 'kind: oauth\ntoken: "${CI_JOB_TOKEN}"',
         },
     ]
-    assert mod.blocking_guardian_findings(leading, ["SECRET-001"], ["json-token"]) == []
+    assert [item["snippet"] for item in mod.blocking_guardian_findings(leading, ["SECRET-001"], ["json-token"])] == [
+        '{"kind":"oauth","token":"${CI_JOB_TOKEN}"}',
+        'kind: oauth\ntoken: "${CI_JOB_TOKEN}"',
+    ]
+    mixed = [
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: YAML Password",
+            "details": {"secret_type": "yaml-password"},
+            "snippet": '{token: "${TOKEN}", password: supersecret}',
+        },
+    ]
+    assert mod.blocking_guardian_findings(mixed, ["SECRET-001"], ["yaml-password"]) == mixed
     records = []
 
     class _Capture(logging.Handler):
@@ -391,7 +407,7 @@ def test_json_wrapped_reference_is_placeholder_and_unknown_type_warns():
         assert mod.guardian_secret_type({"message": "Secret detected: Not A Real Rule"}) == ""
     finally:
         logger.removeHandler(handler)
-    assert any("not-a-real-rule" in message for message in records)
+    assert records == ["unrecognized ai-guardian secret type"]
 
 
 def test_blocking_guardian_findings_uses_message_when_details_missing():

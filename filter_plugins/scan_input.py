@@ -91,7 +91,7 @@ def _secret_type_slug(value: Any) -> str:
     if slug in _KNOWN_SECRET_TYPES:
         return slug
     if slug:
-        _LOG.warning("unrecognized ai-guardian secret type %r", slug)
+        _LOG.warning("unrecognized ai-guardian secret type")
     return ""
 
 
@@ -189,27 +189,45 @@ def _finding_secret_text(finding: dict) -> str:
 
 
 _VALUE_SCALAR_RE = re.compile(r"""[:=]\s*(['"])(.*?)\1""", re.DOTALL)
+_UNQUOTED_VALUE_RE = re.compile(
+    r"(?i)[:=]\s*("
+    r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|"
+    r"os\.environ(?:\.[A-Za-z_]+|\[['\"][A-Za-z_][A-Za-z0-9_]*['\"]\])|"
+    r"[^\s'\"#,{}]+"
+    r")"
+)
 
 
 def _snippet_scalars_are_placeholder(text: str) -> bool | None:
-    """Classify every assigned quoted scalar, not only the first colon.
+    """Classify every assigned scalar, quoted or not.
 
-    Returns True when a reference is present and no literal secret is.
-    Returns False when a quoted value is a literal or has a hardcoded suffix.
-    Returns None when the snippet has no quoted assignment to judge.
+    Returns True only when every assigned value is a variable reference.
+    A literal, including a short one, or an unquoted value after a comma,
+    keeps the finding blocking.
     """
     saw_reference = False
+    saw_value = False
     for match in _VALUE_SCALAR_RE.finditer(text):
         value = match.group(2)
-        rest = text[match.end() :]
-        if not _rest_is_trailing_syntax(rest):
+        if not _rest_is_trailing_syntax(text[match.end() :]):
             return False
+        saw_value = True
         if _PLACEHOLDER_SECRET_RE.match(value):
             saw_reference = True
-            continue
-        if len(value) >= 8:
+        else:
             return False
-    if saw_reference:
+    bare = _VALUE_SCALAR_RE.sub(" ", text)
+    for match in _UNQUOTED_VALUE_RE.finditer(bare):
+        value = match.group(1)
+        nxt = bare[match.end() : match.end() + 1]
+        if nxt.isalnum():
+            return False
+        saw_value = True
+        if _PLACEHOLDER_SECRET_RE.match(value):
+            saw_reference = True
+        else:
+            return False
+    if saw_reference and saw_value:
         return True
     return None
 
