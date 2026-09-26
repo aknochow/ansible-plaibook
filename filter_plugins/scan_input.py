@@ -188,15 +188,45 @@ def _finding_secret_text(finding: dict) -> str:
     return ""
 
 
+_VALUE_SCALAR_RE = re.compile(r"""[:=]\s*(['"])(.*?)\1""", re.DOTALL)
+
+
+def _snippet_scalars_are_placeholder(text: str) -> bool | None:
+    """Classify every assigned quoted scalar, not only the first colon.
+
+    Returns True when a reference is present and no literal secret is.
+    Returns False when a quoted value is a literal or has a hardcoded suffix.
+    Returns None when the snippet has no quoted assignment to judge.
+    """
+    saw_reference = False
+    for match in _VALUE_SCALAR_RE.finditer(text):
+        value = match.group(2)
+        rest = text[match.end() :]
+        if not _rest_is_trailing_syntax(rest):
+            return False
+        if _PLACEHOLDER_SECRET_RE.match(value):
+            saw_reference = True
+            continue
+        if len(value) >= 8:
+            return False
+    if saw_reference:
+        return True
+    return None
+
+
 def secret_value_is_placeholder(finding: dict) -> bool:
-    """True when the captured secret is a reference or a stock placeholder.
+    """True when the captured secret is a variable reference.
 
     No captured text is not a placeholder: a credential-shaped rule with
-    no value still blocks.
+    no value still blocks. A later JSON or YAML field is inspected, not
+    only the first colon in the snippet.
     """
     text = _finding_secret_text(finding)
     if not text:
         return False
+    scalars = _snippet_scalars_are_placeholder(text)
+    if scalars is not None:
+        return scalars
     return _PLACEHOLDER_SECRET_RE.match(_captured_secret(text)) is not None
 
 

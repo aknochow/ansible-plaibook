@@ -362,6 +362,21 @@ def test_json_wrapped_reference_is_placeholder_and_unknown_type_warns():
         },
     ]
     assert mod.blocking_guardian_findings(more, ["SECRET-001"], ["json-token"]) == []
+    leading = [
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: JSON Token",
+            "details": {"secret_type": "json-token"},
+            "snippet": '{"kind":"oauth","token":"${CI_JOB_TOKEN}"}',
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: JSON Token",
+            "details": {"secret_type": "json-token"},
+            "snippet": 'kind: oauth\ntoken: "${CI_JOB_TOKEN}"',
+        },
+    ]
+    assert mod.blocking_guardian_findings(leading, ["SECRET-001"], ["json-token"]) == []
     records = []
 
     class _Capture(logging.Handler):
