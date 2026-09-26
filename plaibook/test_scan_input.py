@@ -412,9 +412,7 @@ def test_json_wrapped_reference_is_placeholder_and_unknown_type_warns():
             "snippet": 'token: "${CI_JOB_TOKEN}" # supplied by CI',
         },
     ]
-    assert [item["snippet"] for item in mod.blocking_guardian_findings(more, ["SECRET-001"], ["json-token"])] == [
-        '{"token": "${CI_JOB_TOKEN}", "kind": "oauth"}',
-    ]
+    assert mod.blocking_guardian_findings(more, ["SECRET-001"], ["json-token"]) == []
     comment_only = [more[1]]
     assert mod.blocking_guardian_findings(comment_only, ["SECRET-001"], ["json-token"]) == []
     leading = [
@@ -431,10 +429,29 @@ def test_json_wrapped_reference_is_placeholder_and_unknown_type_warns():
             "snippet": 'kind: oauth\ntoken: "${CI_JOB_TOKEN}"',
         },
     ]
-    assert [item["snippet"] for item in mod.blocking_guardian_findings(leading, ["SECRET-001"], ["json-token"])] == [
-        '{"kind":"oauth","token":"${CI_JOB_TOKEN}"}',
-        'kind: oauth\ntoken: "${CI_JOB_TOKEN}"',
-    ]
+    assert mod.blocking_guardian_findings(leading, ["SECRET-001"], ["json-token"]) == []
+    comma_suffix = {
+        "rule_id": "SECRET-001",
+        "message": "Secret detected: Environment Variable",
+        "details": {"secret_type": "env-variable"},
+        "snippet": 'credential="${TOKEN}",hardcoded',
+    }
+    assert mod.blocking_guardian_findings(
+        [comma_suffix],
+        ["SECRET-001"],
+        ["env-variable"],
+    ) == [comma_suffix]
+    short_literal = {
+        "rule_id": "SECRET-001",
+        "message": "Secret detected: JSON Token",
+        "details": {"secret_type": "json-token"},
+        "snippet": '{"token": "${TOKEN}", "pin": "hunter2"}',
+    }
+    assert mod.blocking_guardian_findings(
+        [short_literal],
+        ["SECRET-001"],
+        ["json-token"],
+    ) == [short_literal]
     mixed = [
         {
             "rule_id": "SECRET-001",

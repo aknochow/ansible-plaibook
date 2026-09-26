@@ -135,12 +135,19 @@ _TRAILING_STRUCT_RE = re.compile(r"^[\s,}\]]*$")
 
 
 def _rest_is_trailing_syntax(rest: str) -> bool:
-    """True when text after a quoted scalar is structure or a YAML comment."""
+    """True when text after a quoted scalar is structure or a YAML comment.
+
+    A comma counts only when another keyed field or a closer follows.
+    ``\"${TOKEN}\",hardcoded`` is not structure.
+    """
     text = rest.strip()
     if not text or text.startswith("#"):
         return True
     if text.startswith(","):
-        return True
+        tail = text[1:].strip()
+        if not tail or tail[0] in "}]":
+            return True
+        return re.match(r"""['\"]?[A-Za-z_][A-Za-z0-9_]*['\"]?\s*[:=]""", tail) is not None
     return _TRAILING_STRUCT_RE.fullmatch(text) is not None
 
 
@@ -226,21 +233,27 @@ def _snippet_scalars_are_placeholder(text: str) -> bool | None:
         saw_value = True
         if _PLACEHOLDER_SECRET_RE.match(value):
             saw_reference = True
+        elif re.fullmatch(r"[A-Za-z]{1,5}", value):
+            continue
         else:
             return False
     bare = _VALUE_SCALAR_RE.sub(" ", text)
     for match in _UNQUOTED_VALUE_RE.finditer(bare):
         value = match.group(1)
         rest = bare[match.end() :]
-        if rest[:1].isspace():
-            tail = rest.lstrip()
-            if tail and not tail.startswith("#"):
+        if rest[:1] in "\r\n":
+            pass
+        elif rest[:1].isspace():
+            tail = rest.lstrip(" \t")
+            if tail and not tail.startswith("#") and not tail.startswith(("\n", "\r")):
                 return False
         elif rest:
             return False
         saw_value = True
         if _PLACEHOLDER_SECRET_RE.match(value):
             saw_reference = True
+        elif re.fullmatch(r"[A-Za-z]{1,5}", value):
+            continue
         else:
             return False
     if saw_reference and saw_value:
