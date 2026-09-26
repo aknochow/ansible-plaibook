@@ -138,16 +138,22 @@ def _rest_is_trailing_syntax(rest: str) -> bool:
     """True when text after a quoted scalar is structure or a YAML comment.
 
     A comma counts only when another keyed field or a closer follows.
-    ``\"${TOKEN}\",hardcoded`` is not structure.
+    ``\"${TOKEN}\",hardcoded`` is not structure. ``#`` is a comment only
+    when whitespace precedes it, so ``\"${TOKEN}\"#hardcoded`` is not.
     """
-    text = rest.strip()
-    if not text or text.startswith("#"):
+    if not rest.strip():
         return True
+    after_space = rest.lstrip(" \t")
+    if after_space.startswith("#") and len(after_space) < len(rest):
+        return True
+    if after_space.startswith(("\n", "\r")):
+        return True
+    text = rest.strip()
     if text.startswith(","):
         tail = text[1:].strip()
         if not tail or tail[0] in "}]":
             return True
-        return re.match(r"""['\"]?[A-Za-z_][A-Za-z0-9_]*['\"]?\s*[:=]""", tail) is not None
+        return re.match(r"""['\"]?[A-Za-z_][A-Za-z0-9_-]*['\"]?\s*[:=]""", tail) is not None
     return _TRAILING_STRUCT_RE.fullmatch(text) is not None
 
 
@@ -199,14 +205,13 @@ def finding_has_prefix_token(finding: dict) -> bool:
     return _PREFIX_TOKEN_RE.search("\n".join(parts)) is not None
 
 
-def _finding_secret_text(finding: dict) -> str:
-    texts = _candidate_texts(finding)
-    return texts[0] if texts else ""
-
-
-_VALUE_SCALAR_RE = re.compile(r"""[:=]\s*(['"])(.*?)\1""", re.DOTALL)
+_KEYED_ASSIGN_PREFIX = r"""(?<![A-Za-z0-9_-])(?P<key>['\"]?[A-Za-z_][A-Za-z0-9_-]*['\"]?)\s*[:=]\s*"""
+_VALUE_SCALAR_RE = re.compile(
+    _KEYED_ASSIGN_PREFIX + r"""(?P<q>['\"])(?P<value>.*?)(?P=q)""",
+    re.DOTALL,
+)
 _UNQUOTED_VALUE_RE = re.compile(
-    r"(?i)[:=]\s*("
+    r"(?i)" + _KEYED_ASSIGN_PREFIX + r"(?P<value>"
     r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|"
     r"os\.environ\.get\(\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)|"
     r"os\.environ(?:\.[A-Za-z_]+|\[['\"][A-Za-z_][A-Za-z0-9_]*['\"]\])|"
@@ -215,31 +220,39 @@ _UNQUOTED_VALUE_RE = re.compile(
     r"[^\s'\"#,{}]+"
     r")"
 )
+# A short letter label is not a credential only under a non-secret key.
+_STRUCTURAL_LABEL_KEYS = frozenset({"kind"})
+
+
+def _is_structural_label(key: str, value: str) -> bool:
+    name = key.strip().strip("'\"").lower()
+    return name in _STRUCTURAL_LABEL_KEYS and re.fullmatch(r"[A-Za-z]{1,5}", value) is not None
 
 
 def _snippet_scalars_are_placeholder(text: str) -> bool | None:
     """Classify every assigned scalar, quoted or not.
 
-    Returns True only when every assigned value is a variable reference.
-    A literal, including a short one, or an unquoted value after a comma,
-    keeps the finding blocking.
+    Returns True only when every assigned value is a variable reference
+    or a short letter label under a structural key such as ``kind``.
+    A literal under ``password``, ``token``, or any other key stays
+    blocking, including a 1–5 letter value such as ``admin``.
     """
     saw_reference = False
     saw_value = False
     for match in _VALUE_SCALAR_RE.finditer(text):
-        value = match.group(2)
+        value = match.group("value")
         if not _rest_is_trailing_syntax(text[match.end() :]):
             return False
         saw_value = True
         if _PLACEHOLDER_SECRET_RE.match(value):
             saw_reference = True
-        elif re.fullmatch(r"[A-Za-z]{1,5}", value):
+        elif _is_structural_label(match.group("key"), value):
             continue
         else:
             return False
     bare = _VALUE_SCALAR_RE.sub(" ", text)
     for match in _UNQUOTED_VALUE_RE.finditer(bare):
-        value = match.group(1)
+        value = match.group("value")
         rest = bare[match.end() :]
         if rest[:1] in "\r\n":
             pass
@@ -252,7 +265,7 @@ def _snippet_scalars_are_placeholder(text: str) -> bool | None:
         saw_value = True
         if _PLACEHOLDER_SECRET_RE.match(value):
             saw_reference = True
-        elif re.fullmatch(r"[A-Za-z]{1,5}", value):
+        elif _is_structural_label(match.group("key"), value):
             continue
         else:
             return False

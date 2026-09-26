@@ -441,6 +441,36 @@ def test_json_wrapped_reference_is_placeholder_and_unknown_type_warns():
         ["SECRET-001"],
         ["env-variable"],
     ) == [comma_suffix]
+    glued_hash = {
+        "rule_id": "SECRET-001",
+        "message": "Secret detected: Environment Variable",
+        "details": {"secret_type": "env-variable"},
+        "snippet": 'credential="${TOKEN}"#hardcoded',
+    }
+    assert mod.blocking_guardian_findings(
+        [glued_hash],
+        ["SECRET-001"],
+        ["env-variable"],
+    ) == [glued_hash]
+    short_password = [
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: JSON Password",
+            "details": {"secret_type": "json-password"},
+            "snippet": '{"token": "${CI_TOKEN}", "password": "admin"}',
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: YAML Password",
+            "details": {"secret_type": "yaml-password"},
+            "snippet": 'password: abcde\ntoken: "${CI_TOKEN}"',
+        },
+    ]
+    assert mod.blocking_guardian_findings(
+        short_password,
+        ["SECRET-001"],
+        ["json-password", "yaml-password"],
+    ) == short_password
     short_literal = {
         "rule_id": "SECRET-001",
         "message": "Secret detected: JSON Token",
