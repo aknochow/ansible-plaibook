@@ -354,6 +354,17 @@ def test_reference_suffix_blocks_and_jinja_lookup_does_not():
         "credential=${TOKEN}#hardcoded",
         "credential=${TOKEN},hardcoded",
     ]
+    hidden = {
+        "rule_id": "SECRET-001",
+        "message": "Secret detected: Environment Variable",
+        "details": {"secret_type": "env-variable", "match": "${TOKEN}", "raw": "${TOKEN}ghp_x"},
+        "snippet": "${TOKEN}ghp_x",
+    }
+    assert mod.blocking_guardian_findings(
+        [hidden],
+        ["SECRET-001"],
+        ["env-variable"],
+    ) == [hidden]
 
 
 def test_json_wrapped_reference_is_placeholder_and_unknown_type_warns():

@@ -170,23 +170,31 @@ def _captured_secret(text: str) -> str:
     return _strip_wrapping_quotes(stripped)
 
 
-def finding_has_prefix_token(finding: dict) -> bool:
-    """True when the finding text contains a known token prefix or a PEM key."""
-    parts = [_finding_secret_text(finding), str(finding.get("message") or "")]
-    return _PREFIX_TOKEN_RE.search("\n".join(parts)) is not None
-
-
-def _finding_secret_text(finding: dict) -> str:
+def _candidate_texts(finding: dict) -> list[str]:
+    """Every non-empty representation. A short match must not hide a longer one."""
+    texts: list[str] = []
     details = finding.get("details")
     if isinstance(details, dict):
         for key in ("match", "secret", "value", "raw"):
             raw = details.get(key)
             if isinstance(raw, str) and raw.strip():
-                return raw.strip()
+                texts.append(raw.strip())
     snippet = finding.get("snippet")
     if isinstance(snippet, str) and snippet.strip():
-        return snippet.strip()
-    return ""
+        texts.append(snippet.strip())
+    return texts
+
+
+def finding_has_prefix_token(finding: dict) -> bool:
+    """True when any representation contains a known token prefix or a PEM key."""
+    parts = _candidate_texts(finding)
+    parts.append(str(finding.get("message") or ""))
+    return _PREFIX_TOKEN_RE.search("\n".join(parts)) is not None
+
+
+def _finding_secret_text(finding: dict) -> str:
+    texts = _candidate_texts(finding)
+    return texts[0] if texts else ""
 
 
 _VALUE_SCALAR_RE = re.compile(r"""[:=]\s*(['"])(.*?)\1""", re.DOTALL)
@@ -243,13 +251,17 @@ def secret_value_is_placeholder(finding: dict) -> bool:
     no value still blocks. A later JSON or YAML field is inspected, not
     only the first colon in the snippet.
     """
-    text = _finding_secret_text(finding)
-    if not text:
+    texts = _candidate_texts(finding)
+    if not texts:
         return False
-    scalars = _snippet_scalars_are_placeholder(text)
-    if scalars is not None:
-        return scalars
-    return _PLACEHOLDER_SECRET_RE.match(_captured_secret(text)) is not None
+
+    def _one(text: str) -> bool:
+        scalars = _snippet_scalars_are_placeholder(text)
+        if scalars is not None:
+            return scalars
+        return _PLACEHOLDER_SECRET_RE.match(_captured_secret(text)) is not None
+
+    return all(_one(text) for text in texts)
 
 
 def blocking_guardian_findings(
