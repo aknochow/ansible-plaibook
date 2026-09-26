@@ -118,15 +118,6 @@ _PLACEHOLDER_SECRET_RE = re.compile(
     r")$"
 )
 _BEARER_VALUE_RE = re.compile(r"(?i)\bbearer\s+(\S+)")
-_ASSIGNED_VALUE_RE = re.compile(r"""[:=]\s*['\"]([^'\"]*)['\"]""")
-_UNQUOTED_REF_RE = re.compile(
-    r"(?i)[:=]\s*("
-    r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*|"
-    r"lookup\s*\(\s*['\"]env['\"]\s*,\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)|"
-    r"os\.environ(?:\.[A-Za-z_]+|\[['\"][A-Za-z_][A-Za-z0-9_]*['\"]\])?|"
-    r"environ\.get\(\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)"
-    r")"
-)
 # Prefix-backed credentials still block when a generic subtype reported them.
 _PREFIX_TOKEN_RE = re.compile(
     r"(ghp_[A-Za-z0-9]|github_pat_|glpat-|sk-ant-|AKIA[0-9A-Z]{16}|-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----)"
@@ -142,6 +133,16 @@ def _strip_wrapping_quotes(value: str) -> str:
 _TRAILING_STRUCT_RE = re.compile(r"^[\s,}\]]*$")
 
 
+def _rest_is_trailing_syntax(rest: str) -> bool:
+    """True when text after a quoted scalar is structure or a YAML comment."""
+    text = rest.strip()
+    if not text or text.startswith("#"):
+        return True
+    if text.startswith(","):
+        return True
+    return _TRAILING_STRUCT_RE.fullmatch(text) is not None
+
+
 def _assigned_value(rhs: str) -> str:
     """Take one quoted scalar, allowing only JSON/YAML punctuation after it."""
     rhs = rhs.strip()
@@ -150,7 +151,7 @@ def _assigned_value(rhs: str) -> str:
         end = rhs.find(quote, 1)
         if end != -1:
             rest = rhs[end + 1 :]
-            if _TRAILING_STRUCT_RE.fullmatch(rest):
+            if _rest_is_trailing_syntax(rest):
                 return rhs[1:end]
             return rhs
     return _strip_wrapping_quotes(rhs)
