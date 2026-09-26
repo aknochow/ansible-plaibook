@@ -231,8 +231,12 @@ def _snippet_scalars_are_placeholder(text: str) -> bool | None:
     bare = _VALUE_SCALAR_RE.sub(" ", text)
     for match in _UNQUOTED_VALUE_RE.finditer(bare):
         value = match.group(1)
-        nxt = bare[match.end() : match.end() + 1]
-        if nxt and not nxt.isspace():
+        rest = bare[match.end() :]
+        if rest[:1].isspace():
+            tail = rest.lstrip()
+            if tail and not tail.startswith("#"):
+                return False
+        elif rest:
             return False
         saw_value = True
         if _PLACEHOLDER_SECRET_RE.match(value):
