@@ -224,7 +224,7 @@ def _snippet_scalars_are_placeholder(text: str) -> bool | None:
     for match in _UNQUOTED_VALUE_RE.finditer(bare):
         value = match.group(1)
         nxt = bare[match.end() : match.end() + 1]
-        if nxt and nxt not in " \t\r\n,}]#":
+        if nxt and not nxt.isspace():
             return False
         saw_value = True
         if _PLACEHOLDER_SECRET_RE.match(value):

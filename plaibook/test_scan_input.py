@@ -315,6 +315,18 @@ def test_reference_suffix_blocks_and_jinja_lookup_does_not():
             "rule_id": "SECRET-001",
             "message": "Secret detected: Environment Variable",
             "details": {"secret_type": "env-variable"},
+            "snippet": "credential=${TOKEN}#hardcoded",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+            "snippet": "credential=${TOKEN},hardcoded",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
             "snippet": 'credential = os.environ.get("TOKEN")',
         },
         {
@@ -339,6 +351,8 @@ def test_reference_suffix_blocks_and_jinja_lookup_does_not():
         "credential=${PASSWORD}-hardcoded",
         'credential="${PASSWORD}"hardcoded',
         "credential=${TOKEN}_suffix",
+        "credential=${TOKEN}#hardcoded",
+        "credential=${TOKEN},hardcoded",
     ]
 
 
