@@ -183,8 +183,15 @@ false-positive class on ordinary content this pipeline scans
 (PROMPT-INJECTION-001 on Python dunder methods like `__init__`,
 SSRF-001 on private-range IPs in test/example code) — a hit in either
 category is worth a skeptical read, not automatic action. Neither
-blocks the verdict. SECRET-001 still blocks, including a git URL
-credential on one line or split across lines.
+blocks the verdict. SECRET-001 **credentials-in-git-url** and
+prefix-backed tokens (GitHub/GitLab PATs, cloud API keys, PEM
+private keys) still block, including a git URL credential on one
+line or split across lines. A generic subtype (env assignment,
+password assignment, long base64/hex, or a JSON credential field)
+stays visible here and does not override the lens verdict only when
+the captured value is a placeholder or a variable reference. A
+literal JSON/YAML credential, bearer token, or API-key header still
+blocks.
 {% if guardian_scan_truncated | default(false) %}
 
 Scan input was truncated to {{ review_guardian_max_scan_chars }} characters before scanning.

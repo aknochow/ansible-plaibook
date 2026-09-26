@@ -569,10 +569,34 @@ review_guardian_pip_timeout_seconds: 60
 # the detector from guardian_blocking_findings: a real git userinfo URL
 # uses the same SECRET-001 message.
 #
+# Subtype alone does not demote a SECRET-001 hit. A finding is
+# informational only when the captured value is a placeholder or a
+# variable reference (${VAR}, lookup('env', 'NAME'), os.environ.NAME).
+# A literal env assignment, password assignment, hex/base64 blob,
+# bearer header, or JSON/YAML credential still blocks. Prefix-backed
+# tokens (ghp_, glpat-, sk-ant-, AKIA, PEM private keys) block even
+# when the surrounding text is an env assignment.
+#
 # A list, not a single hardcoded value, so adding another confirmed-
 # reliable blocking category later is a config change, not a code
 # change, and so the actual rule_id string lives in exactly one place.
 review_guardian_blocking_rule_ids: ["SECRET-001"]
+# ai-guardian details.secret_type (toml rule id). SECRET-001 findings
+# with these subtypes still appear in findings.md; they do not override
+# the lens verdict.
+review_guardian_informational_secret_types:
+  - env-variable
+  - exported-env-variable
+  - generic-password-assignment
+  - hex-secret-with-context
+  - very-long-hex-secret
+  - base64-secret-with-context
+  - very-long-base64-secret
+  - json-api-key
+  - json-token
+  - json-password
+  - json-secret
+  - yaml-password
 # Separate from review_guardian_scan_enabled (which controls whether
 # the scan runs at all): set false to keep scanning and surfacing
 # findings without letting any of them force a verdict, independent of

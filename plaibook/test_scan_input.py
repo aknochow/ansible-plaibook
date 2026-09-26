@@ -148,24 +148,381 @@ def test_quote_prefixed_github_user_mention_is_not_a_git_credential():
 
 def test_blocking_guardian_findings_keeps_credentials_in_git_url():
     mod = _filter()
+    noisy = [
+        "env-variable",
+        "exported-env-variable",
+        "generic-password-assignment",
+        "very-long-base64-secret",
+        "base64-secret-with-context",
+        "json-token",
+    ]
     findings = [
         {
             "rule_id": "SECRET-001",
             "message": "Secret detected: Credentials In Git Url",
+            "details": {"secret_type": "credentials-in-git-url"},
             "file_path": "ansible.xxx-ai-guardian-input.txt",
         },
         {
             "rule_id": "SECRET-001",
             "message": "Secret detected: GitHub Personal Access Token",
+            "details": {"secret_type": "github-personal-token"},
             "file_path": "config.py",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+            "file_path": "includes/test_image_vertex.sh",
+            "snippet": "export VERTEX_SA_KEY=${VERTEX_SA_KEY}",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Password/Secret Assignment",
+            "details": {"secret_type": "generic-password-assignment"},
+            "snippet": 'credential = "${DB_PASSWORD}"',
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Long Base64 Secret",
+            "details": {"secret_type": "very-long-base64-secret"},
+            "snippet": "payload=${CI_PAYLOAD}",
         },
         {"rule_id": "PROMPT-INJECTION-001", "message": "Prompt injection detected"},
     ]
-    blocking = mod.blocking_guardian_findings(findings, ["SECRET-001"])
-    assert [item["message"] for item in blocking] == [
-        "Secret detected: Credentials In Git Url",
-        "Secret detected: GitHub Personal Access Token",
+    blocking = mod.blocking_guardian_findings(findings, ["SECRET-001"], noisy)
+    assert [item["details"]["secret_type"] for item in blocking] == [
+        "credentials-in-git-url",
+        "github-personal-token",
     ]
+
+
+def test_credential_shaped_literal_blocks_and_placeholder_does_not():
+    mod = _filter()
+    findings = [
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: JSON Token",
+            "details": {"secret_type": "json-token"},
+            "snippet": '{"token": "ya29.literal-secret-value"}',
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: JSON Token",
+            "details": {"secret_type": "json-token"},
+            "snippet": '{"token": "${CI_JOB_TOKEN}"}',
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Bearer Token",
+            "details": {"secret_type": "bearer-token"},
+            "snippet": "Authorization: Bearer ${TOKEN}",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: API Key Header",
+            "details": {"secret_type": "api-key-header"},
+            "snippet": 'x-api-key: "PASSWORD"',
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+            "snippet": "export TOKEN=${TOKEN}",
+        },
+    ]
+    blocking = mod.blocking_guardian_findings(
+        findings,
+        ["SECRET-001"],
+        ["env-variable"],
+    )
+    assert [item["details"]["secret_type"] for item in blocking] == [
+        "json-token",
+        "json-token",
+        "bearer-token",
+        "api-key-header",
+    ]
+    assert blocking[0]["snippet"].endswith('literal-secret-value"}')
+
+
+def test_unquoted_references_are_placeholders_and_prefixes_still_block():
+    mod = _filter()
+    findings = [
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: API Key Header",
+            "details": {"secret_type": "env-variable"},
+            "snippet": "x-api-key: ${API_KEY}",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+            "snippet": "token: os.environ['TOKEN']",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+            "snippet": "lookup('env', 'TOKEN')",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Password Assignment",
+            "details": {"secret_type": "generic-password-assignment"},
+            "snippet": 'credential = "changeme"',
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+            "snippet": "export GITHUB_TOKEN=ghp_x",
+        },
+    ]
+    blocking = mod.blocking_guardian_findings(
+        findings,
+        ["SECRET-001"],
+        ["env-variable", "generic-password-assignment", "very-long-base64-secret"],
+    )
+    assert [item["details"]["secret_type"] for item in blocking] == [
+        "generic-password-assignment",
+        "env-variable",
+    ]
+
+
+def test_reference_suffix_blocks_and_jinja_lookup_does_not():
+    mod = _filter()
+    findings = [
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Password Assignment",
+            "details": {"secret_type": "generic-password-assignment"},
+            "snippet": "credential=${PASSWORD}-hardcoded",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Password Assignment",
+            "details": {"secret_type": "generic-password-assignment"},
+            "snippet": 'credential="${PASSWORD}"hardcoded',
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+            "snippet": "credential=${TOKEN}_suffix",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+            "snippet": "credential=${TOKEN}#hardcoded",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+            "snippet": "credential=${TOKEN},hardcoded",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+            "snippet": 'credential=${TOKEN} + "-hardcoded"',
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+            "snippet": 'credential = os.environ.get("TOKEN")',
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+            "snippet": "credential: lookup('env', 'TOKEN')",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+            "snippet": "credential: \"{{ lookup('env', 'TOKEN') }}\"",
+        },
+    ]
+    blocking = mod.blocking_guardian_findings(
+        findings,
+        ["SECRET-001"],
+        ["env-variable", "generic-password-assignment"],
+    )
+    assert [item["snippet"] for item in blocking] == [
+        "credential=${PASSWORD}-hardcoded",
+        'credential="${PASSWORD}"hardcoded',
+        "credential=${TOKEN}_suffix",
+        "credential=${TOKEN}#hardcoded",
+        "credential=${TOKEN},hardcoded",
+        'credential=${TOKEN} + "-hardcoded"',
+    ]
+    hidden = {
+        "rule_id": "SECRET-001",
+        "message": "Secret detected: Environment Variable",
+        "details": {"secret_type": "env-variable", "match": "${TOKEN}", "raw": "${TOKEN}ghp_x"},
+        "snippet": "${TOKEN}ghp_x",
+    }
+    assert mod.blocking_guardian_findings(
+        [hidden],
+        ["SECRET-001"],
+        ["env-variable"],
+    ) == [hidden]
+
+
+def test_json_wrapped_reference_is_placeholder_and_unknown_type_warns():
+    import logging
+
+    mod = _filter()
+    findings = [
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: JSON Token",
+            "details": {"secret_type": "json-token"},
+            "snippet": '{"token": "${CI_JOB_TOKEN}"}',
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: JSON Token",
+            "details": {"secret_type": "json-token"},
+            "snippet": '{"token": "${CI_JOB_TOKEN}"}extra',
+        },
+    ]
+    blocking = mod.blocking_guardian_findings(
+        findings,
+        ["SECRET-001"],
+        ["json-token"],
+    )
+    assert [item["snippet"] for item in blocking] == ['{"token": "${CI_JOB_TOKEN}"}extra']
+    more = [
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: JSON Token",
+            "details": {"secret_type": "json-token"},
+            "snippet": '{"token": "${CI_JOB_TOKEN}", "kind": "oauth"}',
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: JSON Token",
+            "details": {"secret_type": "json-token"},
+            "snippet": 'token: "${CI_JOB_TOKEN}" # supplied by CI',
+        },
+    ]
+    assert mod.blocking_guardian_findings(more, ["SECRET-001"], ["json-token"]) == []
+    comment_only = [more[1]]
+    assert mod.blocking_guardian_findings(comment_only, ["SECRET-001"], ["json-token"]) == []
+    leading = [
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: JSON Token",
+            "details": {"secret_type": "json-token"},
+            "snippet": '{"kind":"oauth","token":"${CI_JOB_TOKEN}"}',
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: JSON Token",
+            "details": {"secret_type": "json-token"},
+            "snippet": 'kind: oauth\ntoken: "${CI_JOB_TOKEN}"',
+        },
+    ]
+    assert mod.blocking_guardian_findings(leading, ["SECRET-001"], ["json-token"]) == []
+    comma_suffix = {
+        "rule_id": "SECRET-001",
+        "message": "Secret detected: Environment Variable",
+        "details": {"secret_type": "env-variable"},
+        "snippet": 'credential="${TOKEN}",hardcoded',
+    }
+    assert mod.blocking_guardian_findings(
+        [comma_suffix],
+        ["SECRET-001"],
+        ["env-variable"],
+    ) == [comma_suffix]
+    glued_hash = {
+        "rule_id": "SECRET-001",
+        "message": "Secret detected: Environment Variable",
+        "details": {"secret_type": "env-variable"},
+        "snippet": 'credential="${TOKEN}"#hardcoded',
+    }
+    assert mod.blocking_guardian_findings(
+        [glued_hash],
+        ["SECRET-001"],
+        ["env-variable"],
+    ) == [glued_hash]
+    short_password = [
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: JSON Password",
+            "details": {"secret_type": "json-password"},
+            "snippet": '{"token": "${CI_TOKEN}", "password": "admin"}',
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: YAML Password",
+            "details": {"secret_type": "yaml-password"},
+            "snippet": 'password: abcde\ntoken: "${CI_TOKEN}"',
+        },
+    ]
+    assert mod.blocking_guardian_findings(
+        short_password,
+        ["SECRET-001"],
+        ["json-password", "yaml-password"],
+    ) == short_password
+    short_literal = {
+        "rule_id": "SECRET-001",
+        "message": "Secret detected: JSON Token",
+        "details": {"secret_type": "json-token"},
+        "snippet": '{"token": "${TOKEN}", "pin": "hunter2"}',
+    }
+    assert mod.blocking_guardian_findings(
+        [short_literal],
+        ["SECRET-001"],
+        ["json-token"],
+    ) == [short_literal]
+    mixed = [
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: YAML Password",
+            "details": {"secret_type": "yaml-password"},
+            "snippet": '{token: "${TOKEN}", password: supersecret}',
+        },
+    ]
+    assert mod.blocking_guardian_findings(mixed, ["SECRET-001"], ["yaml-password"]) == mixed
+    records = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            records.append(record.getMessage())
+
+    handler = _Capture()
+    logger = logging.getLogger("ansible.plugins.filter.scan_input")
+    logger.addHandler(handler)
+    logger.setLevel(logging.WARNING)
+    try:
+        assert mod.guardian_secret_type({"message": "Secret detected: Not A Real Rule"}) == ""
+    finally:
+        logger.removeHandler(handler)
+    assert records == ["unrecognized ai-guardian secret type"]
+
+
+def test_blocking_guardian_findings_uses_message_when_details_missing():
+    mod = _filter()
+    findings = [
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "snippet": "export FOO=${FOO}",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Credentials In Git Url",
+        },
+    ]
+    blocking = mod.blocking_guardian_findings(findings, ["SECRET-001"], ["env-variable"])
+    assert [item["message"] for item in blocking] == ["Secret detected: Credentials In Git Url"]
 
 
 def test_placeholder_userinfo_is_preserved():

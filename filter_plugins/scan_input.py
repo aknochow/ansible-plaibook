@@ -22,8 +22,11 @@ Same-line userinfo and split-across-lines userinfo both still match.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
+
+_LOG = logging.getLogger("ansible.plugins.filter.scan_input")
 
 # Newline is not a mention prefix: "password\\n@github.com" is a split
 # credential, not a review comment. @github.com is a git host even when
@@ -44,12 +47,269 @@ def prepare_guardian_scan_input(text: str) -> str:
     return neutralize_host_mentions(text)
 
 
+_SECRET_DETECTED_PREFIX = re.compile(r"(?i)^secret detected:\s*")
+# Display-name slugs from get_secret_type_display() when details.secret_type
+# is missing. Canonical ids are the secrets.toml rule ids.
+_SECRET_TYPE_ALIASES = {
+    "environment-variable": "env-variable",
+    "exported-environment-variable": "exported-env-variable",
+    "password-secret-assignment": "generic-password-assignment",
+    "long-hex-secret": "very-long-hex-secret",
+    "long-base64-secret": "very-long-base64-secret",
+    "hex-secret": "hex-secret-with-context",
+    "base64-secret": "base64-secret-with-context",
+    "credentials-embedded-in-git-remote-url": "credentials-in-git-url",
+}
+_KNOWN_SECRET_TYPES = set(_SECRET_TYPE_ALIASES.values()) | {
+    "env-variable",
+    "exported-env-variable",
+    "generic-password-assignment",
+    "hex-secret-with-context",
+    "very-long-hex-secret",
+    "base64-secret-with-context",
+    "very-long-base64-secret",
+    "credentials-in-git-url",
+    "github-personal-token",
+    "json-api-key",
+    "json-token",
+    "json-password",
+    "json-secret",
+    "yaml-password",
+    "bearer-token",
+    "api-key-header",
+    "auth-token-header",
+}
+
+
+def _secret_type_slug(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    text = _SECRET_DETECTED_PREFIX.sub("", text)
+    text = re.sub(r"\s*\(.*\)$", "", text).strip()
+    slug = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+    if slug in _SECRET_TYPE_ALIASES:
+        return _SECRET_TYPE_ALIASES[slug]
+    if slug in _KNOWN_SECRET_TYPES:
+        return slug
+    if slug:
+        _LOG.warning("unrecognized ai-guardian secret type")
+    return ""
+
+
+def guardian_secret_type(finding: dict) -> str:
+    """ai-guardian SECRET-001 subtype (toml rule id), or empty."""
+    details = finding.get("details")
+    if isinstance(details, dict):
+        raw = details.get("secret_type") or details.get("rule_id")
+        slug = _secret_type_slug(raw)
+        if slug:
+            return slug
+    return _secret_type_slug(finding.get("message"))
+
+
+# A captured value that is a reference or a stock placeholder, not a literal.
+_PLACEHOLDER_SECRET_RE = re.compile(
+    r"(?i)^(?:"
+    r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*|%[_A-Za-z0-9]+%|"
+    r"\{\{\s*[A-Za-z_][A-Za-z0-9_]*\s*\}\}|"
+    r"\{\{\s*lookup\s*\(\s*['\"]env['\"]\s*,\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)\s*\}\}|"
+    r"lookup\s*\(\s*['\"]env['\"]\s*,\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)|"
+    r"os\.environ(?:\.[A-Za-z_]+|\[['\"][A-Za-z_][A-Za-z0-9_]*['\"]\])?|"
+    r"os\.environ\.get\(\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)|"
+    r"environ\.get\(\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)"
+    r")$"
+)
+_BEARER_VALUE_RE = re.compile(r"(?i)\bbearer\s+(\S+)")
+# Prefix-backed credentials still block when a generic subtype reported them.
+_PREFIX_TOKEN_RE = re.compile(
+    r"(ghp_[A-Za-z0-9]|github_pat_|glpat-|sk-ant-|AKIA[0-9A-Z]{16}|-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----)"
+)
+
+
+def _strip_wrapping_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        return value[1:-1]
+    return value
+
+
+_TRAILING_STRUCT_RE = re.compile(r"^[\s,}\]]*$")
+
+
+def _rest_is_trailing_syntax(rest: str) -> bool:
+    """True when text after a quoted scalar is structure or a YAML comment.
+
+    A comma counts only when another keyed field or a closer follows.
+    ``\"${TOKEN}\",hardcoded`` is not structure. ``#`` is a comment only
+    when whitespace precedes it, so ``\"${TOKEN}\"#hardcoded`` is not.
+    """
+    if not rest.strip():
+        return True
+    after_space = rest.lstrip(" \t")
+    if after_space.startswith("#") and len(after_space) < len(rest):
+        return True
+    if after_space.startswith(("\n", "\r")):
+        return True
+    text = rest.strip()
+    if text.startswith(","):
+        tail = text[1:].strip()
+        if not tail or tail[0] in "}]":
+            return True
+        return re.match(r"""['\"]?[A-Za-z_][A-Za-z0-9_-]*['\"]?\s*[:=]""", tail) is not None
+    return _TRAILING_STRUCT_RE.fullmatch(text) is not None
+
+
+def _assigned_value(rhs: str) -> str:
+    """Take one quoted scalar, allowing only JSON/YAML punctuation after it."""
+    rhs = rhs.strip()
+    if rhs[:1] in "'\"":
+        quote = rhs[0]
+        end = rhs.find(quote, 1)
+        if end != -1:
+            rest = rhs[end + 1 :]
+            if _rest_is_trailing_syntax(rest):
+                return rhs[1:end]
+            return rhs
+    return _strip_wrapping_quotes(rhs)
+
+
+def _captured_secret(text: str) -> str:
+    """Return the whole assigned value, not a reference prefix inside it."""
+    stripped = text.strip()
+    bearer = _BEARER_VALUE_RE.search(stripped)
+    if bearer and not stripped[bearer.end():].strip():
+        return bearer.group(1).strip().strip("'\"")
+    assigned = re.search(r"[:=]\s*(.*)$", stripped)
+    if assigned:
+        return _assigned_value(assigned.group(1))
+    return _strip_wrapping_quotes(stripped)
+
+
+def _candidate_texts(finding: dict) -> list[str]:
+    """Every non-empty representation. A short match must not hide a longer one."""
+    texts: list[str] = []
+    details = finding.get("details")
+    if isinstance(details, dict):
+        for key in ("match", "secret", "value", "raw"):
+            raw = details.get(key)
+            if isinstance(raw, str) and raw.strip():
+                texts.append(raw.strip())
+    snippet = finding.get("snippet")
+    if isinstance(snippet, str) and snippet.strip():
+        texts.append(snippet.strip())
+    return texts
+
+
+def finding_has_prefix_token(finding: dict) -> bool:
+    """True when any representation contains a known token prefix or a PEM key."""
+    parts = _candidate_texts(finding)
+    parts.append(str(finding.get("message") or ""))
+    return _PREFIX_TOKEN_RE.search("\n".join(parts)) is not None
+
+
+_KEYED_ASSIGN_PREFIX = r"""(?<![A-Za-z0-9_-])(?P<key>['\"]?[A-Za-z_][A-Za-z0-9_-]*['\"]?)\s*[:=]\s*"""
+_VALUE_SCALAR_RE = re.compile(
+    _KEYED_ASSIGN_PREFIX + r"""(?P<q>['\"])(?P<value>.*?)(?P=q)""",
+    re.DOTALL,
+)
+_UNQUOTED_VALUE_RE = re.compile(
+    r"(?i)" + _KEYED_ASSIGN_PREFIX + r"(?P<value>"
+    r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|"
+    r"os\.environ\.get\(\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)|"
+    r"os\.environ(?:\.[A-Za-z_]+|\[['\"][A-Za-z_][A-Za-z0-9_]*['\"]\])|"
+    r"environ\.get\(\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)|"
+    r"lookup\s*\(\s*['\"]env['\"]\s*,\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)|"
+    r"[^\s'\"#,{}]+"
+    r")"
+)
+# A short letter label is not a credential only under a non-secret key.
+_STRUCTURAL_LABEL_KEYS = frozenset({"kind"})
+
+
+def _is_structural_label(key: str, value: str) -> bool:
+    name = key.strip().strip("'\"").lower()
+    return name in _STRUCTURAL_LABEL_KEYS and re.fullmatch(r"[A-Za-z]{1,5}", value) is not None
+
+
+def _snippet_scalars_are_placeholder(text: str) -> bool | None:
+    """Classify every assigned scalar, quoted or not.
+
+    Returns True only when every assigned value is a variable reference
+    or a short letter label under a structural key such as ``kind``.
+    A literal under ``password``, ``token``, or any other key stays
+    blocking, including a 1–5 letter value such as ``admin``.
+    """
+    saw_reference = False
+    saw_value = False
+    for match in _VALUE_SCALAR_RE.finditer(text):
+        value = match.group("value")
+        if not _rest_is_trailing_syntax(text[match.end() :]):
+            return False
+        saw_value = True
+        if _PLACEHOLDER_SECRET_RE.match(value):
+            saw_reference = True
+        elif _is_structural_label(match.group("key"), value):
+            continue
+        else:
+            return False
+    bare = _VALUE_SCALAR_RE.sub(" ", text)
+    for match in _UNQUOTED_VALUE_RE.finditer(bare):
+        value = match.group("value")
+        rest = bare[match.end() :]
+        if rest[:1] in "\r\n":
+            pass
+        elif rest[:1].isspace():
+            tail = rest.lstrip(" \t")
+            if tail and not tail.startswith("#") and not tail.startswith(("\n", "\r")):
+                return False
+        elif rest:
+            return False
+        saw_value = True
+        if _PLACEHOLDER_SECRET_RE.match(value):
+            saw_reference = True
+        elif _is_structural_label(match.group("key"), value):
+            continue
+        else:
+            return False
+    if saw_reference and saw_value:
+        return True
+    return None
+
+
+def secret_value_is_placeholder(finding: dict) -> bool:
+    """True when the captured secret is a variable reference.
+
+    No captured text is not a placeholder: a credential-shaped rule with
+    no value still blocks. A later JSON or YAML field is inspected, not
+    only the first colon in the snippet.
+    """
+    texts = _candidate_texts(finding)
+    if not texts:
+        return False
+
+    def _one(text: str) -> bool:
+        scalars = _snippet_scalars_are_placeholder(text)
+        if scalars is not None:
+            return scalars
+        return _PLACEHOLDER_SECRET_RE.match(_captured_secret(text)) is not None
+
+    return all(_one(text) for text in texts)
+
+
 def blocking_guardian_findings(
     findings: Any,
     rule_ids: Any,
+    informational_secret_types: Any = None,
 ) -> list[dict]:
-    """Findings whose rule_id is configured to force NEEDS_CHANGES."""
+    """Findings whose rule_id is configured to force NEEDS_CHANGES.
+
+    SECRET-001 is one engine-agnostic bucket. Subtype alone does not
+    demote a finding. A hit is informational only when the captured
+    value is a placeholder or a variable reference. Prefix-backed
+    tokens and PEM keys block even when the value sits in an env
+    assignment or a long blob. ``informational_secret_types`` is
+    accepted for callers and is not an unconditional bypass.
+    """
     ids = {str(item) for item in (rule_ids or []) if item}
+    noisy = {_secret_type_slug(item) for item in (informational_secret_types or []) if item}
     out: list[dict] = []
     if not isinstance(findings, list):
         return out
@@ -57,6 +317,12 @@ def blocking_guardian_findings(
         if not isinstance(finding, dict):
             continue
         if str(finding.get("rule_id") or "") not in ids:
+            continue
+        if finding_has_prefix_token(finding):
+            out.append(finding)
+            continue
+        secret_type = guardian_secret_type(finding)
+        if secret_type and secret_type in noisy and secret_value_is_placeholder(finding):
             continue
         out.append(finding)
     return out
@@ -67,5 +333,8 @@ class FilterModule:
         return {
             "neutralize_host_mentions": neutralize_host_mentions,
             "prepare_guardian_scan_input": prepare_guardian_scan_input,
+            "guardian_secret_type": guardian_secret_type,
+            "secret_value_is_placeholder": secret_value_is_placeholder,
+            "finding_has_prefix_token": finding_has_prefix_token,
             "blocking_guardian_findings": blocking_guardian_findings,
         }
