@@ -297,13 +297,31 @@ def test_reference_suffix_blocks_and_jinja_lookup_does_not():
             "rule_id": "SECRET-001",
             "message": "Secret detected: Password Assignment",
             "details": {"secret_type": "generic-password-assignment"},
-            "snippet": "credential=${PASSWORD}hardcoded",
+            "snippet": "credential=${PASSWORD}-hardcoded",
         },
         {
             "rule_id": "SECRET-001",
             "message": "Secret detected: Password Assignment",
             "details": {"secret_type": "generic-password-assignment"},
             "snippet": 'credential="${PASSWORD}"hardcoded',
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+            "snippet": "credential=${TOKEN}_suffix",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+            "snippet": 'credential = os.environ.get("TOKEN")',
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+            "snippet": "credential: lookup('env', 'TOKEN')",
         },
         {
             "rule_id": "SECRET-001",
@@ -318,8 +336,9 @@ def test_reference_suffix_blocks_and_jinja_lookup_does_not():
         ["env-variable", "generic-password-assignment"],
     )
     assert [item["snippet"] for item in blocking] == [
-        "credential=${PASSWORD}hardcoded",
+        "credential=${PASSWORD}-hardcoded",
         'credential="${PASSWORD}"hardcoded',
+        "credential=${TOKEN}_suffix",
     ]
 
 

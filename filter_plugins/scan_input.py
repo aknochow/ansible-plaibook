@@ -114,6 +114,7 @@ _PLACEHOLDER_SECRET_RE = re.compile(
     r"\{\{\s*lookup\s*\(\s*['\"]env['\"]\s*,\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)\s*\}\}|"
     r"lookup\s*\(\s*['\"]env['\"]\s*,\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)|"
     r"os\.environ(?:\.[A-Za-z_]+|\[['\"][A-Za-z_][A-Za-z0-9_]*['\"]\])?|"
+    r"os\.environ\.get\(\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)|"
     r"environ\.get\(\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)"
     r")$"
 )
@@ -192,7 +193,10 @@ _VALUE_SCALAR_RE = re.compile(r"""[:=]\s*(['"])(.*?)\1""", re.DOTALL)
 _UNQUOTED_VALUE_RE = re.compile(
     r"(?i)[:=]\s*("
     r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|"
+    r"os\.environ\.get\(\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)|"
     r"os\.environ(?:\.[A-Za-z_]+|\[['\"][A-Za-z_][A-Za-z0-9_]*['\"]\])|"
+    r"environ\.get\(\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)|"
+    r"lookup\s*\(\s*['\"]env['\"]\s*,\s*['\"][A-Za-z_][A-Za-z0-9_]*['\"]\s*\)|"
     r"[^\s'\"#,{}]+"
     r")"
 )
@@ -220,7 +224,7 @@ def _snippet_scalars_are_placeholder(text: str) -> bool | None:
     for match in _UNQUOTED_VALUE_RE.finditer(bare):
         value = match.group(1)
         nxt = bare[match.end() : match.end() + 1]
-        if nxt.isalnum():
+        if nxt and nxt not in " \t\r\n,}]#":
             return False
         saw_value = True
         if _PLACEHOLDER_SECRET_RE.match(value):
