@@ -37,3 +37,6 @@ exclude_paths:
   - .galaxy-collections/
   # Event-Driven Ansible rulebooks are not playbooks.
   - eda/
+  # ansible.controller is not in the offline lint set. Syntax-checked
+  # when scripts/install-ansible-controller.sh has installed the pin.
+  - controller/

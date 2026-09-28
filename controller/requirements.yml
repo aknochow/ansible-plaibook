@@ -1,0 +1,8 @@
+---
+# Public Galaxy does not publish ansible.controller (that name is the
+# Automation Hub build of this collection). awx.awx 24.6.1 is the same
+# modules. scripts/install-ansible-controller.sh installs this pin and
+# exposes it as ansible.controller, with the platform-gateway API prefix.
+collections:
+  - name: awx.awx
+    version: 24.6.1

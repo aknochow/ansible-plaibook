@@ -259,3 +259,8 @@
       unaffected by a concurrent run: {{ review_findings_run_scoped_path }}
       / {{ review_summary_run_scoped_path }}. Full run history for this commit
       is appended to {{ review_findings_path | dirname }}/runs.jsonl.
+
+- name: Record this target on the controller CI artifact
+  ansible.builtin.include_tasks: record_ci_target.yml
+  vars:
+    ci_target_findings: "{{ deduped_findings | default([]) }}"

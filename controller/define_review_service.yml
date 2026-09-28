@@ -1,0 +1,170 @@
+---
+# Create the plaibook-review job template on an AAP controller.
+#
+# Does not create tokens and does not print credential values.
+# Run once, with a controller admin token, after the EE image exists:
+#
+#   export CONTROLLER_HOST=aap.example.com
+#   export CONTROLLER_OAUTH_TOKEN=...
+#   ansible-playbook controller/define_review_service.yml
+#
+# Optional:
+#   -e plaibook_launch_user=plaibook-ci
+#   -e plaibook_github_credential_name=plaibook-github-read
+#
+# The launch user, when set, receives Execute on this job template only.
+- name: Define the plaibook review service
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  environment:
+    CONTROLLER_OPTIONAL_API_URLPATTERN_PREFIX: >-
+      {{ lookup('ansible.builtin.env', 'CONTROLLER_OPTIONAL_API_URLPATTERN_PREFIX')
+         | default('/api/controller/', true) }}
+
+  vars:
+    plaibook_controller_host: >-
+      {{ lookup('ansible.builtin.env', 'CONTROLLER_HOST')
+         | default(lookup('ansible.builtin.env', 'AAP_CONTROLLER_HOST'), true) }}
+    plaibook_controller_token: >-
+      {{ lookup('ansible.builtin.env', 'CONTROLLER_OAUTH_TOKEN')
+         | default(lookup('ansible.builtin.env', 'AAP_CONTROLLER_TOKEN'), true) }}
+    plaibook_controller_organization: >-
+      {{ lookup('ansible.builtin.env', 'PLAIBOOK_CONTROLLER_ORGANIZATION')
+         | default('Default', true) }}
+    plaibook_review_job_template: plaibook-review
+    plaibook_project_name: plaibook
+    plaibook_project_scm_url: https://github.com/aknochow/ansible-plaibook.git
+    plaibook_project_scm_branch: main
+    plaibook_inventory_name: plaibook-localhost
+    plaibook_ee_name: plaibook-ee
+    plaibook_ee_image: quay.io/aknochow/plaibook-ee:latest
+    plaibook_launch_user: ""
+    plaibook_github_credential_name: ""
+    plaibook_github_credential_type: plaibook-github-token
+
+  tasks:
+    - name: Require a controller host and token without printing either
+      ansible.builtin.assert:
+        that:
+          - plaibook_controller_host | length > 0
+          - plaibook_controller_token | length > 0
+          - "'@' not in plaibook_controller_host"
+        fail_msg: >-
+          CONTROLLER_HOST and CONTROLLER_OAUTH_TOKEN must be set.
+          Values are not printed. TLS verification stays on.
+
+    - name: Normalize the controller host
+      ansible.builtin.set_fact:
+        plaibook_controller_host: >-
+          {{ plaibook_controller_host
+             | regex_replace('^https?://', '')
+             | regex_replace('/+$', '') }}
+
+    - name: Ensure the localhost inventory
+      ansible.controller.inventory:
+        controller_host: "{{ plaibook_controller_host }}"
+        controller_oauthtoken: "{{ plaibook_controller_token }}"
+        validate_certs: true
+        name: "{{ plaibook_inventory_name }}"
+        organization: "{{ plaibook_controller_organization }}"
+        description: Localhost inventory for plaibook review.yml
+        state: present
+
+    - name: Ensure localhost in that inventory
+      ansible.controller.host:
+        controller_host: "{{ plaibook_controller_host }}"
+        controller_oauthtoken: "{{ plaibook_controller_token }}"
+        validate_certs: true
+        name: localhost
+        inventory: "{{ plaibook_inventory_name }}"
+        variables:
+          ansible_connection: local
+        state: present
+
+    - name: Ensure the plaibook execution environment
+      ansible.controller.execution_environment:
+        controller_host: "{{ plaibook_controller_host }}"
+        controller_oauthtoken: "{{ plaibook_controller_token }}"
+        validate_certs: true
+        name: "{{ plaibook_ee_name }}"
+        image: "{{ plaibook_ee_image }}"
+        organization: "{{ plaibook_controller_organization }}"
+        pull: missing
+        state: present
+
+    - name: Ensure the plaibook project
+      ansible.controller.project:
+        controller_host: "{{ plaibook_controller_host }}"
+        controller_oauthtoken: "{{ plaibook_controller_token }}"
+        validate_certs: true
+        name: "{{ plaibook_project_name }}"
+        organization: "{{ plaibook_controller_organization }}"
+        scm_type: git
+        scm_url: "{{ plaibook_project_scm_url }}"
+        scm_branch: "{{ plaibook_project_scm_branch }}"
+        scm_update_on_launch: true
+        state: present
+
+    - name: Ensure the GitHub token credential type
+      ansible.controller.credential_type:
+        controller_host: "{{ plaibook_controller_host }}"
+        controller_oauthtoken: "{{ plaibook_controller_token }}"
+        validate_certs: true
+        name: "{{ plaibook_github_credential_type }}"
+        description: Injects a GitHub token for review.yml PR fetch. The token is stored in the controller credential, not in this playbook.
+        kind: cloud
+        inputs:
+          fields:
+            - id: github_token
+              type: string
+              label: GitHub token
+              secret: true
+          required:
+            - github_token
+        injectors:
+          env:
+            GH_TOKEN: "{{ '{{ github_token }}' }}"
+            GITHUB_TOKEN: "{{ '{{ github_token }}' }}"
+        state: present
+
+    - name: Ensure the plaibook-review job template
+      ansible.controller.job_template:
+        controller_host: "{{ plaibook_controller_host }}"
+        controller_oauthtoken: "{{ plaibook_controller_token }}"
+        validate_certs: true
+        name: "{{ plaibook_review_job_template }}"
+        description: One plaibook review target per launch. Playbook is review.yml.
+        organization: "{{ plaibook_controller_organization }}"
+        job_type: run
+        inventory: "{{ plaibook_inventory_name }}"
+        project: "{{ plaibook_project_name }}"
+        playbook: review.yml
+        execution_environment: "{{ plaibook_ee_name }}"
+        credentials: "{{ [plaibook_github_credential_name] if (plaibook_github_credential_name | length > 0) else omit }}"
+        extra_vars:
+          post_results: false
+        ask_variables_on_launch: true
+        state: present
+      register: review_template
+
+    - name: Grant the launch user Execute on this template only
+      when: plaibook_launch_user | length > 0
+      ansible.controller.role:
+        controller_host: "{{ plaibook_controller_host }}"
+        controller_oauthtoken: "{{ plaibook_controller_token }}"
+        validate_certs: true
+        role: execute
+        users:
+          - "{{ plaibook_launch_user }}"
+        job_templates:
+          - "{{ plaibook_review_job_template }}"
+        state: present
+
+    - name: Show the template name and id
+      ansible.builtin.debug:
+        msg: >-
+          job_template={{ plaibook_review_job_template }}
+          id={{ review_template.id | default('unchanged') }}
+          organization={{ plaibook_controller_organization }}
+          playbook=review.yml

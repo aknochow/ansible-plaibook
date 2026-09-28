@@ -57,3 +57,8 @@
             'skip_hint': review_skip_hint,
             'failing_checks': review_ci_failing_checks | default([])
           }] }}
+
+    - name: Record the skipped target on the controller CI artifact
+      ansible.builtin.include_tasks: record_ci_target.yml
+      vars:
+        ci_target_findings: []

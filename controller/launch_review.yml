@@ -1,0 +1,126 @@
+---
+# Launch one plaibook review on the controller. One job per target.
+#
+#   export CONTROLLER_HOST=aap.example.com
+#   export CONTROLLER_OAUTH_TOKEN=...   # presence is checked, value is never printed
+#   ansible-playbook controller/launch_review.yml \
+#     -e plaibook_review_target=org/repo/123
+#
+# Requires ansible.controller.job_launch. See scripts/install-ansible-controller.sh
+# and docs/aap-review-service.md. validate_certs stays true.
+- name: Launch one plaibook review job
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  environment:
+    CONTROLLER_OPTIONAL_API_URLPATTERN_PREFIX: >-
+      {{ lookup('ansible.builtin.env', 'CONTROLLER_OPTIONAL_API_URLPATTERN_PREFIX')
+         | default('/api/controller/', true) }}
+
+  vars:
+    plaibook_controller_host: >-
+      {{ lookup('ansible.builtin.env', 'CONTROLLER_HOST')
+         | default(lookup('ansible.builtin.env', 'AAP_CONTROLLER_HOST'), true) }}
+    plaibook_controller_token: >-
+      {{ lookup('ansible.builtin.env', 'CONTROLLER_OAUTH_TOKEN')
+         | default(lookup('ansible.builtin.env', 'AAP_CONTROLLER_TOKEN'), true) }}
+    plaibook_review_job_template: >-
+      {{ lookup('ansible.builtin.env', 'PLAIBOOK_REVIEW_JOB_TEMPLATE')
+         | default('plaibook-review', true) }}
+    plaibook_controller_organization: >-
+      {{ lookup('ansible.builtin.env', 'PLAIBOOK_CONTROLLER_ORGANIZATION')
+         | default('Default', true) }}
+    plaibook_controller_validate_certs: true
+    plaibook_review_target: ""
+    plaibook_review_extra_vars: {}
+    plaibook_ci_result_path: >-
+      {{ lookup('ansible.builtin.env', 'PLAIBOOK_CI_RESULT_PATH') }}
+
+  tasks:
+    - name: Require a controller host and token without printing either
+      ansible.builtin.assert:
+        that:
+          - plaibook_controller_host | length > 0
+          - plaibook_controller_token | length > 0
+          - "'@' not in plaibook_controller_host"
+          - plaibook_controller_validate_certs | bool
+        fail_msg: >-
+          CONTROLLER_HOST (or AAP_CONTROLLER_HOST) and CONTROLLER_OAUTH_TOKEN
+          (or AAP_CONTROLLER_TOKEN) must be set. Values are not printed.
+          TLS verification stays on.
+
+    - name: Normalize the controller host
+      ansible.builtin.set_fact:
+        plaibook_controller_host: >-
+          {{ plaibook_controller_host
+             | regex_replace('^https?://', '')
+             | regex_replace('/+$', '') }}
+
+    - name: Build launch extra_vars for this one target
+      ansible.builtin.set_fact:
+        _launch_extra_vars: >-
+          {{ {
+               'review_type': 'pr',
+               'review_targets_raw': plaibook_review_target,
+               'post_results': false,
+               'review_require_ci_passing': false
+             } | combine(plaibook_review_extra_vars | default({}, true)) }}
+
+    - name: Launch the review job template and wait
+      ansible.controller.job_launch:
+        controller_host: "{{ plaibook_controller_host }}"
+        controller_oauthtoken: "{{ plaibook_controller_token }}"
+        validate_certs: true
+        job_template: "{{ plaibook_review_job_template }}"
+        organization: "{{ plaibook_controller_organization }}"
+        extra_vars: "{{ _launch_extra_vars }}"
+        wait: true
+        interval: 15
+        timeout: 7200
+      register: review_job
+
+    - name: Read the job artifact
+      ansible.builtin.uri:
+        url: "https://{{ plaibook_controller_host }}/api/controller/v2/jobs/{{ review_job.id }}/"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ plaibook_controller_token }}"
+        validate_certs: true
+        status_code: [200]
+        return_content: true
+      register: review_job_detail
+      retries: 5
+      delay: 3
+      until: review_job_detail is succeeded
+      no_log: true
+
+    - name: Require the run-scoped CI artifact from this job
+      ansible.builtin.set_fact:
+        plaibook_ci: "{{ (review_job_detail.json.artifacts | default({})).plaibook_ci | default({}) }}"
+
+    - name: Fail when this job did not publish plaibook_ci
+      ansible.builtin.assert:
+        that:
+          - plaibook_ci.schema | default(0) | int == 1
+          - plaibook_ci.run_id | default('') | length > 0
+          - plaibook_ci.ci_result_file | default('') is match('^ci_result\\.[A-Za-z0-9]+\\.json$')
+        fail_msg: >-
+          Job {{ review_job.id }} status {{ review_job.status | default('unknown') }}
+          did not return artifacts.plaibook_ci. No review result to publish.
+
+    - name: Write the caller-local copy of this job's CI artifact
+      when: plaibook_ci_result_path | length > 0
+      ansible.builtin.copy:
+        content: "{{ plaibook_ci | to_nice_json }}"
+        dest: "{{ plaibook_ci_result_path }}"
+        mode: "0600"
+
+    - name: Report the job id and run-scoped result file
+      ansible.builtin.debug:
+        msg: >-
+          job_id={{ review_job.id }}
+          status={{ review_job.status | default('') }}
+          run_id={{ plaibook_ci.run_id }}
+          ci_result_file={{ plaibook_ci.ci_result_file }}
+          last_run_file={{ plaibook_ci.last_run_file }}
+          check_conclusion={{ plaibook_ci.check_conclusion | default('') }}

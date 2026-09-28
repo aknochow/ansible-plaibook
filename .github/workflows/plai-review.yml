@@ -1,0 +1,60 @@
+name: plaibook review
+
+# Starts after the other pull-request workflows finish. The check run
+# branch protection should require is "plaibook review". Re-run with a
+# pull-request comment that starts with /plai-review, or workflow_dispatch.
+# Same-repo relative uses: this file does not receive a secret from a
+# floating ref in another repository.
+
+on:
+  workflow_run:
+    workflows: ["CI", "CodeQL", "OpenSSF Scorecard"]
+    types: [completed]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to review
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: plaibook-review-${{ github.event.workflow_run.head_sha || github.event.issue.number || github.event.inputs.pr_number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  launch:
+    name: launch
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (
+        github.event_name == 'issue_comment'
+        && github.event.issue.pull_request
+        && startsWith(github.event.comment.body, '/plai-review')
+        && github.event.comment.user.type != 'Bot'
+        && (
+          github.event.comment.author_association == 'OWNER'
+          || github.event.comment.author_association == 'MEMBER'
+          || github.event.comment.author_association == 'COLLABORATOR'
+        )
+      )
+      || (
+        github.event_name == 'workflow_run'
+        && github.event.workflow_run.event == 'pull_request'
+      )
+    permissions:
+      actions: read
+      checks: write
+      contents: read
+      pull-requests: write
+      statuses: read
+    uses: ./.github/workflows/plai-review-reusable.yml
+    secrets:
+      AAP_CONTROLLER_TOKEN: ${{ secrets.AAP_CONTROLLER_TOKEN }}
+    with:
+      controller_host: ${{ vars.AAP_CONTROLLER_HOST }}
+      plaibook_ref: ${{ github.sha }}
+      required_workflows: CI,CodeQL,OpenSSF Scorecard

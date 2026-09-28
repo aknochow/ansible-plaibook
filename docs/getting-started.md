@@ -189,3 +189,8 @@ plai review gitlab:org/repo/34 --post
 # AAP / EE:
 ansible-playbook review.yml -e review_targets_raw=gitlab:org/repo/34 -e post_results=true
 ```
+
+A controller job template launch is a different path from
+`post_results`. It keeps `post_results` false and returns
+`ci_result.<run_id>.json` plus the job artifact `plaibook_ci`. See
+[AAP review service](aap-review-service.md).

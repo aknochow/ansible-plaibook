@@ -211,3 +211,28 @@
     # a default that could change.
     stdin_add_newline: true
   changed_when: true
+
+- name: Build the controller CI artifact
+  build_ci_review_artifact:
+    run_id: "{{ last_run_id }}"
+    status: "{{ 'failed' if (review_pipeline_failed | default(false) | bool) else 'ok' }}"
+    error: "{{ review_pipeline_error | default('') }}"
+    targets: "{{ pipeline_ci_targets | default([]) }}"
+  register: _ci_artifact
+
+- name: Publish the CI artifact on the controller job
+  ansible.builtin.set_stats:
+    data:
+      plaibook_ci: "{{ _ci_artifact.artifact }}"
+    per_host: false
+    aggregate: false
+
+- name: Write the run-scoped CI artifact
+  ansible.builtin.copy:
+    content: "{{ _ci_artifact.artifact | to_nice_json }}"
+    dest: "{{ lookup('env', 'HOME') }}/.cache/ansible-plaibook/ci_result.{{ last_run_id }}.json"
+    mode: "0600"
+
+- name: Show the run-scoped CI artifact name
+  ansible.builtin.debug:
+    msg: "PLAIBOOK_CI_RESULT_RUN_SCOPED: ci_result.{{ last_run_id }}.json"

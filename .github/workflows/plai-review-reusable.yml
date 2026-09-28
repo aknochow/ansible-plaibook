@@ -1,0 +1,93 @@
+name: plaibook review reusable
+
+# Called by family repos. Callers that pass AAP_CONTROLLER_TOKEN must pin
+# this file with a full 40-character commit SHA. Do not call it at @main.
+# post_results stays false. This workflow posts the GitHub review itself.
+
+on:
+  workflow_call:
+    inputs:
+      controller_host:
+        description: Controller hostname with no scheme. Set the Actions variable AAP_CONTROLLER_HOST.
+        required: true
+        type: string
+      plaibook_ref:
+        description: Full commit SHA of aknochow/ansible-plaibook to check out for the launch playbook.
+        required: true
+        type: string
+      required_workflows:
+        description: Comma-separated workflow names that must be completed before the review starts.
+        required: true
+        type: string
+      job_template:
+        description: Controller job template name.
+        required: false
+        type: string
+        default: plaibook-review
+    secrets:
+      AAP_CONTROLLER_TOKEN:
+        required: false
+
+permissions: {}
+
+jobs:
+  launch:
+    name: launch
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      actions: read
+      checks: write
+      contents: read
+      pull-requests: write
+      statuses: read
+    steps:
+      - name: Check out the pinned plaibook launch playbook
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.2.2
+        with:
+          repository: aknochow/ansible-plaibook
+          ref: ${{ inputs.plaibook_ref }}
+          path: .plaibook
+          persist-credentials: false
+
+      - name: Install pinned ansible-core
+        run: python3 -m pip install --disable-pip-version-check 'ansible-core==2.16.19'
+
+      - name: Install ansible.controller from the pinned awx.awx tree
+        env:
+          ANSIBLE_COLLECTIONS_PATH: ${{ github.workspace }}/.galaxy-collections
+        run: bash .plaibook/scripts/install-ansible-controller.sh
+
+      - name: Wait until the other checks on this commit have finished
+        id: wait
+        env:
+          REQUIRED_WORKFLOWS: ${{ inputs.required_workflows }}
+          PLAIBOOK_REVIEW_STATE: ${{ runner.temp }}/plaibook-review
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 .plaibook/scripts/github_review_check.py wait
+
+      - name: Open the plaibook review check
+        if: steps.wait.outputs.skip != 'true'
+        env:
+          PLAIBOOK_REVIEW_STATE: ${{ runner.temp }}/plaibook-review
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 .plaibook/scripts/github_review_check.py open-check
+
+      - name: Launch one controller job for this pull request
+        if: steps.wait.outputs.skip != 'true'
+        env:
+          CONTROLLER_HOST: ${{ inputs.controller_host }}
+          CONTROLLER_OAUTH_TOKEN: ${{ secrets.AAP_CONTROLLER_TOKEN }}
+          PLAIBOOK_REVIEW_JOB_TEMPLATE: ${{ inputs.job_template }}
+          PLAIBOOK_ROOT: ${{ github.workspace }}/.plaibook
+          PLAIBOOK_REVIEW_STATE: ${{ runner.temp }}/plaibook-review
+          ANSIBLE_COLLECTIONS_PATH: ${{ github.workspace }}/.galaxy-collections
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 .plaibook/scripts/github_review_check.py launch
+
+      - name: Publish the check and suggestion comments
+        if: always() && steps.wait.outcome == 'success' && steps.wait.outputs.skip != 'true'
+        env:
+          PLAIBOOK_REVIEW_STATE: ${{ runner.temp }}/plaibook-review
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 .plaibook/scripts/github_review_check.py publish

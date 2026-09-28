@@ -275,6 +275,7 @@
         pipeline_agent_calls: []
         pipeline_phase_durations: []
         pipeline_findings_reports: []
+        pipeline_ci_targets: []
 
     # Collections and provider pip packages must land before preflight:
     # a 3.10 plai re-execs into sandbox-runtime, which is a clean 3.11

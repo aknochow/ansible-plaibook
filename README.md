@@ -250,6 +250,12 @@ podman push <your-registry>/plaibook-ee:latest
 Credentials (GitHub/GitLab tokens, OpenShell mTLS) are injected via
 AAP credentials at job-run time, never baked into the image.
 
+One remote review is one job of the template `plaibook-review`
+(`controller/launch_review.yml`, module `ansible.controller.job_launch`).
+`post_results` stays false. The GitHub check `plaibook review` reads
+that job's `plaibook_ci` artifact and posts suggestion comments.
+Details: [`docs/aap-review-service.md`](docs/aap-review-service.md).
+
 Vertex/Gemini job templates do not need `aknochow.cursor` in the EE.
 `review.yml` loads that collection only when `agent_family=cursor`
 actually starts the sidecar. Rebuild the EE when you change

@@ -1,0 +1,15 @@
+---
+# Compact per-target record for the controller CI artifact. Kept off
+# pipeline_findings_reports so last_run.<run_id>.json does not grow a
+# second copy of the rendered report. Refuted findings are dropped
+# later, in build_ci_review_artifact.
+- name: Record this target for the controller CI artifact
+  ansible.builtin.set_fact:
+    pipeline_ci_targets: "{{ (pipeline_ci_targets | default([])) + [_ci_target] }}"
+  vars:
+    _ci_target:
+      target: "{{ review_org_repo }}#{{ review_number }}"
+      commit: "{{ review_short_sha | default('') }}"
+      verdict: "{{ review_verdict | default('') }}"
+      score: "{{ score_overall | default(0) | float }}"
+      findings: "{{ ci_target_findings | default([]) }}"

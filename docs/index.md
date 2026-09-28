@@ -29,6 +29,7 @@ and tested like any other piece of infrastructure.
 ## Where to go next
 
 - **[Getting Started](getting-started.md)**: `plai review` / `plaibook review`, and `ansible-playbook review.yml` for AAP.
+- **[AAP review service](aap-review-service.md)**: one controller job per target, and the GitHub check `plaibook review`.
 - **[Architecture](architecture.md)**: how the pipeline is built: the review role, domain-specific steering, and the independent verification pass.
 - **[Reference](reference.md)**: every variable that controls a run.
 
