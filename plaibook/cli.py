@@ -42,6 +42,7 @@ from plaibook.summary import (
     load_json,
     sanitize_display_line,
 )
+from plaibook.update import upgrade_plaibook
 from plaibook.wait import WaitSpinner, spinner_enabled
 
 USAGE_EPILOG = """\
@@ -97,6 +98,7 @@ Examples:
   plai review org/repo/123 -f
   plai review org/repo/123 --provider cursor
   plai review org/repo/123 --no-sandbox
+  plai update
 """
 
 
@@ -121,6 +123,12 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
         version=f"plaibook {__version__}",
     )
     sub = parser.add_subparsers(dest="command")
+
+    sub.add_parser(
+        "update",
+        help="Upgrade the pipx install of plaibook.",
+        description="Run pipx upgrade plaibook. Does not upgrade a checkout or a plain pip install.",
+    )
 
     review = sub.add_parser(
         "review",
@@ -533,6 +541,8 @@ def cmd_review(args: argparse.Namespace) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
+    if args.command == "update":
+        return upgrade_plaibook()
     if args.command != "review":
         parser.print_help()
         return 2

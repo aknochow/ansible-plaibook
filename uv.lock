@@ -859,7 +859,7 @@ wheels = [
 
 [[package]]
 name = "plaibook"
-version = "0.1.26"
+version = "0.1.27"
 source = { editable = "." }
 dependencies = [
     { name = "ansible-core", version = "2.16.19", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
