@@ -21,6 +21,7 @@ fi
 PLAYBOOKS=(
   "tests/test_checklist_execution.yml"
   "tests/test_cursor_named_lens_retry.yml"
+  "tests/test_cursor_verify_status_error.yml"
   "tests/test_cursor_lens_attempt_usage.yml"
   "tests/test_cursor_prompt_nonce.yml"
   "tests/test_guardian_not_installed.yml"
@@ -52,7 +53,7 @@ run_playbook() {
   local out rc=0
   out="$(mktemp)"
   set +e
-  if [[ "${pb}" == "tests/test_cursor_named_lens_retry.yml" ]]; then
+  if [[ "${pb}" == "tests/test_cursor_named_lens_retry.yml" || "${pb}" == "tests/test_cursor_verify_status_error.yml" ]]; then
     ANSIBLE_LIBRARY="${STUB_LIBRARY}${ANSIBLE_LIBRARY:+:${ANSIBLE_LIBRARY}}" \
       CURSOR_AGENT_STUB_FILE="${STUB_PAYLOAD}" \
       ansible-playbook "${pb}" >"${out}" 2>&1
