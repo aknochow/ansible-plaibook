@@ -849,12 +849,15 @@ def publish_review(repo: str, pr: str, sha: str, result: dict[str, Any]) -> list
     actions = plan_comments(findings, existing)
     event = review_event(verdict)
     body = summary_body(result, actions)
-    canonical = _canonical_reviews(repo, pr, body, event, sha)
+    reviews = _list_reviews(repo, pr)
+    canonical = _canonical_reviews(reviews, body, event, sha)
     rehome = not canonical
     has_new = any(action.get("op") == "create" for action in actions)
     if canonical and not has_new:
         _apply_updates(repo, [action for action in actions if action.get("op") == "update"])
         _retire_replaced_comments(repo, existing, canonical)
+        keep = _review_ids(canonical) if event == "REQUEST_CHANGES" else set()
+        _dismiss_change_requests(repo, pr, change_requests_to_dismiss(reviews, keep_ids=keep), sha)
         return actions
     comments, retire, updates = partition_actions(actions, rehome=rehome)
     if rehome:
@@ -862,6 +865,7 @@ def publish_review(repo: str, pr: str, sha: str, result: dict[str, Any]) -> list
     _apply_updates(repo, updates)
     _submit_review(repo, pr, sha, body, event, comments, actions, result)
     _retire_comments(repo, retire)
+    _dismiss_change_requests(repo, pr, change_requests_to_dismiss(reviews, keep_ids=set()), sha)
     return actions
 
 
@@ -1027,18 +1031,68 @@ def _retire_replaced_comments(
     _retire_comments(repo, stale)
 
 
-def _canonical_reviews(repo: str, pr: str, body: str, event: str, sha: str) -> list[dict[str, Any]]:
+def _list_reviews(repo: str, pr: str) -> list[dict[str, Any]]:
     url = f"{_api(repo)}/pulls/{pr}/reviews?per_page=100"
     found: list[dict[str, Any]] = []
     while url:
         status, payload, link = _request("GET", url)
         if status != 200 or not isinstance(payload, list):
             raise RuntimeError(f"unable to list reviews ({status})")
-        for review in payload:
-            if isinstance(review, dict) and review_matches(review, body, event, sha):
-                found.append(review)
+        found.extend(item for item in payload if isinstance(item, dict))
         url = _next_link(link)
     return found
+
+
+def _canonical_reviews(
+    reviews: list[dict[str, Any]], body: str, event: str, sha: str
+) -> list[dict[str, Any]]:
+    return [review for review in reviews if review_matches(review, body, event, sha)]
+
+
+def _review_ids(reviews: list[dict[str, Any]]) -> set[int]:
+    ids: set[int] = set()
+    for review in reviews:
+        raw_id = review.get("id")
+        if isinstance(raw_id, int) and not isinstance(raw_id, bool):
+            ids.add(raw_id)
+    return ids
+
+
+def change_requests_to_dismiss(reviews: list[dict[str, Any]], *, keep_ids: set[int]) -> list[int]:
+    """App reviews that still request changes and are not the current one.
+
+    A later COMMENT does not clear an earlier CHANGES_REQUESTED review.
+    This app does not approve, so the old request has to be dismissed.
+    Reviews from anyone else are left alone.
+    """
+    ids: list[int] = []
+    for review in reviews:
+        if not _is_review_app(review) or review.get("state") != "CHANGES_REQUESTED":
+            continue
+        raw_id = review.get("id")
+        if not isinstance(raw_id, int) or isinstance(raw_id, bool) or raw_id in keep_ids:
+            continue
+        ids.append(raw_id)
+    return ids
+
+
+def _dismiss_change_requests(repo: str, pr: str, review_ids: list[int], sha: str) -> None:
+    message = f"Superseded by the plaibook review of {sha}."
+    for review_id in review_ids:
+        status, payload, _link = _request(
+            "PUT",
+            f"{_api(repo)}/pulls/{pr}/reviews/{review_id}/dismissals",
+            {"message": message, "event": "DISMISS"},
+        )
+        if status != 200:
+            detail = _error_text(payload)
+            raise RuntimeError(
+                f"unable to dismiss requested changes {review_id} ({status}): {detail}. "
+                "The plai-review GitHub App needs Contents: write so a "
+                "request-changes review is a write review, and Administration: "
+                "write to dismiss one on a protected branch. The installation "
+                "must accept those permissions."
+            )
 
 
 def _write_output(values: dict[str, str]) -> None:

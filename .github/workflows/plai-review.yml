@@ -17,7 +17,10 @@ name: plai
 # checks:read. The called job keeps that read-only token. Posting uses
 # the GitHub App installation token. PLAI_GITHUB_APP_ID and
 # PLAI_GITHUB_APP_PRIVATE_KEY post the review as the GitHub App whose
-# slug is plai-review.
+# slug is plai-review. That app needs Contents: write so a request for
+# changes is a write review, and Administration: write so it can dismiss
+# its own stale request on a protected branch. The job token stays
+# read-only.
 
 on:
   pull_request_target:

@@ -12,6 +12,7 @@ from github_pr_review import (
     REVIEW_KEYWORD,
     _cmd_publish,
     _retire_absent_findings,
+    change_requests_to_dismiss,
     check_conclusion,
     combine_gate_states,
     comment_anchor,
@@ -764,6 +765,81 @@ def test_review_event_requests_changes_for_needs_changes():
         "COMMENT",
         sha,
     )
+
+
+def test_change_requests_to_dismiss_keeps_the_current_request_and_other_people():
+    bot = {"login": "plai-review[bot]"}
+    reviews = [
+        {"id": 1, "user": bot, "state": "CHANGES_REQUESTED", "commit_id": "a" * 40},
+        {"id": 2, "user": bot, "state": "CHANGES_REQUESTED", "commit_id": "b" * 40},
+        {"id": 3, "user": {"login": "someone"}, "state": "CHANGES_REQUESTED", "commit_id": "b" * 40},
+        {"id": 4, "user": bot, "state": "COMMENTED", "commit_id": "b" * 40},
+        {"id": True, "user": bot, "state": "CHANGES_REQUESTED"},
+    ]
+    assert change_requests_to_dismiss(reviews, keep_ids={2}) == [1]
+    assert change_requests_to_dismiss(reviews, keep_ids=set()) == [1, 2]
+
+
+def test_publish_review_dismisses_an_older_change_request(monkeypatch):
+    calls = []
+    sha = "b" * 40
+
+    def fake_request(method, url, payload=None):
+        calls.append((method, url, payload))
+        if method == "GET" and url.endswith("/comments?per_page=100"):
+            return 200, [], ""
+        if method == "GET" and "/reviews?" in url:
+            return 200, [
+                {
+                    "id": 7,
+                    "user": {"login": "plai-review[bot]"},
+                    "body": "old request",
+                    "state": "CHANGES_REQUESTED",
+                    "commit_id": "a" * 40,
+                },
+                {
+                    "id": 8,
+                    "user": {"login": "reviewer"},
+                    "state": "CHANGES_REQUESTED",
+                    "commit_id": "a" * 40,
+                },
+            ], ""
+        if method == "POST" and url.endswith("/reviews"):
+            return 201, {"id": 99, "state": "COMMENTED"}, ""
+        if method == "PUT" and url.endswith("/reviews/7/dismissals"):
+            assert payload == {
+                "message": f"Superseded by the plaibook review of {sha}.",
+                "event": "DISMISS",
+            }
+            return 200, {"id": 7, "state": "DISMISSED"}, ""
+        raise AssertionError((method, url, payload))
+
+    monkeypatch.setattr("github_pr_review._request", fake_request)
+    result = {"status": "ok", "targets": [{"verdict": "READY_FOR_HUMAN_REVIEW", "score": 100, "findings": []}]}
+    publish_review("acme/repo", "9", sha, result)
+    puts = [item for item in calls if item[0] == "PUT"]
+    assert len(puts) == 1
+    assert puts[0][1].endswith("/pulls/9/reviews/7/dismissals")
+
+
+def test_publish_review_reports_a_missing_dismiss_permission(monkeypatch):
+    def fake_request(method, url, payload=None):
+        if method == "GET" and url.endswith("/comments?per_page=100"):
+            return 200, [], ""
+        if method == "GET" and "/reviews?" in url:
+            return 200, [
+                {"id": 7, "user": {"login": "plai-review[bot]"}, "state": "CHANGES_REQUESTED", "commit_id": "a" * 40}
+            ], ""
+        if method == "POST":
+            return 201, {"id": 99}, ""
+        if method == "PUT":
+            return 403, {"message": "Resource not accessible by integration"}, ""
+        raise AssertionError((method, url))
+
+    monkeypatch.setattr("github_pr_review._request", fake_request)
+    result = {"status": "ok", "targets": [{"verdict": "READY_FOR_HUMAN_REVIEW", "score": 100, "findings": []}]}
+    with pytest.raises(RuntimeError, match="Administration: write"):
+        publish_review("acme/repo", "9", "b" * 40, result)
 
 
 def test_partition_rehomes_existing_comments_into_one_review():

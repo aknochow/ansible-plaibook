@@ -10,7 +10,7 @@ name: plai
 # PLAI_GITHUB_APP_ID and PLAI_GITHUB_APP_PRIVATE_KEY post
 # that review as the GitHub App whose slug is plai-review. The job token is contents:read,
 # pull-requests:read, and checks:read. checks:read lets the gate list check runs.
-# The token cannot write the pull request. Posting uses
+# The token cannot write the pull request. Posting and dismissing use
 # the GitHub App installation token, and only in the publish step, after
 # the agent has finished. That step runs a copy of the publisher taken
 # before the agent starts. The review step installs OpenShell from the
