@@ -113,7 +113,9 @@ def format_pretty(document: dict[str, Any], *, full: bool = False) -> str:
 
     Full findings.md is not dumped unless ``full`` (``--full`` / ``-v``).
     SKIPPED (CI preflight) always prints the reason and failing check
-    names; the 0.0 score is omitted. A guardian-forced NEEDS_CHANGES is
+    names; the 0.0 score is omitted. NOTHING_TO_REVIEW (an empty
+    commit range) prints that reason and no score, so it cannot look
+    like ``status: ok``. A guardian-forced NEEDS_CHANGES is
     named on the default TTY so 100% plus that verdict is not silent.
     """
     lines: list[str] = []
@@ -131,7 +133,8 @@ def format_pretty(document: dict[str, Any], *, full: bool = False) -> str:
         verdict = sanitize_display_line(target.get("verdict") or document.get("status") or "UNKNOWN")
         score = target.get("score_overall", target.get("score"))
         skipped = _is_skipped(target, verdict)
-        score_text = "" if skipped else _percent(score)
+        empty_range = _is_empty_range(target, verdict)
+        score_text = "" if skipped or empty_range else _percent(score)
         name = sanitize_display_line(target.get("target") or "")
         header = f"{verdict}"
         if score_text:
@@ -152,6 +155,10 @@ def format_pretty(document: dict[str, Any], *, full: bool = False) -> str:
 
         if skipped:
             lines.extend(_skipped_lines(target))
+        elif empty_range:
+            reason = str(target.get("skip_reason") or target.get("report") or "").strip()
+            if reason:
+                lines.append(f"  {sanitize_display_line(reason)}")
 
         scores = target.get("scores") or {}
         if scores:
@@ -194,6 +201,11 @@ def format_pretty(document: dict[str, Any], *, full: bool = False) -> str:
 
 def _is_skipped(target: dict[str, Any], verdict: str) -> bool:
     return verdict.upper() == "SKIPPED" or bool(target.get("ci_preflight_failed"))
+
+
+def _is_empty_range(target: dict[str, Any], verdict: str) -> bool:
+    """A commit range with nothing between the endpoints. Not a scored review."""
+    return verdict.upper() == "NOTHING_TO_REVIEW" or bool(target.get("range_empty"))
 
 
 def _skipped_lines(target: dict[str, Any]) -> list[str]:

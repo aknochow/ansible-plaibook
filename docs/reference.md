@@ -14,7 +14,7 @@ status: stable
 |---|---|---|
 | `review_type` | `pr` | `pr` \| `branch` \| `commit`. Selects which target-resolution path runs. |
 | `review_targets_raw` | n/a | A PR/MR URL, `org/repo/N` / `gitlab:org/repo/N`, or a newline-separated list of them. `review_type: pr` only. |
-| `commit_sha` | `HEAD` | `review_type: commit` only. |
+| `commit_sha` | `HEAD` | `review_type: commit` only. One git ref, or a two-dot range `BASE..TIP`. The same commit on both sides records verdict `NOTHING_TO_REVIEW` and does not dispatch lenses. |
 | `repo_path` | current directory | `review_type: commit` only. |
 | `branch_review_target` | n/a | `review_type: branch` only. A local path or remote branch reference. |
 

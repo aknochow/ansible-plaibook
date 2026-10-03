@@ -355,6 +355,7 @@
     same_commit_fast_path: >-
       {{
         review_same_commit_fast_path_enabled | bool
+        and not (review_commit_range | default(false) | bool)
         and _latest_prior_review.found
         and prior_review_sha != ''
         and prior_review_sha == review_short_sha

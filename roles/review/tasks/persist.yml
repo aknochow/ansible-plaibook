@@ -78,7 +78,7 @@
 # constructed.
 - name: Set the findings path fact
   ansible.builtin.set_fact:
-    review_findings_path: "{{ review_output_base }}/{{ review_org_repo }}/{{ review_branch }}/{{ review_today_date }}-{{ review_short_sha }}/findings.md"
+    review_findings_path: "{{ review_output_base }}/{{ review_org_repo }}/{{ review_branch }}/{{ review_today_date }}-{{ review_artifact_id | default(review_short_sha) }}/findings.md"
 
 - name: Ensure the findings directory exists
   ansible.builtin.file:

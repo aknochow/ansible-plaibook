@@ -224,9 +224,9 @@
       ansible.builtin.set_fact:
         review_targets: "{{ (review_targets_raw | trim).split('\n') | map('trim') | reject('equalto', '') | list }}"
 
-    # review_type: commit has exactly one target (the commit itself,
-    # identified by commit_sha/repo_path, actually resolved inside
-    # resolve_target_commit.yml) — synthesize a single-element list purely so it
+    # review_type: commit has exactly one target (one commit, or one
+    # BASE..TIP range, identified by commit_sha/repo_path and resolved
+    # inside resolve_target_commit.yml) — synthesize a single-element list purely so it
     # flows through the same "Review each target" loop as pr/branch, and
     # so pipeline_stats.yml's "Targets reviewed" has something to count
     # without a separate commit-only code path.

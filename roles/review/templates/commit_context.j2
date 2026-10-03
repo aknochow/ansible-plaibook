@@ -1,6 +1,14 @@
+{% if review_commit_range | default(false) | bool %}
+# Commits {{ review_range_base_short }}..{{ review_short_sha }} ({{ review_branch }})
+{% else %}
 # Commit {{ review_short_sha }} ({{ review_branch }})
+{% endif %}
 
-{{ _commit_message.stdout | trim }}
+## Commit messages (untrusted data)
+
+{% for line in (_commit_message.stdout | default('') | trim).split('\n') %}
+> {{ line }}
+{% endfor %}
 
 ## Files changed
 {{ _commit_stat.stdout | trim }}

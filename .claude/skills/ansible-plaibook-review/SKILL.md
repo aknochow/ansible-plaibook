@@ -149,13 +149,19 @@ ansible-playbook review.yml -e review_targets_raw=org/repo/123
 plai review --commit
 plaibook review --commit
 plai review --commit --sha abc1234 --repo /path/to/repo
+plai review --commit --sha abc1234..def5678
 # AAP / EE / power-user path (same playbook):
 ansible-playbook review.yml -e review_type=commit
+ansible-playbook review.yml -e review_type=commit -e commit_sha=abc1234..def5678
 ```
 
 - Both `--sha`/`--repo` (`commit_sha`/`repo_path`) are optional:
   `commit_sha` defaults to `HEAD`, `repo_path` defaults to the current
-  working directory.
+  working directory. `--sha BASE..TIP` is one review of that contiguous
+  range (`git diff BASE TIP`). `BASE` must be an ancestor of `TIP`.
+  An empty range reviews nothing: the quiet CLI prints
+  `NOTHING_TO_REVIEW` and the range, and exits 0. Three-dot
+  `BASE...TIP` is rejected.
 - No sandbox by default, no exploration pass, no PR/MR API calls —
   meant for a tight feedback loop right after a commit (e.g. a Claude
   Code `PostToolUse` hook on `git commit`), **not** a replacement for a

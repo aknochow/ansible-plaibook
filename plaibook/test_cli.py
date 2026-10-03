@@ -11,6 +11,7 @@ import pytest
 import yaml
 
 from plaibook.cli import (
+    _progress_line,
     _validate_review_args,
     ansible_verbosity,
     build_parser,
@@ -127,6 +128,16 @@ def test_extra_vars_commit_and_pr_and_notes():
         "repo_path": "/tmp/repo",
         "commit_sha": "abc1234",
     }
+    ranged = extra_vars_from_args(
+        _args(commit=True, commit_sha="abc1234..def5678"),
+        "runId0123456789",
+    )
+    assert ranged["review_type"] == "commit"
+    assert ranged["commit_sha"] == "abc1234..def5678"
+    assert "Reviewing commits abc1234..def5678" in _progress_line(
+        _args(commit=True, commit_sha="abc1234..def5678", repo_path="repo")
+    )
+    assert "Reviewing commit HEAD" in _progress_line(_args(commit=True))
     pr = extra_vars_from_args(
         _args(target="org/repo/123", review_extra_notes="Note: intentional", post=True),
         "runId0123456789",
@@ -751,6 +762,91 @@ def test_pretty_explains_ci_preflight_skip_without_full_report():
         full=True,
     )
     assert "full rendered skip report should stay behind --full" in full
+
+
+def test_pretty_empty_commit_range_is_not_status_ok():
+    pretty = format_pretty(
+        {
+            "status": "ok",
+            "cost_usd": 0,
+            "targets": [
+                {
+                    "target": "abc1234..abc1234",
+                    "verdict": "NOTHING_TO_REVIEW",
+                    "range_empty": True,
+                    "skip_reason": "Commit range abc1234..abc1234 is empty; nothing to review.",
+                    "report": "Commit range abc1234..abc1234 is empty; nothing to review.",
+                }
+            ],
+        }
+    )
+    assert pretty.startswith("NOTHING_TO_REVIEW  abc1234..abc1234\n")
+    assert "Commit range abc1234..abc1234 is empty; nothing to review." in pretty
+    assert "status: ok" not in pretty
+    assert "READY_FOR_HUMAN_REVIEW" not in pretty
+    assert "%" not in pretty
+
+
+def test_cmd_review_empty_commit_range_names_the_range(tmp_path, monkeypatch, capsys):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    (checkout / "review.yml").write_text("---\n")
+    (checkout / "ansible.cfg").write_text("[defaults]\n")
+    home = tmp_path / "home"
+    cache = home / ".cache" / "ansible-plaibook"
+    cache.mkdir(parents=True)
+    sha = "abc1234..abc1234"
+    reason = f"Commit range {sha} is empty; nothing to review."
+
+    def fake_run(command, *, playbook_root, verbose, env=None):
+        extras = json.loads(command[command.index("-e") + 1])
+        path = last_run_path(extras["last_run_id"], home=home)
+        path.write_text(
+            json.dumps(
+                {
+                    "run_id": extras["last_run_id"],
+                    "status": "ok",
+                    "cost_usd": 0.0,
+                    "targets": [
+                        {
+                            "target": sha,
+                            "verdict": "NOTHING_TO_REVIEW",
+                            "range_empty": True,
+                            "skip_reason": reason,
+                            "report": reason,
+                        }
+                    ],
+                }
+            )
+        )
+        return SimpleNamespace(returncode=0, stdout="TASK [debug]\n" + reason + "\n", stderr="")
+
+    monkeypatch.setattr("plaibook.cli.find_playbook_root", lambda: checkout)
+    monkeypatch.setattr(
+        "plaibook.cli.build_ansible_command",
+        lambda **kwargs: build_ansible_command(ansible_bin="ansible-playbook", **kwargs),
+    )
+    monkeypatch.setattr("plaibook.cli.run_ansible_playbook", fake_run)
+    monkeypatch.setattr("plaibook.cli.last_run_path", lambda run_id: last_run_path(run_id, home=home))
+
+    code = cmd_review(_args(commit=True, commit_sha=sha, playbook_root=str(checkout)))
+    out = capsys.readouterr()
+    assert code == 0
+    assert "TASK [debug]" not in out.out
+    assert reason not in out.err
+    assert out.out.startswith(f"NOTHING_TO_REVIEW  {sha}\n")
+    assert reason in out.out
+    assert "status: ok" not in out.out
+    assert "READY_FOR_HUMAN_REVIEW" not in out.out
+
+    capsys.readouterr()
+    code = cmd_review(_args(commit=True, commit_sha=sha, playbook_root=str(checkout), as_json=True))
+    out = capsys.readouterr()
+    assert code == 0
+    payload = json.loads(out.out)
+    assert payload["status"] == "ok"
+    assert payload["targets"][0]["verdict"] == "NOTHING_TO_REVIEW"
+    assert payload["targets"][0]["skip_reason"] == reason
 
 
 def test_pretty_skip_falls_back_to_report_when_structured_fields_missing():

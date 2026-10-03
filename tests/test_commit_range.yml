@@ -1,0 +1,308 @@
+---
+# resolve_commit_refs.yml: one commit stays parent..sha, and BASE..TIP
+# is the net diff of that contiguous range. No lenses, no network.
+#
+# Usage:
+#   ansible-playbook tests/test_commit_range.yml
+
+- name: Test commit range resolution
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    resolve_commit_refs_path: "{{ playbook_dir }}/../roles/review/tasks/resolve_commit_refs.yml"
+    git_empty_tree_sha: "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+  tasks:
+    - name: Create a temporary git repository
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: "test-commit-range-"
+      register: test_repo_dir
+
+    - name: Exercise commit ranges, then remove the temporary repository
+      block:
+        - name: Initialize the test repository
+          ansible.builtin.command:
+            argv: [git, init, -b, main]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: Configure the test repository identity
+          ansible.builtin.command:
+            argv: "{{ item }}"
+            chdir: "{{ test_repo_dir.path }}"
+          loop:
+            - [git, config, user.name, "Test User"]
+            - [git, config, user.email, "test@example.com"]
+          changed_when: true
+
+        - name: Write base.txt
+          ansible.builtin.copy:
+            content: "one\n"
+            dest: "{{ test_repo_dir.path }}/base.txt"
+            mode: "0644"
+
+        - name: Commit base.txt
+          ansible.builtin.command:
+            argv: [git, add, base.txt]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: Record the base commit
+          ansible.builtin.command:
+            argv: [git, commit, -m, "Add base"]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: Write mid.txt
+          ansible.builtin.copy:
+            content: "two\n"
+            dest: "{{ test_repo_dir.path }}/mid.txt"
+            mode: "0644"
+
+        - name: Commit mid.txt
+          ansible.builtin.command:
+            argv: [git, add, mid.txt]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: Record the mid commit
+          ansible.builtin.command:
+            argv: [git, commit, -m, "Add mid"]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: Write tip.txt
+          ansible.builtin.copy:
+            content: "three\n"
+            dest: "{{ test_repo_dir.path }}/tip.txt"
+            mode: "0644"
+
+        - name: Commit tip.txt
+          ansible.builtin.command:
+            argv: [git, add, tip.txt]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: Record the tip commit
+          ansible.builtin.command:
+            argv: [git, commit, -m, "Add tip"]
+            chdir: "{{ test_repo_dir.path }}"
+          changed_when: true
+
+        - name: Record the three commit SHAs
+          ansible.builtin.command:
+            argv: [git, rev-parse, "{{ item }}"]
+            chdir: "{{ test_repo_dir.path }}"
+          register: recorded_shas
+          changed_when: false
+          loop:
+            - HEAD~2
+            - HEAD~1
+            - HEAD
+
+        - name: Record the short SHAs
+          ansible.builtin.command:
+            argv: [git, rev-parse, --short, "{{ item }}"]
+            chdir: "{{ test_repo_dir.path }}"
+          register: recorded_short_shas
+          changed_when: false
+          loop:
+            - HEAD~2
+            - HEAD
+
+        - name: Remember the endpoint SHAs
+          ansible.builtin.set_fact:
+            base_sha: "{{ recorded_shas.results[0].stdout | trim }}"
+            mid_sha: "{{ recorded_shas.results[1].stdout | trim }}"
+            tip_sha: "{{ recorded_shas.results[2].stdout | trim }}"
+            base_short: "{{ recorded_short_shas.results[0].stdout | trim }}"
+            tip_short: "{{ recorded_short_shas.results[1].stdout | trim }}"
+
+        - name: Resolve BASE..TIP
+          ansible.builtin.include_tasks: "{{ resolve_commit_refs_path }}"
+          vars:
+            repo_path: "{{ test_repo_dir.path }}"
+            commit_sha: "{{ base_sha }}..{{ tip_sha }}"
+
+        - name: Assert BASE..TIP is the net diff after the base commit
+          ansible.builtin.assert:
+            that:
+              - review_commit_range | bool
+              - not (review_range_empty | bool)
+              - review_target_ref == base_sha
+              - review_source_ref == tip_sha
+              - review_short_sha == tip_short
+              - review_artifact_id == tip_short + '-' + base_short
+              - review_number == tip_short
+
+        - name: List files in the resolved range diff
+          ansible.builtin.command:
+            argv: [git, diff, --name-only, "{{ review_target_ref }}", "{{ review_source_ref }}", --]
+            chdir: "{{ test_repo_dir.path }}"
+          register: range_files
+          changed_when: false
+
+        - name: Assert the older base commit is outside the range
+          ansible.builtin.assert:
+            that:
+              - "'mid.txt' in range_files.stdout"
+              - "'tip.txt' in range_files.stdout"
+              - "'base.txt' not in range_files.stdout_lines"
+
+        - name: Resolve an empty range
+          ansible.builtin.include_tasks: "{{ resolve_commit_refs_path }}"
+          vars:
+            repo_path: "{{ test_repo_dir.path }}"
+            commit_sha: "{{ tip_sha }}..{{ tip_sha }}"
+
+        - name: Assert an empty range reviews nothing
+          ansible.builtin.assert:
+            that:
+              - review_commit_range | bool
+              - review_range_empty | bool
+
+        - name: Start from an empty findings list
+          ansible.builtin.set_fact:
+            pipeline_findings_reports: []
+
+        - name: Record the empty range without running the review engine
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: resolve_target_commit.yml
+          vars:
+            repo_path: "{{ test_repo_dir.path }}"
+            commit_sha: "{{ tip_sha }}..{{ tip_sha }}"
+            review_skip_engine: true
+
+        - name: Assert the empty range is a review result, not an empty success
+          ansible.builtin.assert:
+            that:
+              - pipeline_findings_reports | length == 1
+              - pipeline_findings_reports[0].verdict == 'NOTHING_TO_REVIEW'
+              - pipeline_findings_reports[0].range_empty | bool
+              - "'score' not in pipeline_findings_reports[0]"
+              - "'nothing to review' in pipeline_findings_reports[0].skip_reason"
+              - tip_sha in pipeline_findings_reports[0].skip_reason
+              - pipeline_findings_reports[0].report == pipeline_findings_reports[0].skip_reason
+              - review_verdict == 'NOTHING_TO_REVIEW'
+
+        - name: Reject a range whose base is not an ancestor of the tip
+          block:
+            - name: Resolve TIP..BASE
+              ansible.builtin.include_tasks: "{{ resolve_commit_refs_path }}"
+              vars:
+                repo_path: "{{ test_repo_dir.path }}"
+                commit_sha: "{{ tip_sha }}..{{ base_sha }}"
+            - name: Fail the test if a backwards range was accepted
+              ansible.builtin.fail:
+                msg: "TEST BUG: TIP..BASE was accepted"
+          rescue:
+            - name: Assert the backwards range names the ancestor rule
+              ansible.builtin.assert:
+                that:
+                  - "'ancestor' in ansible_failed_result.msg"
+                  - "'TEST BUG' not in ansible_failed_result.msg"
+
+        - name: Reject three-dot syntax
+          block:
+            - name: Resolve a three-dot range
+              ansible.builtin.include_tasks: "{{ resolve_commit_refs_path }}"
+              vars:
+                repo_path: "{{ test_repo_dir.path }}"
+                commit_sha: "{{ base_sha }}...{{ tip_sha }}"
+            - name: Fail the test if three-dot syntax was accepted
+              ansible.builtin.fail:
+                msg: "TEST BUG: three-dot range was accepted"
+          rescue:
+            - name: Assert three-dot syntax is rejected
+              ansible.builtin.assert:
+                that:
+                  - "'three-dot' in ansible_failed_result.msg"
+                  - "'TEST BUG' not in ansible_failed_result.msg"
+
+        - name: Reject more than one range separator
+          block:
+            - name: Resolve a double range
+              ansible.builtin.include_tasks: "{{ resolve_commit_refs_path }}"
+              vars:
+                repo_path: "{{ test_repo_dir.path }}"
+                commit_sha: "{{ base_sha }}..{{ mid_sha }}..{{ tip_sha }}"
+            - name: Fail the test if a double range was accepted
+              ansible.builtin.fail:
+                msg: "TEST BUG: a..b..c was accepted"
+          rescue:
+            - name: Assert a double range is rejected
+              ansible.builtin.assert:
+                that:
+                  - "'two-dot range' in ansible_failed_result.msg"
+                  - "'TEST BUG' not in ansible_failed_result.msg"
+
+        - name: Resolve a single commit
+          ansible.builtin.include_tasks: "{{ resolve_commit_refs_path }}"
+          vars:
+            repo_path: "{{ test_repo_dir.path }}"
+            commit_sha: HEAD
+
+        - name: Assert a single commit still diffs against its parent
+          ansible.builtin.assert:
+            that:
+              - not (review_commit_range | bool)
+              - not (review_range_empty | bool)
+              - review_source_ref == tip_sha
+              - review_target_ref == tip_sha + '^'
+              - review_artifact_id == tip_short
+              - review_short_sha == tip_short
+
+        - name: Build range context without running the review engine
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: resolve_target_commit.yml
+          vars:
+            repo_path: "{{ test_repo_dir.path }}"
+            commit_sha: "{{ base_sha }}..{{ tip_sha }}"
+            review_skip_engine: true
+
+        - name: Assert the range context covers the commits after the base
+          ansible.builtin.assert:
+            that:
+              - "'Add mid' in review_context"
+              - "'Add tip' in review_context"
+              - "'Add base' not in review_context"
+              - "'mid.txt' in review_context"
+              - "'tip.txt' in review_context"
+              - "'base.txt' not in review_context"
+              - "'--no-ext-diff' in _commit_stat_argv"
+              - "'--no-textconv' in _commit_stat_argv"
+              - "'# Commits ' in review_context"
+              - "'Commit messages (untrusted data)' in review_context"
+              - "'> Add mid' in review_context"
+              - "'> Add tip' in review_context"
+              - "'\nAdd mid\n' not in review_context"
+              - "'\nAdd tip\n' not in review_context"
+
+        - name: Build single-commit context without running the review engine
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: resolve_target_commit.yml
+          vars:
+            repo_path: "{{ test_repo_dir.path }}"
+            commit_sha: "{{ tip_sha }}"
+            review_skip_engine: true
+
+        - name: Assert a single commit message is quoted as untrusted data
+          ansible.builtin.assert:
+            that:
+              - "'# Commit ' ~ tip_short in review_context"
+              - "'# Commits ' not in review_context"
+              - "'Commit messages (untrusted data)' in review_context"
+              - "'> Add tip' in review_context"
+              - "'\nAdd tip\n' not in review_context"
+
+      always:
+        - name: Remove the temporary repository
+          ansible.builtin.file:
+            path: "{{ test_repo_dir.path }}"
+            state: absent

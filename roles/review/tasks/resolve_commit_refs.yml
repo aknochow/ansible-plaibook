@@ -1,0 +1,179 @@
+---
+# Turn commit_sha into the two refs briefing.yml diffs.
+#
+# One ref (HEAD, a SHA, a branch): review that commit against its parent.
+# Two-dot BASE..TIP: review the net diff of that contiguous range
+# (git diff BASE TIP). BASE must be an ancestor of TIP. The same commit
+# on both sides is an empty range. Three-dot BASE...TIP is rejected;
+# merge-base diffs belong to review_type=branch.
+#
+# Reads commit_sha and repo_path. Sets review_source_ref, review_target_ref,
+# review_short_sha, review_commit_range, review_range_empty, and
+# review_artifact_id. Does not run the review engine.
+
+- name: Validate repo_path exists
+  ansible.builtin.assert:
+    that: repo_path is directory
+    fail_msg: "repo_path '{{ repo_path }}' is not a valid directory"
+
+- name: Reject a three-dot commit range
+  when: "'...' in (commit_sha | string)"
+  ansible.builtin.fail:
+    msg: >-
+      commit_sha '{{ commit_sha }}' uses three-dot syntax.
+      Pass a two-dot range BASE..TIP (git diff BASE TIP).
+
+- name: Record whether commit_sha is a two-dot range
+  ansible.builtin.set_fact:
+    review_commit_range: "{{ '..' in (commit_sha | string) }}"
+    review_range_empty: false
+
+- name: Validate a single commit ref
+  when: not (review_commit_range | bool)
+  ansible.builtin.assert:
+    that:
+      - commit_sha is regex('^[a-zA-Z0-9_.][a-zA-Z0-9_./@^~-]*$')
+      - not ((commit_sha | string) | trim).startswith('-')
+    fail_msg: "commit_sha '{{ commit_sha }}' doesn't look like a valid git ref"
+
+- name: Split a two-dot commit range
+  when: review_commit_range | bool
+  ansible.builtin.set_fact:
+    _commit_range_parts: "{{ (commit_sha | string).split('..') }}"
+
+- name: Validate both sides of a two-dot commit range
+  when: review_commit_range | bool
+  vars:
+    _range_base: "{{ _commit_range_parts[0] | default('') }}"
+    _range_tip: "{{ _commit_range_parts[1] | default('') }}"
+  ansible.builtin.assert:
+    that:
+      - _commit_range_parts | length == 2
+      - _range_base | length > 0
+      - _range_tip | length > 0
+      - _range_base is regex('^[a-zA-Z0-9_.][a-zA-Z0-9_./@^~-]*$')
+      - _range_tip is regex('^[a-zA-Z0-9_.][a-zA-Z0-9_./@^~-]*$')
+      - not (_range_base | trim).startswith('-')
+      - not (_range_tip | trim).startswith('-')
+    fail_msg: "commit_sha '{{ commit_sha }}' is not a two-dot range of two git refs (BASE..TIP)"
+
+# timeout: 30 on every git command -- a corrupted repo, an NFS-mounted
+# path, or an adversarial .gitconfig hook could otherwise hang these
+# indefinitely and block the playbook.
+- name: Resolve a single commit
+  when: not (review_commit_range | bool)
+  ansible.builtin.command:
+    argv: [git, rev-parse, "{{ commit_sha }}"]
+    chdir: "{{ repo_path }}"
+  changed_when: false
+  register: _resolved_sha
+  timeout: 30
+
+- name: Resolve the short SHA of a single commit
+  when: not (review_commit_range | bool)
+  ansible.builtin.command:
+    argv: [git, rev-parse, --short, "{{ commit_sha }}"]
+    chdir: "{{ repo_path }}"
+  changed_when: false
+  register: _resolved_short_sha
+  timeout: 30
+
+- name: Check whether a single commit has a parent
+  when: not (review_commit_range | bool)
+  ansible.builtin.command:
+    argv: [git, rev-parse, --verify, "{{ _resolved_sha.stdout | trim }}^"]
+    chdir: "{{ repo_path }}"
+  changed_when: false
+  failed_when: false
+  register: _parent_check
+  timeout: 30
+
+- name: Set refs for a single commit
+  when: not (review_commit_range | bool)
+  ansible.builtin.set_fact:
+    review_repo_path: "{{ repo_path }}"
+    review_source_ref: "{{ _resolved_sha.stdout | trim }}"
+    review_target_ref: >-
+      {{ (_resolved_sha.stdout | trim) + '^' if _parent_check.rc == 0
+         else git_empty_tree_sha }}
+    review_short_sha: "{{ _resolved_short_sha.stdout | trim }}"
+    review_artifact_id: "{{ _resolved_short_sha.stdout | trim }}"
+    review_org_repo: "{{ repo_path | basename }}"
+    review_number: "{{ _resolved_short_sha.stdout | trim }}"
+
+- name: Resolve the range base
+  when: review_commit_range | bool
+  ansible.builtin.command:
+    argv: [git, rev-parse, "{{ _commit_range_parts[0] }}"]
+    chdir: "{{ repo_path }}"
+  changed_when: false
+  register: _range_base_sha
+  timeout: 30
+
+- name: Resolve the range tip
+  when: review_commit_range | bool
+  ansible.builtin.command:
+    argv: [git, rev-parse, "{{ _commit_range_parts[1] }}"]
+    chdir: "{{ repo_path }}"
+  changed_when: false
+  register: _range_tip_sha
+  timeout: 30
+
+- name: Resolve short SHAs for the range endpoints
+  when: review_commit_range | bool
+  ansible.builtin.command:
+    argv: [git, rev-parse, --short, "{{ item }}"]
+    chdir: "{{ repo_path }}"
+  changed_when: false
+  register: _range_short_shas
+  loop:
+    - "{{ _range_base_sha.stdout | trim }}"
+    - "{{ _range_tip_sha.stdout | trim }}"
+  timeout: 30
+
+- name: Detect an empty commit range
+  when: review_commit_range | bool
+  ansible.builtin.set_fact:
+    review_range_empty: "{{ (_range_base_sha.stdout | trim) == (_range_tip_sha.stdout | trim) }}"
+
+- name: Check that the range base is an ancestor of the tip
+  when: review_commit_range | bool and not (review_range_empty | bool)
+  ansible.builtin.command:
+    argv:
+      - git
+      - merge-base
+      - --is-ancestor
+      - "{{ _range_base_sha.stdout | trim }}"
+      - "{{ _range_tip_sha.stdout | trim }}"
+    chdir: "{{ repo_path }}"
+  changed_when: false
+  failed_when: false
+  register: _range_ancestor
+  timeout: 30
+
+- name: Fail when the range base is not an ancestor of the tip
+  when: >-
+    review_commit_range | bool
+    and not (review_range_empty | bool)
+    and (_range_ancestor.rc | default(1) | int) != 0
+  ansible.builtin.fail:
+    msg: >-
+      commit range '{{ commit_sha }}' is not a contiguous range:
+      the base is not an ancestor of the tip.
+
+- name: Set refs for a commit range
+  when: review_commit_range | bool and not (review_range_empty | bool)
+  ansible.builtin.set_fact:
+    review_repo_path: "{{ repo_path }}"
+    review_target_ref: "{{ _range_base_sha.stdout | trim }}"
+    review_source_ref: "{{ _range_tip_sha.stdout | trim }}"
+    review_range_base_sha: "{{ _range_base_sha.stdout | trim }}"
+    review_range_base_short: "{{ _range_short_shas.results[0].stdout | trim }}"
+    review_short_sha: "{{ _range_short_shas.results[1].stdout | trim }}"
+    # tip-base, not a single hex run, so this directory does not match
+    # find_latest_prior_review's date-sha pattern and cannot be reused
+    # as the prior review of the tip commit alone.
+    review_artifact_id: >-
+      {{ _range_short_shas.results[1].stdout | trim }}-{{ _range_short_shas.results[0].stdout | trim }}
+    review_org_repo: "{{ repo_path | basename }}"
+    review_number: "{{ _range_short_shas.results[1].stdout | trim }}"

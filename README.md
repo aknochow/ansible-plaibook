@@ -149,7 +149,15 @@ working tree.
 plai review --commit
 plaibook review --commit
 plai review --commit --sha abc1234 --repo /path/to/repo
+plai review --commit --sha abc1234..def5678
 ```
+
+`--sha BASE..TIP` reviews that contiguous range as one diff
+(`git diff BASE TIP`). `BASE` must be an ancestor of `TIP`. The same
+commit on both sides reviews nothing: quiet `plai review` prints
+`NOTHING_TO_REVIEW` and the range, and exits 0. It does not print
+`status: ok`. Three-dot `BASE...TIP` is rejected; a merge-base diff
+of a whole branch is `review_type: branch`.
 
 Unlike `review_type: pr`/`branch` (which never fail the Ansible run
 based on verdict, a `NEEDS_CHANGES` review is still a "successful"

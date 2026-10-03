@@ -69,6 +69,7 @@ successful upload. Cut the release soon after configuring it.
 plai review
 plai review org/repo/123
 plai review --commit
+plai review --commit --sha abc1234..def5678
 plai review org/repo/123 --json
 plai review org/repo/123 -f
 plaibook review org/repo/123

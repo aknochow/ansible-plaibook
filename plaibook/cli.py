@@ -88,6 +88,7 @@ Examples:
   plaibook review org/repo/123
   plai review --commit
   plai review --commit --repo /path/to/repo --sha abc1234
+  plai review --commit --sha abc1234..def5678
   plai review org/repo/123 --json
   plai review org/repo/123 --yaml
   plai review org/repo/123 -v
@@ -152,7 +153,7 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
     review.add_argument(
         "--sha",
         dest="commit_sha",
-        help="Commit SHA for --commit (default: HEAD).",
+        help="Commit SHA, or a two-dot range BASE..TIP, for --commit (default: HEAD).",
     )
     review.add_argument(
         "-v",
@@ -385,7 +386,8 @@ def _progress_line(args: argparse.Namespace) -> str:
     if args.commit:
         repo = sanitize_display_line(args.repo_path or ".")
         sha = sanitize_display_line(args.commit_sha or "HEAD")
-        return f"Reviewing commit {sha} in {repo}\n"
+        kind = "commits" if ".." in sha else "commit"
+        return f"Reviewing {kind} {sha} in {repo}\n"
     if args.branch_target:
         return f"Reviewing branch {sanitize_display_line(args.branch_target)}\n"
     return f"Reviewing {sanitize_display_line(args.target)}\n"
