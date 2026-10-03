@@ -322,6 +322,32 @@ review_same_commit_fast_path_enabled: true
 
 review_context: ""
 
+# Screen comments out of a *copy* of the prepared diff for the lens
+# phase. Default off: eval 03 measures whether to turn this on;
+# shipping it on is an unmeasured behaviour change on every review.
+# Blank in place, never delete — line numbers in findings.md /
+# summary.json / inline PR comments must still map to the real files.
+# Env-lookup with | default(false, true) so an unset
+# ANSIBLE_REVIEW_SCREEN_DIFF_COMMENTS (empty string) still lands off.
+review_screen_diff_comments: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_SCREEN_DIFF_COMMENTS') | default(false, true) | bool }}"
+
+# Independently togglable docstring blanking. Default keeps docstrings
+# even when comment screening is on: a docstring is frequently the only
+# statement of intended contract.
+review_screen_diff_docstrings: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_SCREEN_DIFF_DOCSTRINGS') | default(false, true) | bool }}"
+
+# Eval-only knob for the comment-screener ablation (Arm C): omit the
+# PR/MR description from review_context while keeping metadata. Default
+# off — not a product behaviour change.
+review_withhold_pr_description: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_WITHHOLD_PR_DESCRIPTION') | default(false, true) | bool }}"
+
+# Lens-phase diff. briefing/full_review set this to review_full_diff
+# when screening is off, or to the screened copy when it is on. Lenses
+# read this; verify and findings.md keep using review_full_diff.
+review_lens_diff: ""
+review_lens_diff_screened: false
+review_lens_diff_screen_docstrings: false
+
 # Both normally always set for real by briefing.yml (review_full_diff
 # from the actual diff, review_prior_review_md from
 # find_latest_prior_review.py when a prior round exists). These
