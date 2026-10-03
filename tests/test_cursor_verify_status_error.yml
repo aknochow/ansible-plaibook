@@ -1,0 +1,502 @@
+---
+# An empty Cursor status=error on verify must not abort the review.
+# No live model. Uses tests/library/cursor_agent_stub.py.
+# The verify_turn cases use a responses list in that stub file so one
+# play exercises the retry loop, not only a single dispatch.
+#
+# Usage:
+#   ANSIBLE_LIBRARY=$PWD/tests/library \
+#   CURSOR_AGENT_STUB_FILE=$PWD/tests/.cursor_agent_stub.json \
+#     ansible-playbook tests/test_cursor_verify_status_error.yml
+
+- name: Cursor verify status=error is a failed attempt, not a dead review
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_prompt_nonce: "AbCdEfGh12345678"
+    review_org_repo: aknochow/ansible-plaibook
+    review_number: "88"
+    review_repo_path: "{{ playbook_dir }}"
+    review_cursor_api_key: stub-not-a-real-key
+    review_verify_cursor_model: gpt-5.6-luna
+    review_cursor_effort: high
+    verify_system_prompt: stub verify prompt
+    verify_verdict_schema: {type: object}
+    cursor_agent_module: cursor_agent_stub
+    cursor_agent_stub_file: "{{ lookup('ansible.builtin.env', 'CURSOR_AGENT_STUB_FILE') | default(playbook_dir ~ '/.cursor_agent_stub.json', true) }}"
+    _nested_verdict:
+      evidence_status: inconclusive
+      evidence: planted
+      rationale: from named lens
+      prompt_nonce: "AbCdEfGh12345678"
+    _parent_draft:
+      evidence_status: refuted
+      rationale: SECRET_DRAFT_MUST_NOT_APPEAR
+      prompt_nonce: "AbCdEfGh12345678"
+
+  environment:
+    CURSOR_AGENT_STUB_FILE: "{{ cursor_agent_stub_file }}"
+
+  tasks:
+    - name: Empty status=error stays in the review as a retryable attempt
+      block:
+        - name: Reset verify dispatch flags
+          ansible.builtin.set_fact:
+            pipeline_agent_calls: []
+            verify_dispatch_valid: false
+            verify_dispatch_provider_error: false
+            verify_last_turn: false
+            verify_attempt_number: 1
+
+        - name: Write an empty status=error stub
+          ansible.builtin.copy:
+            dest: "{{ cursor_agent_stub_file }}"
+            mode: "0600"
+            content: "{{ _empty_error | to_json }}"
+          vars:
+            _empty_error:
+              failed: true
+              msg: "Cursor run finished with status error (run_id=run-empty)"
+              status: error
+              run_id: run-empty
+              resolved_model: gpt-5.6-luna
+              text: ""
+              structured_tool_calls: []
+              usage_normalized:
+                input_tokens: 0
+                output_tokens: 0
+                cache_write_tokens: 0
+                cache_read_tokens: 0
+                thinking_tokens: 0
+                total_tokens: 0
+
+        - name: Dispatch the empty status=error
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: dispatch_verify_turn_attempt_cursor.yml
+
+        - name: Confirm the play continued and the attempt is retryable
+          ansible.builtin.assert:
+            that:
+              - verify_dispatch_provider_error | bool
+              - not (verify_dispatch_valid | bool)
+              - verify_turn_result.stop_reason == "error"
+              - verify_turn_result.tool_calls | length == 0
+              - pipeline_agent_calls | length == 1
+              - pipeline_agent_calls[0].lens == "verify"
+              - "'SECRET_DRAFT_MUST_NOT_APPEAR' not in (verify_turn_result | to_json)"
+            fail_msg: >-
+              Empty status=error must not abort. valid={{ verify_dispatch_valid | default('') }}
+              error={{ verify_dispatch_provider_error | default('') }}
+              result={{ verify_turn_result | default({}) }}
+            success_msg: "Empty status=error is a failed verify attempt."
+
+    - name: Nested report_verdict on status=error still binds
+      block:
+        - name: Reset flags before the nested failure
+          ansible.builtin.set_fact:
+            pipeline_agent_calls: []
+            verify_dispatch_valid: false
+            verify_dispatch_provider_error: true
+            verify_last_turn: true
+            verify_attempt_number: 2
+
+        - name: Write a status=error stub that already has a nested verdict
+          ansible.builtin.copy:
+            dest: "{{ cursor_agent_stub_file }}"
+            mode: "0600"
+            content: "{{ _nested_error | to_json }}"
+          vars:
+            _nested_error:
+              failed: true
+              msg: "Cursor run finished with status error (run_id=run-nested)"
+              status: error
+              resolved_model: gpt-5.6-luna
+              structured_tool_calls:
+                - name: report_verdict
+                  caller: nested
+                  agent_id: verify-lens
+                  args: "{{ _nested_verdict }}"
+              usage_normalized:
+                input_tokens: 4
+                output_tokens: 1
+                cache_write_tokens: 0
+                cache_read_tokens: 0
+                thinking_tokens: 0
+                total_tokens: 5
+
+        - name: Dispatch the nested status=error
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: dispatch_verify_turn_attempt_cursor.yml
+
+        - name: Confirm the nested verdict bound
+          ansible.builtin.assert:
+            that:
+              - verify_dispatch_valid | bool
+              - not (verify_dispatch_provider_error | bool)
+              - verify_turn_result.stop_reason == "tool_use"
+              - verify_turn_result.tool_calls[0].name == "report_verdict"
+              - verify_turn_result.tool_calls[0].input.evidence_status == "inconclusive"
+              - pipeline_agent_calls | length == 1
+              - pipeline_agent_calls[0].usage.input_tokens | int == 4
+            fail_msg: "Nested verdict on status=error did not bind: {{ verify_turn_result | default({}) }}"
+            success_msg: "Nested report_verdict on status=error bound."
+
+    - name: Parent-only status=error stays fail-closed
+      block:
+        - name: Reset flags before the parent-only failure
+          ansible.builtin.set_fact:
+            pipeline_agent_calls: []
+            verify_dispatch_valid: false
+            verify_last_turn: false
+            verify_attempt_number: 1
+
+        - name: Write a parent-only status=error stub
+          ansible.builtin.copy:
+            dest: "{{ cursor_agent_stub_file }}"
+            mode: "0600"
+            content: "{{ _parent_error | to_json }}"
+          vars:
+            _parent_error:
+              failed: true
+              msg: "Cursor run finished with status error (run_id=run-parent)"
+              status: error
+              resolved_model: gpt-5.6-luna
+              structured_tool_calls:
+                - name: report_verdict
+                  caller: parent
+                  agent_id: parent-1
+                  args: "{{ _parent_draft }}"
+              usage_normalized:
+                input_tokens: 9
+                output_tokens: 9
+                cache_write_tokens: 0
+                cache_read_tokens: 0
+                thinking_tokens: 0
+                total_tokens: 18
+
+        - name: Dispatch the parent-only status=error
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: dispatch_verify_turn_attempt_cursor.yml
+
+        - name: Fail the test if parent-only was accepted
+          ansible.builtin.fail:
+            msg: "TEST BUG: parent-only verify status=error was accepted"
+      rescue:
+        - name: Confirm parent-only did not publish the draft
+          ansible.builtin.assert:
+            that:
+              - "'status error' in (ansible_failed_result.msg | lower)"
+              - "'SECRET_DRAFT_MUST_NOT_APPEAR' not in (ansible_failed_result.msg | default(''))"
+              - "'TEST BUG' not in (ansible_failed_result.msg | default(''))"
+            fail_msg: "Parent-only rescue leaked or did not fail: {{ ansible_failed_result.msg | default('') }}"
+            success_msg: "Parent-only verify status=error stays fail-closed."
+
+    - name: verify_turn retries a status error and then accepts a verdict
+      block:
+        - name: Reset the turn loop before the success sequence
+          ansible.builtin.set_fact:
+            agent_family: cursor
+            review_verify_max_turns: 3
+            review_structured_output_max_attempts: 3
+            review_verify_model: unused
+            review_verify_claude_cli_model: unused
+            review_verify_openai_model: unused
+            review_verify_gemini_model: unused
+            pipeline_agent_calls: []
+            review_verify_done: false
+            verify_turn_count: 0
+            verify_last_turn: false
+            verify_messages: []
+            verify_dispatch_provider_error: true
+            verify_dispatch_valid: false
+
+        - name: Write status=error followed by a nested verdict
+          ansible.builtin.copy:
+            dest: "{{ cursor_agent_stub_file }}"
+            mode: "0600"
+            content: "{{ _error_then_verdict | to_json }}"
+          vars:
+            _error_then_verdict:
+              calls: 0
+              responses:
+                - failed: true
+                  msg: "Cursor run finished with status error (run_id=run-retry-1)"
+                  status: error
+                  resolved_model: gpt-5.6-luna
+                  text: ""
+                  structured_tool_calls: []
+                  usage_normalized:
+                    input_tokens: 1
+                    output_tokens: 0
+                    cache_write_tokens: 0
+                    cache_read_tokens: 0
+                    thinking_tokens: 0
+                    total_tokens: 1
+                - failed: false
+                  status: finished
+                  resolved_model: gpt-5.6-luna
+                  text: ""
+                  structured_tool_calls:
+                    - name: report_verdict
+                      caller: nested
+                      agent_id: verify-lens
+                      args:
+                        evidence_status: refuted
+                        evidence: second attempt
+                        rationale: from the second attempt
+                        prompt_nonce: "AbCdEfGh12345678"
+                  usage_normalized:
+                    input_tokens: 2
+                    output_tokens: 1
+                    cache_write_tokens: 0
+                    cache_read_tokens: 0
+                    thinking_tokens: 0
+                    total_tokens: 3
+
+        - name: Run one verify turn over the error-then-verdict sequence
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: verify_turn.yml
+
+        - name: Read the stub after the success sequence
+          ansible.builtin.slurp:
+            src: "{{ cursor_agent_stub_file }}"
+          register: _verify_retry_stub
+
+        - name: Confirm the first error was retried and the verdict bound
+          vars:
+            _stub_state: "{{ _verify_retry_stub.content | b64decode | from_json }}"
+          ansible.builtin.assert:
+            that:
+              - _stub_state.calls | int == 2
+              - pipeline_agent_calls | length == 2
+              - not (verify_dispatch_provider_error | bool)
+              - verify_dispatch_valid | bool
+              - review_verify_done | bool
+              - verify_result_status == "refuted"
+              - verify_result_rationale == "from the second attempt"
+            fail_msg: >-
+              verify_turn did not retry then bind.
+              calls={{ _stub_state.calls | default('missing') }}
+              error={{ verify_dispatch_provider_error | default('') }}
+              status={{ verify_result_status | default('') }}
+            success_msg: "verify_turn retried a status error and bound the next verdict."
+
+    - name: verify_turn survives every attempt returning status=error
+      block:
+        - name: Reset the turn loop before the exhausted sequence
+          ansible.builtin.set_fact:
+            pipeline_agent_calls: []
+            review_verify_done: false
+            verify_turn_count: 0
+            verify_messages: []
+            verify_dispatch_provider_error: false
+            verify_dispatch_valid: true
+            verify_result_status: ""
+            verify_result_rationale: ""
+
+        - name: Write three empty status=error responses
+          ansible.builtin.copy:
+            dest: "{{ cursor_agent_stub_file }}"
+            mode: "0600"
+            content: "{{ _all_errors | to_json }}"
+          vars:
+            _all_errors:
+              calls: 0
+              responses: "{{ [_exhausted_error, _exhausted_error, _exhausted_error] }}"
+            _exhausted_error:
+              failed: true
+              msg: "Cursor run finished with status error (run_id=run-exhausted)"
+              status: error
+              resolved_model: gpt-5.6-luna
+              text: ""
+              structured_tool_calls: []
+              usage_normalized:
+                input_tokens: 1
+                output_tokens: 0
+                cache_write_tokens: 0
+                cache_read_tokens: 0
+                thinking_tokens: 0
+                total_tokens: 1
+
+        - name: Run one verify turn over three status errors
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: verify_turn.yml
+
+        - name: Read the stub after the exhausted sequence
+          ansible.builtin.slurp:
+            src: "{{ cursor_agent_stub_file }}"
+          register: _verify_exhausted_stub
+
+        - name: Confirm three errors became an inconclusive verdict
+          vars:
+            _stub_state: "{{ _verify_exhausted_stub.content | b64decode | from_json }}"
+          ansible.builtin.assert:
+            that:
+              - _stub_state.calls | int == 3
+              - pipeline_agent_calls | length == 3
+              - verify_dispatch_provider_error | bool
+              - not (verify_dispatch_valid | bool)
+              - review_verify_done | bool
+              - verify_result_status == "inconclusive"
+              - verify_result_rationale == "Verification agent stopped without reaching a verdict."
+            fail_msg: >-
+              Exhausted status=error did not proceed.
+              calls={{ _stub_state.calls | default('missing') }}
+              status={{ verify_result_status | default('') }}
+            success_msg: "verify_turn finished inconclusive after every attempt was status=error."
+
+    - name: An arbitrary cursor_agent_module is rejected before dispatch
+      block:
+        - name: Dispatch with a module name outside the allowlist
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: dispatch_verify_turn_attempt_cursor.yml
+          vars:
+            cursor_agent_module: ansible.builtin.command
+            verify_dispatch_valid: false
+            verify_last_turn: false
+            verify_attempt_number: 1
+
+        - name: Fail the test if the arbitrary module was accepted
+          ansible.builtin.fail:
+            msg: "TEST BUG: ansible.builtin.command was accepted as the verify module"
+      rescue:
+        - name: Confirm the allowlist rejected the module
+          ansible.builtin.assert:
+            that:
+              - "'not allowed' in (ansible_failed_result.msg | default(''))"
+              - "'TEST BUG' not in (ansible_failed_result.msg | default(''))"
+            fail_msg: "Allowlist did not reject the module: {{ ansible_failed_result.msg | default('') }}"
+            success_msg: "cursor_agent_module outside the allowlist is rejected."
+
+    - name: A bad nonce on a non-final verify turn fails closed
+      block:
+        - name: Reset the turn loop before the bad nonce
+          ansible.builtin.set_fact:
+            agent_family: cursor
+            review_verify_max_turns: 3
+            review_structured_output_max_attempts: 3
+            review_verify_model: unused
+            review_verify_claude_cli_model: unused
+            review_verify_openai_model: unused
+            review_verify_gemini_model: unused
+            pipeline_agent_calls: []
+            review_verify_done: false
+            verify_turn_count: 0
+            verify_last_turn: false
+            verify_messages: []
+            verify_dispatch_provider_error: false
+            verify_dispatch_valid: false
+            verify_result_status: ""
+            verify_result_rationale: ""
+
+        - name: Write a successful return whose nonce does not match
+          ansible.builtin.copy:
+            dest: "{{ cursor_agent_stub_file }}"
+            mode: "0600"
+            content: "{{ _bad_nonce | to_json }}"
+          vars:
+            _bad_nonce:
+              failed: false
+              status: finished
+              resolved_model: gpt-5.6-luna
+              text: ""
+              structured_tool_calls:
+                - name: report_verdict
+                  caller: nested
+                  agent_id: verify-lens
+                  args:
+                    evidence_status: refuted
+                    evidence: planted
+                    rationale: bad nonce
+                    prompt_nonce: WRONGNONCE123456
+              usage_normalized:
+                input_tokens: 3
+                output_tokens: 1
+                cache_write_tokens: 0
+                cache_read_tokens: 0
+                thinking_tokens: 0
+                total_tokens: 4
+
+        - name: Run a non-final verify turn over the bad nonce
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: verify_turn.yml
+
+        - name: Fail the test if the bad nonce became a verdict
+          ansible.builtin.fail:
+            msg: "TEST BUG: a nonce mismatch was accepted"
+      rescue:
+        - name: Confirm the nonce mismatch failed the play
+          ansible.builtin.assert:
+            that:
+              - "'prompt_nonce' in (ansible_failed_result.msg | default(''))"
+              - "'TEST BUG' not in (ansible_failed_result.msg | default(''))"
+              - not (review_verify_done | bool)
+              - verify_result_status | default('') != 'inconclusive'
+            fail_msg: "Nonce mismatch did not fail closed: {{ ansible_failed_result.msg | default('') }}"
+            success_msg: "A bad nonce on a non-final turn fails closed."
+
+    - name: A parent-only success return on a non-final turn fails closed
+      block:
+        - name: Reset the turn loop before the parent-only success
+          ansible.builtin.set_fact:
+            pipeline_agent_calls: []
+            review_verify_done: false
+            verify_turn_count: 0
+            verify_last_turn: false
+            verify_messages: []
+            verify_dispatch_provider_error: false
+            verify_dispatch_valid: false
+            verify_result_status: ""
+            verify_result_rationale: ""
+
+        - name: Write a successful parent-only report_verdict
+          ansible.builtin.copy:
+            dest: "{{ cursor_agent_stub_file }}"
+            mode: "0600"
+            content: "{{ _parent_ok | to_json }}"
+          vars:
+            _parent_ok:
+              failed: false
+              status: finished
+              resolved_model: gpt-5.6-luna
+              text: ""
+              structured_tool_calls:
+                - name: report_verdict
+                  caller: parent
+                  agent_id: parent-1
+                  args: "{{ _parent_draft }}"
+              usage_normalized:
+                input_tokens: 2
+                output_tokens: 1
+                cache_write_tokens: 0
+                cache_read_tokens: 0
+                thinking_tokens: 0
+                total_tokens: 3
+
+        - name: Run a non-final verify turn over the parent-only success
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: verify_turn.yml
+
+        - name: Fail the test if the parent-only success was accepted
+          ansible.builtin.fail:
+            msg: "TEST BUG: a parent-only success return was accepted"
+      rescue:
+        - name: Confirm the parent-only success failed the play
+          ansible.builtin.assert:
+            that:
+              - "'no nested execute' in (ansible_failed_result.msg | default(''))"
+              - "'SECRET_DRAFT_MUST_NOT_APPEAR' not in (ansible_failed_result.msg | default(''))"
+              - "'TEST BUG' not in (ansible_failed_result.msg | default(''))"
+              - not (review_verify_done | bool)
+            fail_msg: "Parent-only success did not fail closed: {{ ansible_failed_result.msg | default('') }}"
+            success_msg: "A parent-only success return on a non-final turn fails closed."

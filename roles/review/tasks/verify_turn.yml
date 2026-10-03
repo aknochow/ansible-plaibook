@@ -26,6 +26,7 @@
     - name: Reset this turn's dispatch validity flag
       ansible.builtin.set_fact:
         verify_dispatch_valid: false
+        verify_dispatch_provider_error: false
 
     # dispatch_lens_{{ agent_family }}.yml's own idiom (tasks/lenses.yml)
     # -- see dispatch_verify_turn_attempt_gemini.yml's header for why a
@@ -45,7 +46,9 @@
       loop: "{{ range(2, review_structured_output_max_attempts | int + 1) | list }}"
       loop_control:
         loop_var: verify_attempt_number
-      when: verify_last_turn and not verify_dispatch_valid
+      when: >-
+        (verify_last_turn | bool or verify_dispatch_provider_error | default(false) | bool)
+        and not (verify_dispatch_valid | bool)
 
     - name: Fail loudly if the forced final verdict call never happened after all attempts
       ansible.builtin.assert:
@@ -65,7 +68,9 @@
           consider raising review_structured_output_max_attempts, or
           checking whether this model has a known elevated rate of this
           issue, before assuming this is a one-off.
-      when: verify_last_turn
+      when:
+        - verify_last_turn | bool
+        - not (verify_dispatch_provider_error | default(false) | bool)
 
     - name: Strip response-only fields before round-tripping this turn's content into the next request
       sanitize_response_content_for_request:
