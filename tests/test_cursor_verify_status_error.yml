@@ -375,3 +375,128 @@
               - "'TEST BUG' not in (ansible_failed_result.msg | default(''))"
             fail_msg: "Allowlist did not reject the module: {{ ansible_failed_result.msg | default('') }}"
             success_msg: "cursor_agent_module outside the allowlist is rejected."
+
+    - name: A bad nonce on a non-final verify turn fails closed
+      block:
+        - name: Reset the turn loop before the bad nonce
+          ansible.builtin.set_fact:
+            agent_family: cursor
+            review_verify_max_turns: 3
+            review_structured_output_max_attempts: 3
+            review_verify_model: unused
+            review_verify_claude_cli_model: unused
+            review_verify_openai_model: unused
+            review_verify_gemini_model: unused
+            pipeline_agent_calls: []
+            review_verify_done: false
+            verify_turn_count: 0
+            verify_last_turn: false
+            verify_messages: []
+            verify_dispatch_provider_error: false
+            verify_dispatch_valid: false
+            verify_result_status: ""
+            verify_result_rationale: ""
+
+        - name: Write a successful return whose nonce does not match
+          ansible.builtin.copy:
+            dest: "{{ cursor_agent_stub_file }}"
+            mode: "0600"
+            content: "{{ _bad_nonce | to_json }}"
+          vars:
+            _bad_nonce:
+              failed: false
+              status: finished
+              resolved_model: gpt-5.6-luna
+              text: ""
+              structured_tool_calls:
+                - name: report_verdict
+                  caller: nested
+                  agent_id: verify-lens
+                  args:
+                    evidence_status: refuted
+                    evidence: planted
+                    rationale: bad nonce
+                    prompt_nonce: WRONGNONCE123456
+              usage_normalized:
+                input_tokens: 3
+                output_tokens: 1
+                cache_write_tokens: 0
+                cache_read_tokens: 0
+                thinking_tokens: 0
+                total_tokens: 4
+
+        - name: Run a non-final verify turn over the bad nonce
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: verify_turn.yml
+
+        - name: Fail the test if the bad nonce became a verdict
+          ansible.builtin.fail:
+            msg: "TEST BUG: a nonce mismatch was accepted"
+      rescue:
+        - name: Confirm the nonce mismatch failed the play
+          ansible.builtin.assert:
+            that:
+              - "'prompt_nonce' in (ansible_failed_result.msg | default(''))"
+              - "'TEST BUG' not in (ansible_failed_result.msg | default(''))"
+              - not (review_verify_done | bool)
+              - verify_result_status | default('') != 'inconclusive'
+            fail_msg: "Nonce mismatch did not fail closed: {{ ansible_failed_result.msg | default('') }}"
+            success_msg: "A bad nonce on a non-final turn fails closed."
+
+    - name: A parent-only success return on a non-final turn fails closed
+      block:
+        - name: Reset the turn loop before the parent-only success
+          ansible.builtin.set_fact:
+            pipeline_agent_calls: []
+            review_verify_done: false
+            verify_turn_count: 0
+            verify_last_turn: false
+            verify_messages: []
+            verify_dispatch_provider_error: false
+            verify_dispatch_valid: false
+            verify_result_status: ""
+            verify_result_rationale: ""
+
+        - name: Write a successful parent-only report_verdict
+          ansible.builtin.copy:
+            dest: "{{ cursor_agent_stub_file }}"
+            mode: "0600"
+            content: "{{ _parent_ok | to_json }}"
+          vars:
+            _parent_ok:
+              failed: false
+              status: finished
+              resolved_model: gpt-5.6-luna
+              text: ""
+              structured_tool_calls:
+                - name: report_verdict
+                  caller: parent
+                  agent_id: parent-1
+                  args: "{{ _parent_draft }}"
+              usage_normalized:
+                input_tokens: 2
+                output_tokens: 1
+                cache_write_tokens: 0
+                cache_read_tokens: 0
+                thinking_tokens: 0
+                total_tokens: 3
+
+        - name: Run a non-final verify turn over the parent-only success
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: verify_turn.yml
+
+        - name: Fail the test if the parent-only success was accepted
+          ansible.builtin.fail:
+            msg: "TEST BUG: a parent-only success return was accepted"
+      rescue:
+        - name: Confirm the parent-only success failed the play
+          ansible.builtin.assert:
+            that:
+              - "'no nested execute' in (ansible_failed_result.msg | default(''))"
+              - "'SECRET_DRAFT_MUST_NOT_APPEAR' not in (ansible_failed_result.msg | default(''))"
+              - "'TEST BUG' not in (ansible_failed_result.msg | default(''))"
+              - not (review_verify_done | bool)
+            fail_msg: "Parent-only success did not fail closed: {{ ansible_failed_result.msg | default('') }}"
+            success_msg: "A parent-only success return on a non-final turn fails closed."
