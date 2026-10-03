@@ -212,13 +212,16 @@
     pipeline_findings_reports: >-
       {{ pipeline_findings_reports + [{
         'target': review_org_repo + '#' + review_number,
+        'title': (_pr_context.title | default('')) if (review_type == 'pr' and _pr_context is defined) else '',
+        'url': (_pr_context.url | default('')) if (review_type == 'pr' and _pr_context is defined) else '',
         'report': review_final_report,
         'verdict': review_verdict,
         'score': score_overall | float,
         'summary_path': review_summary_path,
         'findings_path': review_findings_path,
         'summary_run_scoped_path': review_summary_run_scoped_path,
-        'findings_run_scoped_path': review_findings_run_scoped_path
+        'findings_run_scoped_path': review_findings_run_scoped_path,
+        'cache_hit': false
       }] }}
 
 - name: Append this review execution to the directory runs ledger

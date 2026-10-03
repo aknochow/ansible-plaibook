@@ -72,6 +72,13 @@ AAP / execution-environment runs still invoke the playbook:
 ansible-playbook review.yml -e review_targets_raw=org/repo/123
 ```
 
+After the `PLAY RECAP`, the playbook prints a final review summary with
+the PR/MR title, target, findings report path, and any failure or skip
+reason. Local runs enable this through the checkout's `ansible.cfg`. In
+AAP, add `plaibook_review_summary` to the Job Template's **Ansible
+Callback Plugins** and make this repository's `callback_plugins/`
+directory available as the callback plugin path.
+
 `review_targets_raw` accepts a GitHub PR URL, a GitLab MR URL, or a bare
 `org/repo/N` / `org/repo/pull/N` (GitHub) / `gitlab:org/repo/N` (GitLab)
 identifier. Those bare forms are safe unquoted in bash (`#` is a comment,

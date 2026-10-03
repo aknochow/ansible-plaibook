@@ -380,6 +380,8 @@
         - name: Capture the failure so it can be re-raised after cleanup
           ansible.builtin.set_fact:
             review_pipeline_failed: true
+            review_failed_target: >-
+              {{ review_active_target | default(review_targets | default([]) | join(', ')) }}
             review_pipeline_error: >-
               {{ (ansible_failed_result.msg | default(ansible_failed_task.name ~ ' failed'))
                  | regex_replace('://[^/@\s]+@', '://***@')
@@ -444,7 +446,25 @@
           loop_control:
             label: "{{ item.target }}"
 
-    - name: Re-raise the pipeline failure (after sandbox cleanup, stats, and findings reports above)
+    # Keep this decision separate from the fail task so the callback can
+    # print one complete summary after PLAYBOOK RECAP, including why a
+    # commit-mode regression gate failed.
+    - name: Determine whether the review failed its regression gate
+      ansible.builtin.set_fact:
+        review_regression_gate_failed: >-
+          {{
+            (not (review_pipeline_failed | default(false) | bool))
+            and (fail_on_regressions | bool)
+            and (review_verdict | default('')) == 'NEEDS_CHANGES'
+            and ((findings_critical | default([]) | length) + (findings_major | default([]) | length)) > 0
+          }}
+
+    - name: Build the final review summary for the after-recap callback
+      ansible.builtin.set_fact:
+        plaibook_final_review_summary: >-
+          {{ lookup('template', playbook_dir + '/roles/review/templates/final_review_summary.j2') | trim }}
+
+    - name: Re-raise the pipeline failure (after cleanup and summary capture)
       ansible.builtin.fail:
         msg: "{{ review_pipeline_error }}"
       when: review_pipeline_failed | default(false)
@@ -456,11 +476,7 @@
     # single-iteration loop; a multi-target pr/branch run opting into
     # this would only gate on its last target, not a documented use case.
     - name: Fail if this review found a real regression
-      when: >-
-        (not (review_pipeline_failed | default(false)))
-        and fail_on_regressions | bool
-        and (review_verdict | default('')) == 'NEEDS_CHANGES'
-        and ((findings_critical | default([]) | length) + (findings_major | default([]) | length)) > 0
+      when: review_regression_gate_failed | bool
       ansible.builtin.fail:
         msg: >-
           {{ review_org_repo }}#{{ review_number }} scored {{ score_overall }}/100 with

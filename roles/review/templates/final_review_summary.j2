@@ -1,0 +1,48 @@
+=== Review Summary ===
+{% set records = pipeline_findings_reports | default([]) %}
+{% set skipped_count = records | selectattr('verdict', 'equalto', 'SKIPPED') | list | length %}
+{% if review_pipeline_failed | default(false) | bool or review_regression_gate_failed | default(false) | bool %}
+Run status: FAILED
+{% elif records | length == 0 or skipped_count == records | length %}
+Run status: SKIPPED
+{% else %}
+Run status: COMPLETED
+{% endif %}
+Review type: {{ review_type | default('pr') }}
+{% if review_pipeline_failed | default(false) | bool %}
+Failure target: {{ review_failed_target | default('unknown target') | regex_replace('[\r\n\t]', ' ') }}
+Failure reason: {{ review_pipeline_error | default('The review pipeline failed without a recorded error.') | regex_replace('[\r\n\t]+', ' ') }}
+{% elif review_regression_gate_failed | default(false) | bool %}
+Failure target: {{ ((review_org_repo | default('unknown repository')) ~ '#' ~ (review_number | default('unknown'))) | regex_replace('[\r\n\t]', ' ') }}
+Failure reason: fail_on_regressions is enabled and the review found {{ findings_critical | default([]) | length }} Critical and {{ findings_major | default([]) | length }} Major finding(s).
+{% elif records | length == 0 %}
+Skip reason: no review result was recorded. The run may have stopped before a target could be reviewed.
+{% endif %}
+{% for item in records %}
+
+Review: {{ item.title | default(item.target, true) | regex_replace('[\r\n\t]+', ' ') }}
+Target: {{ item.target | default('unknown target') | regex_replace('[\r\n\t]', ' ') }}
+{% if item.title | default('', true) | length > 0 %}
+PR/MR title: {{ item.title | regex_replace('[\r\n\t]+', ' ') }}
+{% endif %}
+{% if item.url | default('', true) | length > 0 %}
+PR/MR: {{ item.url | regex_replace('[\r\n\t]', '') }}
+{% endif %}
+Verdict: {{ item.verdict | default('UNKNOWN') }}{% if item.score is defined %} (score {{ item.score }}){% endif %}
+{% if item.verdict | default('') == 'SKIPPED' %}
+Skip reason: {{ item.skip_reason | default('No skip reason was recorded.') | regex_replace('[\r\n\t]+', ' ') }}
+{% if item.skip_hint | default('', true) | length > 0 %}
+Next step: {{ item.skip_hint | regex_replace('[\r\n\t]+', ' ') }}
+{% endif %}
+{% elif item.verdict | default('') == 'NEEDS_CHANGES' %}
+Review reason: blocking findings remain; see the findings report for evidence and details.
+{% endif %}
+{% if item.findings_path | default('', true) | length > 0 %}
+Findings report: {{ item.findings_run_scoped_path | default(item.findings_path, true) }}
+{% else %}
+Findings report: not created{% if item.verdict | default('') == 'SKIPPED' %} (review skipped before full analysis){% else %} (results were not persisted){% endif %}
+{% endif %}
+{% if item.cache_hit | default(false) | bool %}
+Note: reused the prior review for this same commit.
+{% endif %}
+{% endfor %}
