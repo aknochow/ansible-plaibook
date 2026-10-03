@@ -6,7 +6,9 @@
 
 Reads CURSOR_AGENT_STUB_FILE (JSON object). If the object has failed=true,
 fail_json with the remaining keys (the WaitLiveRun-after-drain shape).
-Otherwise exit_json. Never calls cursor-sdk or the network.
+Otherwise exit_json. A top-level ``responses`` list is a sequence: each
+call consumes the first object, writes the remainder back, and increments
+``calls``. Never calls cursor-sdk or the network.
 """
 
 from __future__ import annotations
@@ -72,6 +74,24 @@ options:
 """
 
 
+def _next_payload(path: str, payload: dict) -> dict:
+    """Return this call's result. A responses list is consumed one object at a time."""
+    responses = payload.get("responses")
+    if responses is None:
+        return payload
+    if not isinstance(responses, list) or not responses or not isinstance(responses[0], dict):
+        raise ValueError("cursor agent stub responses must be a non-empty list of objects")
+    current = dict(responses[0])
+    updated = dict(payload)
+    updated["responses"] = responses[1:]
+    updated["calls"] = int(payload.get("calls") or 0) + 1
+    temporary = f"{path}.tmp"
+    with open(temporary, "w", encoding="utf-8") as handle:
+        json.dump(updated, handle)
+    os.replace(temporary, path)
+    return current
+
+
 def main() -> None:
     module = AnsibleModule(
         argument_spec=dict(
@@ -103,6 +123,11 @@ def main() -> None:
         return
     if not isinstance(payload, dict):
         module.fail_json(msg="cursor agent stub payload must be a JSON object")
+        return
+    try:
+        payload = _next_payload(path, payload)
+    except ValueError as exc:
+        module.fail_json(msg=str(exc))
         return
 
     failed = bool(payload.pop("failed", False))
