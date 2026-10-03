@@ -34,6 +34,9 @@
 # lens never called the tool on the last verify turn; mid-turns with
 # zero executes retry. Parent-only execute (GetDynamicTools /
 # tools: [mcp] fabrication) always fails closed.
+# A module fail_json (Cursor status=error with an empty body) is one
+# failed attempt. Rescue it and retry. A nested report_verdict on that
+# failed return still binds. Do not abort the playbook before persist.
 #
 # prompt_nonce is a cheap spawn canary after a nested execute. The
 # nested execute is the payload bind. Do not print .text in fail_msg.
@@ -48,76 +51,176 @@
       - "tools: [mcp, task]"
       - "structured_tool: report_verdict (verify_verdict_schema)"
 
-- name: "Cursor: dispatch the verify agent"
-  aknochow.cursor.agent:
-    api_key: "{{ review_cursor_api_key }}"
-    prompt: >-
-      Spawn the verify_lens subagent with the Task / Subagent tool.
-      You must call the Task / Subagent tool -- verify_lens is not
-      itself a tool. Do not refute the finding yourself. Do not call
-      report_verdict yourself. Wait for verify_lens to finish.
-    model: "{{ review_verify_cursor_model }}"
-    effort: "{{ review_cursor_effort }}"
-    cwd: "{{ review_repo_path }}"
-    setting_sources: []
-    tools: [mcp, task]
-    agents:
-      verify_lens:
-        description: Adversarial single-finding verifier with trusted instructions.
-        prompt: "{{ verify_system_prompt }}"
-    structured_tool:
-      name: report_verdict
-      description: Submit the verification verdict for this one finding.
-      input_schema: "{{ verify_verdict_schema }}"
-  register: _cursor_verify_raw
+- name: Cursor verify dispatch attempt
+  block:
+    - name: "Cursor: dispatch the verify agent"
+      action:
+        module: "{{ cursor_agent_module | default('aknochow.cursor.agent') }}"
+        api_key: "{{ review_cursor_api_key }}"
+        prompt: >-
+          Spawn the verify_lens subagent with the Task / Subagent tool.
+          You must call the Task / Subagent tool -- verify_lens is not
+          itself a tool. Do not refute the finding yourself. Do not call
+          report_verdict yourself. Wait for verify_lens to finish.
+        model: "{{ review_verify_cursor_model }}"
+        effort: "{{ review_cursor_effort }}"
+        cwd: "{{ review_repo_path }}"
+        setting_sources: []
+        tools: [mcp, task]
+        agents:
+          verify_lens:
+            description: Adversarial single-finding verifier with trusted instructions.
+            prompt: "{{ verify_system_prompt }}"
+        structured_tool:
+          name: report_verdict
+          description: Submit the verification verdict for this one finding.
+          input_schema: "{{ verify_verdict_schema }}"
+      register: _cursor_verify_raw
 
-- name: "Cursor: record this attempt's usage for the pipeline-wide stats summary"
-  ansible.builtin.set_fact:
-    pipeline_agent_calls: >-
-      {{ pipeline_agent_calls + [{
-           'target': review_org_repo + '#' + review_number, 'lens': 'verify',
-           'model': _cursor_verify_raw.resolved_model | default(review_verify_cursor_model),
-           'usage': _cursor_verify_raw.usage_normalized,
-           'attempt': verify_attempt_number | default(1)
-         }] }}
+    - name: "Cursor: record this attempt's usage for the pipeline-wide stats summary"
+      ansible.builtin.set_fact:
+        pipeline_agent_calls: >-
+          {{ (pipeline_agent_calls | default([])) + [{
+               'target': review_org_repo + '#' + review_number, 'lens': 'verify',
+               'model': _cursor_verify_raw.resolved_model | default(review_verify_cursor_model),
+               'usage': _cursor_verify_raw.usage_normalized,
+               'attempt': verify_attempt_number | default(1)
+             }] }}
 
-- name: "Cursor: consume Verify named-lens execute"
-  ansible.builtin.include_tasks: select_cursor_named_lens.yml
-  vars:
-    cursor_raw: "{{ _cursor_verify_raw }}"
-    cursor_nonce_lens_label: "Verify"
-    cursor_lens_tool: report_verdict
-    cursor_named_lens_required: "{{ verify_last_turn | default(false) }}"
+    - name: "Cursor: consume Verify named-lens execute"
+      ansible.builtin.include_tasks: select_cursor_named_lens.yml
+      vars:
+        cursor_raw: "{{ _cursor_verify_raw }}"
+        cursor_nonce_lens_label: "Verify"
+        cursor_lens_tool: report_verdict
+        cursor_named_lens_required: "{{ verify_last_turn | default(false) }}"
 
-- name: "Cursor: fail closed if the Verify named lens nonce mismatches"
-  when: cursor_named_lens_present | default(false) | bool
-  ansible.builtin.include_tasks: assert_cursor_prompt_nonce.yml
-  vars:
-    cursor_nonce_structured: "{{ cursor_lens_structured }}"
-    cursor_nonce_lens_label: "Verify"
+    - name: "Cursor: fail closed if the Verify named lens nonce mismatches"
+      when: cursor_named_lens_present | default(false) | bool
+      ansible.builtin.include_tasks: assert_cursor_prompt_nonce.yml
+      vars:
+        cursor_nonce_structured: "{{ cursor_lens_structured }}"
+        cursor_nonce_lens_label: "Verify"
 
-- name: "Cursor: build this attempt's synthesized report_verdict tool_use (if any)"
-  ansible.builtin.set_fact:
-    _cursor_verify_report_call: >-
-      {{ [{'id': 'cursor_report_verdict',
-           'name': 'report_verdict',
-           'input': cursor_lens_structured}]
-         if (cursor_named_lens_present | default(false) | bool) else [] }}
+    - name: "Cursor: build this attempt's synthesized report_verdict tool_use (if any)"
+      ansible.builtin.set_fact:
+        _cursor_verify_report_call: >-
+          {{ [{'id': 'cursor_report_verdict',
+               'name': 'report_verdict',
+               'input': cursor_lens_structured}]
+             if (cursor_named_lens_present | default(false) | bool) else [] }}
 
-- name: "Cursor: normalize this attempt's result into the shared verify_turn_result shape"
-  ansible.builtin.set_fact:
-    verify_turn_result:
-      message:
-        content: "{{ _cursor_verify_report_call }}"
-        model: "{{ _cursor_verify_raw.resolved_model | default(review_verify_cursor_model) }}"
-      tool_calls: "{{ _cursor_verify_report_call }}"
-      stop_reason: "{{ 'tool_use' if (cursor_named_lens_present | default(false) | bool) else (_cursor_verify_raw.status | default('unknown')) }}"
-      usage: "{{ _cursor_verify_raw.usage_normalized }}"
+    - name: "Cursor: normalize this attempt's result into the shared verify_turn_result shape"
+      ansible.builtin.set_fact:
+        verify_turn_result:
+          message:
+            content: "{{ _cursor_verify_report_call }}"
+            model: "{{ _cursor_verify_raw.resolved_model | default(review_verify_cursor_model) }}"
+          tool_calls: "{{ _cursor_verify_report_call }}"
+          stop_reason: "{{ 'tool_use' if (cursor_named_lens_present | default(false) | bool) else (_cursor_verify_raw.status | default('unknown')) }}"
+          usage: "{{ _cursor_verify_raw.usage_normalized }}"
 
-- name: "Cursor: check whether this attempt produced a named-lens verdict"
-  ansible.builtin.set_fact:
-    _verify_cursor_structured_present: "{{ cursor_named_lens_present | default(false) | bool }}"
+    - name: "Cursor: check whether this attempt produced a named-lens verdict"
+      ansible.builtin.set_fact:
+        _verify_cursor_structured_present: "{{ cursor_named_lens_present | default(false) | bool }}"
 
-- name: "Cursor: mark this attempt valid unless it's the forced last turn with no verdict at all"
-  ansible.builtin.set_fact:
-    verify_dispatch_valid: "{{ (not verify_last_turn) or (_verify_cursor_structured_present | bool) }}"
+    - name: "Cursor: mark this attempt valid unless it's the forced last turn with no verdict at all"
+      ansible.builtin.set_fact:
+        verify_dispatch_provider_error: false
+        verify_dispatch_valid: "{{ (not verify_last_turn) or (_verify_cursor_structured_present | bool) }}"
+
+  rescue:
+    - name: "Cursor: classify the failed verify return"
+      ansible.builtin.set_fact:
+        _verify_failed_nested: >-
+          {{ (ansible_failed_result.structured_tool_calls | default([]))
+             | selectattr('caller', 'equalto', 'nested')
+             | selectattr('name', 'equalto', 'report_verdict')
+             | list }}
+        _verify_failed_parent: >-
+          {{ (ansible_failed_result.structured_tool_calls | default([]))
+             | selectattr('caller', 'equalto', 'parent')
+             | list }}
+        _verify_failed_status_error: >-
+          {{ (ansible_failed_result.status | default('')) == 'error'
+             or ('status error' in (ansible_failed_result.msg | default('') | lower)) }}
+
+    - name: "Cursor: re-raise a parent-only verify fabrication"
+      when:
+        - _verify_failed_parent | length > 0
+        - _verify_failed_nested | length == 0
+      ansible.builtin.fail:
+        msg: "{{ ansible_failed_result.msg | default('Verify parent-only report_verdict') }}"
+
+    - name: "Cursor: bind a nested verdict that arrived with status=error"
+      when: _verify_failed_nested | length > 0
+      ansible.builtin.set_fact:
+        cursor_lens_structured: "{{ _verify_failed_nested[-1].args }}"
+        cursor_named_lens_present: true
+        verify_dispatch_provider_error: false
+        verify_dispatch_valid: true
+        verify_turn_result:
+          message:
+            content:
+              - id: cursor_report_verdict
+                name: report_verdict
+                input: "{{ _verify_failed_nested[-1].args }}"
+            model: "{{ ansible_failed_result.resolved_model | default(review_verify_cursor_model) }}"
+          tool_calls:
+            - id: cursor_report_verdict
+              name: report_verdict
+              input: "{{ _verify_failed_nested[-1].args }}"
+          stop_reason: tool_use
+          usage: "{{ ansible_failed_result.usage_normalized | default({}) }}"
+
+    - name: "Cursor: fail closed if the rescued Verify nonce mismatches"
+      when: _verify_failed_nested | length > 0
+      ansible.builtin.include_tasks: assert_cursor_prompt_nonce.yml
+      vars:
+        cursor_nonce_structured: "{{ cursor_lens_structured }}"
+        cursor_nonce_lens_label: "Verify"
+
+    - name: "Cursor: record usage from a failed verify return"
+      when:
+        - ansible_failed_result.usage_normalized is defined
+        - _verify_failed_parent | length == 0
+      ansible.builtin.set_fact:
+        pipeline_agent_calls: >-
+          {{ (pipeline_agent_calls | default([])) + [{
+               'target': review_org_repo + '#' + review_number, 'lens': 'verify',
+               'model': ansible_failed_result.resolved_model | default(review_verify_cursor_model),
+               'usage': ansible_failed_result.usage_normalized,
+               'attempt': verify_attempt_number | default(1)
+             }] }}
+
+    - name: "Cursor: empty status=error is a failed attempt, not a dead review"
+      when:
+        - _verify_failed_nested | length == 0
+        - _verify_failed_parent | length == 0
+        - _verify_failed_status_error | bool
+      ansible.builtin.set_fact:
+        verify_dispatch_provider_error: true
+        verify_dispatch_valid: false
+        verify_turn_result:
+          message:
+            content: []
+            model: "{{ ansible_failed_result.resolved_model | default(review_verify_cursor_model) }}"
+          tool_calls: []
+          stop_reason: error
+          usage: "{{ ansible_failed_result.usage_normalized | default({}) }}"
+
+    - name: "Cursor: a named-lens miss stays invalid for the last-turn retry"
+      when:
+        - _verify_failed_nested | length == 0
+        - _verify_failed_parent | length == 0
+        - not (_verify_failed_status_error | bool)
+      ansible.builtin.set_fact:
+        verify_dispatch_provider_error: false
+        verify_dispatch_valid: false
+        verify_turn_result:
+          message:
+            content: []
+            model: "{{ review_verify_cursor_model }}"
+          tool_calls: []
+          stop_reason: end_turn
+          usage: {}
