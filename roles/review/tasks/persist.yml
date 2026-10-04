@@ -17,8 +17,16 @@
 # history, not a CI artifact). Left ungitignored by design: this
 # pipeline shouldn't mutate a repo it's reviewing beyond a plain file
 # write; wire artifacts/ into your own repo's .gitignore if needed.
+#
+# Skipped when review_delegate_host is set. That path's review_repo_path
+# is inside the guest, so this write is two SSH sessions (mkdir, then
+# copy) into a tree teardown deletes. The controller history copy below
+# is the one that survives. An unsandboxed CI job still gets the file
+# in its own workspace.
 - name: Write the findings report as a CI-consumable artifact in the checkout
-  when: review_write_artifact | bool
+  when:
+    - review_write_artifact | bool
+    - review_delegate_host | default('') | trim | length == 0
   block:
     - name: Ensure the artifacts directory exists in the checkout
       ansible.builtin.file:

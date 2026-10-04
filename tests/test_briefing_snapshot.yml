@@ -1,0 +1,156 @@
+---
+# Briefing reads the diff, deleted files, and checkout text from one
+# command. skills/ bodies stay out of the file map. No live repo.
+#
+# Usage:
+#   ansible-playbook tests/test_briefing_snapshot.yml
+
+- name: Test briefing.yml's one-command diff snapshot
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_delegate_host: ""
+    review_repo_path: "{{ fixture_dir.path }}"
+    review_target_ref: "target_ref"
+    review_source_ref: "HEAD"
+    review_short_sha: "snaptest"
+    review_branch: "test-briefing-snapshot"
+    review_org_repo: "test/briefing-snapshot"
+    review_number: "test-briefing-snapshot"
+    review_output_base: "{{ fixture_review_output.path }}"
+
+  tasks:
+    - name: Create a throwaway fixture repo directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: "briefing-snapshot-repo-"
+      register: fixture_dir
+
+    - name: Create a throwaway review_output_base directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: "briefing-snapshot-output-"
+      register: fixture_review_output
+
+    - name: Initialize the fixture repo and configure a commit identity
+      ansible.builtin.command:
+        argv: "{{ item }}"
+        chdir: "{{ fixture_dir.path }}"
+      loop:
+        - [git, init, -q]
+        - [git, config, user.email, "test@test.com"]
+        - [git, config, user.name, "Test"]
+      loop_control:
+        label: "{{ item | join(' ') }}"
+      changed_when: false
+      timeout: 30
+
+    - name: Write the base fixture files
+      ansible.builtin.copy:
+        dest: "{{ fixture_dir.path }}/{{ item.path }}"
+        content: "{{ item.content }}"
+        mode: "0644"
+      loop:
+        - path: pyproject.toml
+          content: |
+            [project]
+            name = "snapshot"
+        - path: old.txt
+          content: |
+            gone
+        - path: README.md
+          content: |
+            base
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Commit and tag the base fixture state as target_ref
+      ansible.builtin.command:
+        argv: "{{ item }}"
+        chdir: "{{ fixture_dir.path }}"
+      loop:
+        - [git, add, -A]
+        - [git, commit, -q, -m, base]
+        - [git, tag, target_ref]
+      loop_control:
+        label: "{{ item | join(' ') }}"
+      changed_when: false
+      timeout: 30
+
+    - name: Create source-only directories
+      ansible.builtin.file:
+        path: "{{ fixture_dir.path }}/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - src
+        - skills
+
+    - name: Write the source fixture files
+      ansible.builtin.copy:
+        dest: "{{ fixture_dir.path }}/{{ item.path }}"
+        content: "{{ item.content }}"
+        mode: "0644"
+      loop:
+        - path: README.md
+          content: |
+            changed
+        - path: src/app.py
+          content: |
+            print('kept')
+        - path: skills/skip.py
+          content: |
+            SECRET_SKILL_BODY
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Remove the deleted fixture file
+      ansible.builtin.file:
+        path: "{{ fixture_dir.path }}/old.txt"
+        state: absent
+
+    - name: Commit the source state
+      ansible.builtin.command:
+        argv: "{{ item }}"
+        chdir: "{{ fixture_dir.path }}"
+      loop:
+        - [git, add, -A]
+        - [git, commit, -q, -m, change]
+      loop_control:
+        label: "{{ item | join(' ') }}"
+      changed_when: false
+      timeout: 30
+
+    - name: Run briefing.yml
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: briefing
+        public: true
+
+    - name: Assert the snapshot kept the diff, the deletion, and the skill path
+      ansible.builtin.assert:
+        that:
+          - "'old.txt' in review_full_diff"
+          - "'changed' in review_full_diff"
+          - review_diff_files | length == 4
+          - "'README.md' in review_diff_files"
+          - "'old.txt' in review_diff_files"
+          - "'skills/skip.py' in review_diff_files"
+          - "'src/app.py' in review_diff_files"
+          - review_completeness_checks.deleted_files | length == 1
+          - "'old.txt' in review_completeness_checks.deleted_files"
+          - briefing_type == 'python-project'
+          - _diff_file_contents['src/app.py'] is search('kept')
+          - "'skills/skip.py' not in _diff_file_contents"
+          - "'SECRET_SKILL_BODY' not in (_diff_file_contents | to_json)"
+          - review_checklist.triggered == false
+
+    - name: Clean up the fixture repo and output directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ fixture_dir.path }}"
+        - "{{ fixture_review_output.path }}"

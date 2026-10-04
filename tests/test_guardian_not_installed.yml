@@ -17,7 +17,7 @@
   gather_facts: false
 
   vars:
-    review_delegate_host: ""
+    review_delegate_host: sandbox-must-not-be-contacted
     review_guardian_binary: ai-guardian-missing-for-test
     review_full_diff: |
       diff --git a/app.py b/app.py
@@ -43,6 +43,7 @@
           - guardian_scan_skip_reason == "ai-guardian not installed"
           - guardian_findings == []
           - "'exited 2' not in guardian_scan_skip_reason"
+          - _guardian_scan_host == inventory_hostname
         fail_msg: >-
           Expected skip_reason 'ai-guardian not installed' when the
           binary is missing on an unsandboxed host. Got available=
@@ -56,7 +57,7 @@
   gather_facts: false
 
   vars:
-    review_delegate_host: ""
+    review_delegate_host: sandbox-must-not-be-contacted
     review_full_diff: |
       diff --git a/app.py b/app.py
       index abc123..def456 100644
@@ -98,6 +99,7 @@
           - not (_inject_stat.stat.exists | default(false))
           - not (guardian_scan_available | bool)
           - guardian_scan_skip_reason == "ai-guardian not installed"
+          - _guardian_scan_host == inventory_hostname
         fail_msg: >-
           review_guardian_binary was interpolated into sh -c. Marker
           exists={{ _inject_stat.stat.exists | default('undefined') }},

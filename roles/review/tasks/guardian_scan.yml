@@ -1,12 +1,15 @@
 ---
 # Prompt-side-only ai-guardian scan of shared untrusted content (diff + PR/MR description).
 # Scans once, shared across lenses (not per-lens). Response-side scanning is out of scope.
-# Self-installs ai-guardian in sandbox when missing. Unsandboxed runs require a
-# pre-install on the controller -- use_sandbox=false never self-installs, so a
-# missing binary means there is no deterministic scan this run. Report that as
-# "ai-guardian not installed" (Ansible's command module returns rc=2 for
-# ENOENT, not 127). Do not lump a missing tool in with a scan that ran and
-# errored.
+# The scan always runs on the controller. The diff and the PR text are already
+# there, and delegating the scan into the sandbox made every sandboxed review
+# pay SSH timeouts, including a wheelhouse copy that failed and still skipped
+# the scan. When the default binary is missing, install it into
+# ~/.cache/ansible-plaibook/ai-guardian. A test that overrides
+# review_guardian_binary does not install.
+# A missing binary is "ai-guardian not installed" (Ansible's command module
+# returns rc=2 for ENOENT, not 127). Do not lump a missing tool in with a
+# scan that ran and errored.
 # Scans FILE, not inline `--text`, to avoid exposing untrusted content in process arguments.
 # Guardian findings are informational-only, separate from severity scoring.
 
@@ -43,12 +46,12 @@
       ansible.builtin.set_fact:
         _guardian_real_nl: "\n"
 
-    # Never pass omit through Jinja into delegate_to: Ansible can treat
-    # the omit placeholder as a hostname. Unsandboxed runs delegate to
-    # inventory_hostname (this play's localhost).
-    - name: Resolve the scan host without passing omit into delegate_to
+    # review_delegate_host is for checklist and diff execution. This scan
+    # does not use it. A set delegate host must not turn these tasks into
+    # SSH calls.
+    - name: Scan on the controller
       ansible.builtin.set_fact:
-        _guardian_scan_host: "{{ review_delegate_host if (review_delegate_host | default('') | trim | length > 0) else inventory_hostname }}"
+        _guardian_scan_host: "{{ inventory_hostname }}"
 
     # PR/MR description is untrusted input reaching the same lenses
     # (review_agent_prompt.j2/security_agent_prompt.j2 both render it),
@@ -88,14 +91,7 @@
       ansible.builtin.tempfile:
         state: file
         suffix: "-ai-guardian-input.txt"
-      delegate_to: "{{ _guardian_scan_host }}"
-      ignore_unreachable: true
       register: _guardian_input_file
-
-    - name: Fail loudly if the sandbox connection was unreachable
-      ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
-      vars:
-        fail_if_unreachable_result_var: _guardian_input_file
 
     # mode: '0600' explicitly -- ansible.builtin.tempfile's own default
     # depends on the host's umask, which could leave this
@@ -107,27 +103,13 @@
         content: "{{ _guardian_scan_input }}"
         dest: "{{ _guardian_input_file.path }}"
         mode: "0600"
-      delegate_to: "{{ _guardian_scan_host }}"
-      ignore_unreachable: true
       register: _guardian_input_write_result
-
-    - name: Fail loudly if the sandbox connection was unreachable
-      ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
-      vars:
-        fail_if_unreachable_result_var: _guardian_input_write_result
 
     - name: Create a run-unique, owner-only-readable path for ai-guardian's JSON findings output
       ansible.builtin.tempfile:
         state: file
         suffix: "-ai-guardian-findings.json"
-      delegate_to: "{{ _guardian_scan_host }}"
-      ignore_unreachable: true
       register: _guardian_json_output_file
-
-    - name: Fail loudly if the sandbox connection was unreachable
-      ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
-      vars:
-        fail_if_unreachable_result_var: _guardian_json_output_file
 
     # ai-guardian doesn't create its own output file with restrictive
     # permissions -- it may contain snippets of the scanned untrusted
@@ -138,14 +120,7 @@
       ansible.builtin.file:
         path: "{{ _guardian_json_output_file.path }}"
         mode: "0600"
-      delegate_to: "{{ _guardian_scan_host }}"
-      ignore_unreachable: true
       register: _guardian_json_output_chmod_result
-
-    - name: Fail loudly if the sandbox connection was unreachable
-      ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
-      vars:
-        fail_if_unreachable_result_var: _guardian_json_output_chmod_result
 
     # command -v is a shell builtin, so the lookup still goes through
     # sh. Do not interpolate review_guardian_binary into that script:
@@ -160,301 +135,203 @@
           - sh
           - "{{ review_guardian_binary }}"
 
-    # Only meaningful in the sandboxed case (review_delegate_host set)
-    # -- an unsandboxed run has no delegate host to install onto.
-    # The precheck itself always runs, including on the controller:
-    # unsandboxed missing-binary used to fall through to the scan
-    # command, which Ansible records as rc=2 with empty stderr
-    # ("ai-guardian scan exited 2: "), indistinguishable from a scan
-    # that ran and errored.
-    - name: Check whether ai-guardian is already present on the scan host
+    # A missing binary used to fall through to the scan command, which
+    # Ansible records as rc=2 with empty stderr, indistinguishable from
+    # a scan that ran and errored.
+    - name: Check whether ai-guardian is already on the controller PATH
       ansible.builtin.command:
         argv: "{{ _guardian_binary_lookup_argv }}"
-      delegate_to: "{{ _guardian_scan_host }}"
-      ignore_unreachable: true
       register: _guardian_binary_precheck
       failed_when: false
       changed_when: false
 
-    - ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
-      vars:
-        fail_if_unreachable_result_var: _guardian_binary_precheck
-      when: review_delegate_host | default('') | trim | length > 0
+    - name: Use the controller binary when it is already on PATH
+      ansible.builtin.set_fact:
+        _guardian_scan_executable: "{{ review_guardian_binary if (_guardian_binary_precheck.rc | int == 0) else '' }}"
 
-    - name: Install ai-guardian into the sandbox when missing
-      when: >-
-        (review_delegate_host | default('') | trim | length > 0)
-        and (_guardian_binary_precheck.rc | default(0) != 0)
+    # Only the default binary name is installed. A test that sets
+    # review_guardian_binary to a name that is never installed must
+    # stay on the not-installed path and must not call pip.
+    - name: Install ai-guardian into a controller virtualenv when it is missing
+      when:
+        - _guardian_scan_executable | length == 0
+        - review_guardian_binary == 'ai-guardian'
       block:
-        - name: Create a temp wheelhouse directory on the controller
-          ansible.builtin.tempfile:
-            state: directory
-            suffix: "-ai-guardian-wheelhouse"
-          register: _guardian_wheelhouse_dir
+        - name: Choose the controller prefix for ai-guardian
+          ansible.builtin.set_fact:
+            _guardian_prefix: "{{ lookup('env', 'HOME') }}/.cache/ansible-plaibook/ai-guardian"
 
-        # Copied into the wheelhouse dir itself (not referenced from
-        # their original files/ location) so the later "Copy the
-        # wheelhouse into the sandbox" step -- which already recursively
-        # copies this whole directory -- carries them along automatically,
-        # without a separate copy step. --require-hashes below reads
-        # these from their SANDBOX-side path after that copy.
-        - name: Copy the pinned requirements-with-hashes files into the wheelhouse
-          ansible.builtin.copy:
-            src: "{{ item }}"
-            dest: "{{ _guardian_wheelhouse_dir.path }}/{{ item }}"
-            mode: "0644"
-          loop:
-            - guardian-ai-guardian-requirements.txt
-            - guardian-requests-requirements.txt
+        - name: See whether that prefix already has the binary
+          ansible.builtin.stat:
+            path: "{{ _guardian_prefix }}/bin/ai-guardian"
+          register: _guardian_venv_binary
 
-        # --platform any --implementation py --abi none --only-binary=:all:
-        # forces pip to select the universal "py3-none-any" wheel for
-        # every package instead of whatever wheel it would pick for the
-        # CONTROLLER's own platform -- caught by this task's own
-        # dogfooding: without these flags, downloading on macOS silently
-        # fetches macOS-specific compiled wheels for any dependency that
-        # ships one (charset-normalizer does, via an optional mypyc-
-        # compiled speedup), which then fail to install on the sandbox's
-        # Linux filesystem with "no matching distribution" -- confirmed
-        # directly (not assumed) that ai-guardian, requests, and every
-        # package in requests' own dependency chain (charset-normalizer,
-        # idna, urllib3, certifi) all publish a genuine py3-none-any
-        # wheel, so this constraint never actually falls back to source
-        # (which would need a compiler + network on the sandbox to
-        # build, defeating the whole point of a wheelhouse).
-        # --python-version pins a floor for dependency RESOLUTION only
-        # (which package versions are considered), not the sandbox's
-        # actual runtime -- too low a value here incorrectly excludes
-        # modern requests releases that require a newer minimum (e.g.
-        # bare "3" parses as "3.0", which excludes everything requiring
-        # Python >=3.7 and silently resolves a 2017-era requests
-        # instead, missing years of security fixes). review_guardian_
-        # pip_target_python_version sets a realistic floor instead.
-        # --no-deps: ai-guardian's full dependency list includes
-        # onnxruntime/tokenizers for optional ML-based prompt-injection
-        # detection, not needed for the toml-patterns-backed secret
-        # scanning this task actually relies on (see this file's header
-        # comment), and those packages don't publish wheels for every
-        # platform (confirmed in handoff.ansible-plaibook-guardian-
-        # integration.yaml). requests -- pure Python down its whole
-        # transitive chain -- is the only runtime dependency
-        # secret_scanning.py's SDK layer actually imports.
-        # --require-hashes -r <file>, not a bare package specifier: pip
-        # verifies every downloaded wheel's sha256 against the pinned
-        # hash in guardian-ai-guardian-requirements.txt before saving
-        # it, rejecting a tampered or substituted artifact even from an
-        # otherwise-trusted index. Caught by this task's own MR review
-        # (escalated to Critical on a second pass) -- version pinning
-        # alone (the prior state) doesn't protect against a compromised
-        # release published under an already-pinned version/index.
-        # --no-deps still required even in hash-checking mode: without
-        # it, pip additionally demands hashes for ai-guardian's own full
-        # dependency tree (bandit, tree-sitter grammars, etc. --
-        # confirmed directly, this errors loudly rather than silently
-        # ignoring --no-deps).
-        - name: Download the ai-guardian wheel (no deps -- its own heavy ML extras aren't needed)
-          ansible.builtin.command:
-            argv:
-              - pip3
-              - download
-              - --require-hashes
-              - --no-deps
-              - --platform
-              - any
-              - --python-version
-              - "{{ review_guardian_pip_target_python_version }}"
-              - --implementation
-              - py
-              - --abi
-              - none
-              - "--only-binary=:all:"
-              - -r
-              - "{{ _guardian_wheelhouse_dir.path }}/guardian-ai-guardian-requirements.txt"
-              - -d
-              - "{{ _guardian_wheelhouse_dir.path }}"
-          changed_when: true
-          timeout: "{{ review_guardian_pip_timeout_seconds }}"
+        - name: Build the controller prefix from the pinned wheels
+          when: not (_guardian_venv_binary.stat.exists | bool)
+          block:
 
-        - name: Download requests and its transitive deps for ai-guardian
-          ansible.builtin.command:
-            argv:
-              - pip3
-              - download
-              - --require-hashes
-              - --platform
-              - any
-              - --python-version
-              - "{{ review_guardian_pip_target_python_version }}"
-              - --implementation
-              - py
-              - --abi
-              - none
-              - "--only-binary=:all:"
-              - -r
-              - "{{ _guardian_wheelhouse_dir.path }}/guardian-requests-requirements.txt"
-              - -d
-              - "{{ _guardian_wheelhouse_dir.path }}"
-          changed_when: true
-          timeout: "{{ review_guardian_pip_timeout_seconds }}"
+            - name: Create a temp wheelhouse directory on the controller
+              ansible.builtin.tempfile:
+                state: directory
+                suffix: "-ai-guardian-wheelhouse"
+              register: _guardian_wheelhouse_dir
 
-        # A SEPARATE tempdir from _guardian_wheelhouse_dir above, on
-        # purpose -- that one is a CONTROLLER-local path
-        # (ansible.builtin.tempfile with no delegate_to resolves
-        # against the controller's own filesystem/OS, e.g. macOS's
-        # /var/folders/...), which is meaningless as a destination path
-        # on the sandbox. Caught by this task's own dogfooding: reusing
-        # the controller's tempdir path verbatim as the sandbox-side
-        # dest crashed with a PermissionError trying to create
-        # /var/folders/... inside the sandbox's own Linux filesystem.
-        - name: Create a temp wheelhouse directory on the sandbox
-          ansible.builtin.tempfile:
-            state: directory
-            suffix: "-ai-guardian-wheelhouse"
-          delegate_to: "{{ _guardian_scan_host }}"
-          ignore_unreachable: true
-          register: _guardian_sandbox_wheelhouse_dir
+            - name: Copy the pinned requirements-with-hashes files into the wheelhouse
+              ansible.builtin.copy:
+                src: "{{ item }}"
+                dest: "{{ _guardian_wheelhouse_dir.path }}/{{ item }}"
+                mode: "0644"
+              loop:
+                - guardian-ai-guardian-requirements.txt
+                - guardian-requests-requirements.txt
 
-        - ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
-          vars:
-            fail_if_unreachable_result_var: _guardian_sandbox_wheelhouse_dir
+            # --platform any --implementation py --abi none --only-binary=:all:
+            # forces pip to select the universal "py3-none-any" wheel for
+            # every package instead of whatever wheel it would pick for the
+            # CONTROLLER's own platform -- caught by this task's own
+            # dogfooding: without these flags, downloading on macOS silently
+            # fetches macOS-specific compiled wheels for any dependency that
+            # ships one (charset-normalizer does, via an optional mypyc-
+            # compiled speedup), which then fail to install on the sandbox's
+            # Linux filesystem with "no matching distribution" -- confirmed
+            # directly (not assumed) that ai-guardian, requests, and every
+            # package in requests' own dependency chain (charset-normalizer,
+            # idna, urllib3, certifi) all publish a genuine py3-none-any
+            # wheel, so this constraint never actually falls back to source
+            # (which would need a compiler + network on the sandbox to
+            # build, defeating the whole point of a wheelhouse).
+            # --python-version pins a floor for dependency RESOLUTION only
+            # (which package versions are considered), not the sandbox's
+            # actual runtime -- too low a value here incorrectly excludes
+            # modern requests releases that require a newer minimum (e.g.
+            # bare "3" parses as "3.0", which excludes everything requiring
+            # Python >=3.7 and silently resolves a 2017-era requests
+            # instead, missing years of security fixes). review_guardian_
+            # pip_target_python_version sets a realistic floor instead.
+            # --no-deps: ai-guardian's full dependency list includes
+            # onnxruntime/tokenizers for optional ML-based prompt-injection
+            # detection, not needed for the toml-patterns-backed secret
+            # scanning this task actually relies on (see this file's header
+            # comment), and those packages don't publish wheels for every
+            # platform (confirmed in handoff.ansible-plaibook-guardian-
+            # integration.yaml). requests -- pure Python down its whole
+            # transitive chain -- is the only runtime dependency
+            # secret_scanning.py's SDK layer actually imports.
+            # --require-hashes -r <file>, not a bare package specifier: pip
+            # verifies every downloaded wheel's sha256 against the pinned
+            # hash in guardian-ai-guardian-requirements.txt before saving
+            # it, rejecting a tampered or substituted artifact even from an
+            # otherwise-trusted index. Caught by this task's own MR review
+            # (escalated to Critical on a second pass) -- version pinning
+            # alone (the prior state) doesn't protect against a compromised
+            # release published under an already-pinned version/index.
+            # --no-deps still required even in hash-checking mode: without
+            # it, pip additionally demands hashes for ai-guardian's own full
+            # dependency tree (bandit, tree-sitter grammars, etc. --
+            # confirmed directly, this errors loudly rather than silently
+            # ignoring --no-deps).
+            - name: Download the ai-guardian wheel (no deps -- its own heavy ML extras aren't needed)
+              ansible.builtin.command:
+                argv:
+                  - pip3
+                  - download
+                  - --require-hashes
+                  - --no-deps
+                  - --platform
+                  - any
+                  - --python-version
+                  - "{{ review_guardian_pip_target_python_version }}"
+                  - --implementation
+                  - py
+                  - --abi
+                  - none
+                  - "--only-binary=:all:"
+                  - -r
+                  - "{{ _guardian_wheelhouse_dir.path }}/guardian-ai-guardian-requirements.txt"
+                  - -d
+                  - "{{ _guardian_wheelhouse_dir.path }}"
+              changed_when: true
+              timeout: "{{ review_guardian_pip_timeout_seconds }}"
 
-        - name: Copy the wheelhouse into the sandbox
-          ansible.builtin.copy:
-            src: "{{ _guardian_wheelhouse_dir.path }}/"
-            dest: "{{ _guardian_sandbox_wheelhouse_dir.path }}/"
-            mode: preserve
-          delegate_to: "{{ _guardian_scan_host }}"
-          ignore_unreachable: true
-          register: _guardian_copy_wheelhouse_result
+            - name: Download requests and its transitive deps for ai-guardian
+              ansible.builtin.command:
+                argv:
+                  - pip3
+                  - download
+                  - --require-hashes
+                  - --platform
+                  - any
+                  - --python-version
+                  - "{{ review_guardian_pip_target_python_version }}"
+                  - --implementation
+                  - py
+                  - --abi
+                  - none
+                  - "--only-binary=:all:"
+                  - -r
+                  - "{{ _guardian_wheelhouse_dir.path }}/guardian-requests-requirements.txt"
+                  - -d
+                  - "{{ _guardian_wheelhouse_dir.path }}"
+              changed_when: true
+              timeout: "{{ review_guardian_pip_timeout_seconds }}"
 
-        - ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
-          vars:
-            fail_if_unreachable_result_var: _guardian_copy_wheelhouse_result
+            - name: Install ai-guardian from the wheelhouse into the controller prefix
+              ansible.builtin.command:
+                argv:
+                  - pip3
+                  - install
+                  - --target
+                  - "{{ _guardian_prefix }}"
+                  - --break-system-packages
+                  - --require-hashes
+                  - --no-index
+                  - --no-deps
+                  - --find-links
+                  - "{{ _guardian_wheelhouse_dir.path }}"
+                  - -r
+                  - "{{ _guardian_wheelhouse_dir.path }}/guardian-ai-guardian-requirements.txt"
+              register: _guardian_install_result
+              changed_when: true
+              failed_when: _guardian_install_result.rc != 0
+              timeout: "{{ review_guardian_pip_timeout_seconds }}"
 
-        # A SEPARATE pip install call from requests' own, deliberately --
-        # ai-guardian's own heavy ML extras (onnxruntime/tokenizers) were
-        # never downloaded (--no-deps above), so --no-deps here too keeps
-        # this install from trying to resolve them against a wheelhouse
-        # that doesn't have them. --require-hashes -r <file>, reading the
-        # SAME requirements-with-hashes file the download step used,
-        # copied along with the wheels themselves -- pip re-verifies the
-        # hash again here too (install-time, not just download-time),
-        # so even a wheel tampered with in transit between the
-        # controller and the sandbox is caught before it's installed.
-        - name: Install ai-guardian from the wheelhouse (no network needed on the scan host)
-          ansible.builtin.command:
-            argv:
-              - pip3
-              - install
-              - --require-hashes
-              - --no-index
-              - --no-deps
-              - --find-links
-              - "{{ _guardian_sandbox_wheelhouse_dir.path }}"
-              - -r
-              - "{{ _guardian_sandbox_wheelhouse_dir.path }}/guardian-ai-guardian-requirements.txt"
-          delegate_to: "{{ _guardian_scan_host }}"
-          ignore_unreachable: true
-          register: _guardian_install_result
-          changed_when: true
-          # Explicit rather than relying on the module's own default
-          # non-zero-rc failure behavior -- caught by this task's own MR
-          # review: makes the success criterion self-documenting and
-          # resilient against a future edit accidentally adding
-          # failed_when: false nearby (as the scan task further below
-          # deliberately does, for a different, documented reason).
-          failed_when: _guardian_install_result.rc != 0
-          timeout: "{{ review_guardian_pip_timeout_seconds }}"
+            - name: Install requests and its transitive deps into the controller prefix
+              ansible.builtin.command:
+                argv:
+                  - pip3
+                  - install
+                  - --target
+                  - "{{ _guardian_prefix }}"
+                  - --break-system-packages
+                  - --require-hashes
+                  - --no-index
+                  - --find-links
+                  - "{{ _guardian_wheelhouse_dir.path }}"
+                  - -r
+                  - "{{ _guardian_wheelhouse_dir.path }}/guardian-requests-requirements.txt"
+              register: _guardian_install_requests_result
+              changed_when: true
+              failed_when: _guardian_install_requests_result.rc != 0
+              timeout: "{{ review_guardian_pip_timeout_seconds }}"
+          always:
+            - name: Clean up the controller-side wheelhouse
+              ansible.builtin.file:
+                path: "{{ _guardian_wheelhouse_dir.path }}"
+                state: absent
+              when: _guardian_wheelhouse_dir is defined
 
-        - ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
-          vars:
-            fail_if_unreachable_result_var: _guardian_install_result
-
-        # No --no-deps here (requests' own transitive chain IS wanted).
-        # --require-hashes' own semantics require every one of them
-        # explicitly hash-pinned in guardian-requests-requirements.txt
-        # rather than left to auto-resolve -- an inherent property of
-        # hash-checking mode, not something to work around: if
-        # requests' upstream dependency chain ever changes, that file
-        # needs regenerating (see its own header comment for the exact
-        # command), the same way any lockfile would.
-        - name: Install requests and its transitive deps from the wheelhouse
-          ansible.builtin.command:
-            argv:
-              - pip3
-              - install
-              - --require-hashes
-              - --no-index
-              - --find-links
-              - "{{ _guardian_sandbox_wheelhouse_dir.path }}"
-              - -r
-              - "{{ _guardian_sandbox_wheelhouse_dir.path }}/guardian-requests-requirements.txt"
-          delegate_to: "{{ _guardian_scan_host }}"
-          ignore_unreachable: true
-          register: _guardian_install_requests_result
-          changed_when: true
-          failed_when: _guardian_install_requests_result.rc != 0
-          timeout: "{{ review_guardian_pip_timeout_seconds }}"
-
-        - ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
-          vars:
-            fail_if_unreachable_result_var: _guardian_install_requests_result
-      # always:, not just trailing tasks inside block: -- catches a
-      # download/copy/install task failing partway through and still
-      # cleans up whichever tempdir(s) were actually created before the
-      # failure propagates up to this file's own outer rescue: below.
-      # `is defined` guards against the always: section itself running
-      # when the very task that would have registered the fact never
-      # got to execute (e.g. the controller tempdir creation itself
-      # failed). Caught by this task's own MR review.
-      always:
-        - name: Clean up the controller-side wheelhouse
-          ansible.builtin.file:
-            path: "{{ _guardian_wheelhouse_dir.path }}"
-            state: absent
-          when: _guardian_wheelhouse_dir is defined
-
-        - name: Clean up the sandbox-side wheelhouse
-          ansible.builtin.file:
-            path: "{{ _guardian_sandbox_wheelhouse_dir.path }}"
-            state: absent
-          delegate_to: "{{ _guardian_scan_host }}"
-          ignore_unreachable: true
-          ignore_errors: true
-          register: _guardian_sandbox_wheelhouse_cleanup_result
-          when: _guardian_sandbox_wheelhouse_dir is defined
-
-        # Same "silent failure is worse than a visible one" reasoning as
-        # the scan's own temp-file cleanup warning further below --
-        # caught by this task's own MR review: this wheelhouse cleanup
-        # had ignore_errors: true with no equivalent visibility at all.
-        - name: Warn if sandbox-side wheelhouse cleanup failed
-          ansible.builtin.debug:
-            msg: >-
-              ai-guardian self-install: cleanup failed for
-              {{ _guardian_sandbox_wheelhouse_dir.path }} on the sandbox
-              -- this temp directory may persist on the scan host.
-          when: >-
-            (_guardian_sandbox_wheelhouse_cleanup_result is defined)
-            and (_guardian_sandbox_wheelhouse_cleanup_result.failed | default(false))
-
-    - name: Re-check whether ai-guardian is present on the scan host
-      ansible.builtin.command:
-        argv: "{{ _guardian_binary_lookup_argv }}"
-      delegate_to: "{{ _guardian_scan_host }}"
-      ignore_unreachable: true
-      register: _guardian_binary_postcheck
-      failed_when: false
-      changed_when: false
-
-    - ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
-      vars:
-        fail_if_unreachable_result_var: _guardian_binary_postcheck
-      when: review_delegate_host | default('') | trim | length > 0
+        - name: Use the controller prefix binary
+          ansible.builtin.set_fact:
+            _guardian_scan_executable: "{{ _guardian_prefix }}/bin/ai-guardian"
+            _guardian_pythonpath: "{{ _guardian_prefix }}"
+      rescue:
+        - name: Record that the controller install did not produce a binary
+          ansible.builtin.set_fact:
+            _guardian_scan_executable: ""
 
     - name: Record whether ai-guardian is actually installed
       ansible.builtin.set_fact:
-        _guardian_binary_present: "{{ _guardian_binary_postcheck.rc == 0 }}"
+        _guardian_binary_present: "{{ _guardian_scan_executable | length > 0 }}"
 
     - name: Skip the scan when ai-guardian is not installed
       when: not (_guardian_binary_present | bool)
@@ -475,11 +352,6 @@
     # error is a feature-availability problem (this task's whole
     # reason to exist is informational-only, non-blocking), not a
     # structural pipeline bug -- must never fail the review over it.
-    # Distinct from ignore_unreachable/fail_if_sandbox_unreachable.yml
-    # above and below, which still fail loudly on the delegate host
-    # itself being unreachable -- same treatment as every other
-    # delegated task in this pipeline, since that indicates a real
-    # sandbox-infrastructure problem, not an ai-guardian-specific one.
     # timeout: 30 -- generous relative to the measured ~0.35s scan time,
     # protects against ai-guardian hanging on pathological input. Real
     # finding caught by this task's own MR review, but its suggested
@@ -499,26 +371,19 @@
       when: _guardian_binary_present | bool
       ansible.builtin.command:
         argv:
-          - "{{ review_guardian_binary }}"
+          - "{{ _guardian_scan_executable }}"
           - scan
           - "{{ _guardian_input_file.path }}"
           - --json-output
           - "{{ _guardian_json_output_file.path }}"
           - --exit-code
-      delegate_to: "{{ _guardian_scan_host }}"
-      ignore_unreachable: true
       environment:
         CI: "true"
+        PYTHONPATH: "{{ _guardian_pythonpath | default('') }}"
       timeout: "{{ review_guardian_scan_timeout_seconds }}"
       register: _guardian_scan_result
       failed_when: false
       changed_when: false
-
-    - name: Fail loudly if the sandbox connection was unreachable
-      when: _guardian_binary_present | bool
-      ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
-      vars:
-        fail_if_unreachable_result_var: _guardian_scan_result
 
     # rc 0/1: scan ran (1 means findings exist with --exit-code).
     # Missing binary: name it "ai-guardian not installed". Ansible's
@@ -541,16 +406,8 @@
     - name: Read the JSON findings if the scan actually ran
       ansible.builtin.slurp:
         path: "{{ _guardian_json_output_file.path }}"
-      delegate_to: "{{ _guardian_scan_host }}"
-      ignore_unreachable: true
       register: _guardian_findings_raw
       ignore_errors: true
-      when: guardian_scan_available | bool
-
-    - name: Fail loudly if the sandbox connection was unreachable
-      ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
-      vars:
-        fail_if_unreachable_result_var: _guardian_findings_raw
       when: guardian_scan_available | bool
 
     # Caught by this task's own MR review: a scan that genuinely ran
@@ -590,8 +447,6 @@
       loop:
         - "{{ _guardian_input_file.path }}"
         - "{{ _guardian_json_output_file.path }}"
-      delegate_to: "{{ _guardian_scan_host }}"
-      ignore_unreachable: true
       ignore_errors: true
       register: _guardian_cleanup_result
 

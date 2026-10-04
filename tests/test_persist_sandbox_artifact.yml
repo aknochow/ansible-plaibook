@@ -1,0 +1,114 @@
+---
+# A sandboxed review must not SSH into the guest to write artifacts/.
+# That copy dies with the sandbox. The controller history write still
+# runs. An unsandboxed review still writes the CI copy into the checkout.
+#
+# Usage:
+#   ansible-playbook tests/test_persist_sandbox_artifact.yml
+
+- name: Test persist.yml skips the checkout artifact when sandboxed
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_write_artifact: true
+    review_org_repo: "test/persist-sandbox-artifact"
+    review_branch: "persist-sandbox-artifact"
+    review_short_sha: "abc1234"
+    review_number: "1"
+    review_verdict: "READY_FOR_HUMAN_REVIEW"
+    score_overall: 90.0
+    score_functionality: 90.0
+    score_security: 90.0
+    score_quality: 90.0
+    findings_critical: []
+    findings_major: []
+    findings_minor: []
+    findings_nit: []
+    deduped_findings: []
+    review_diff_stats: {}
+    review_diff_categories: {}
+    review_completeness_checks: { deleted_files: [], todo_fixme: [], trailing_whitespace: 0 }
+    review_neutralization_check: { triggered: false, remaining_refs: [] }
+    review_checklist: { triggered: false, results: [] }
+    briefing_project: "test/persist-sandbox-artifact"
+    briefing_branch: "persist-sandbox-artifact"
+    briefing_commit: "abc1234"
+    review_context: ""
+    fence: "```"
+    guardian_scan_available: false
+    guardian_scan_skip_reason: "review_guardian_scan_enabled is false"
+    guardian_findings: []
+    guardian_scan_truncated: false
+    guardian_blocking_findings: []
+
+  tasks:
+    - name: Register a sandbox host that must not be contacted
+      ansible.builtin.add_host:
+        name: fake_unreachable_persist
+        ansible_host: "does-not-exist.invalid"
+        ansible_connection: ssh
+        ansible_ssh_common_args: >-
+          -o ConnectTimeout=1 -o ConnectionAttempts=1
+          -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+          -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR
+
+    - name: Create a throwaway checkout and review_output_base
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: "{{ item }}"
+      loop:
+        - persist-sandbox-checkout-
+        - persist-sandbox-output-
+      register: fixture_dirs
+
+    - name: Point the review at those directories
+      ansible.builtin.set_fact:
+        review_repo_path: "{{ fixture_dirs.results[0].path }}"
+        review_output_base: "{{ fixture_dirs.results[1].path }}"
+        pipeline_findings_reports: []
+        review_delegate_host: fake_unreachable_persist
+
+    - name: Persist while a delegate host is set
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: persist
+        public: true
+
+    - name: Stat the checkout artifacts directory after the sandboxed persist
+      ansible.builtin.stat:
+        path: "{{ review_repo_path }}/artifacts"
+      register: _sandboxed_artifacts
+
+    - name: Assert the guest artifact was not written and the controller copy was
+      ansible.builtin.assert:
+        that:
+          - not _sandboxed_artifacts.stat.exists
+          - review_findings_path is file
+
+    - name: Persist again with no delegate host
+      ansible.builtin.set_fact:
+        review_delegate_host: ""
+    - name: Include persist for the unsandboxed checkout write
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: persist
+        public: true
+
+    - name: Stat the unsandboxed checkout artifact
+      ansible.builtin.stat:
+        path: "{{ review_repo_path }}/artifacts/{{ review_artifact_filename }}"
+      register: _local_artifact
+
+    - name: Assert the unsandboxed CI copy landed in the checkout
+      ansible.builtin.assert:
+        that:
+          - _local_artifact.stat.exists
+          - _local_artifact.stat.isreg
+
+    - name: Clean up the fixture directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ fixture_dirs.results }}"

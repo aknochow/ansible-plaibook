@@ -341,7 +341,8 @@ review_debug_dump_prompts: false
 # Writes a second copy of the findings report into the checkout itself
 # for CI consumption, see persist.yml's header comment. Defaults on
 # since it's a plain additive file write with no effect on the
-# reviewer-history path.
+# reviewer-history path. Sandboxed runs skip it: the guest copy does
+# not survive teardown, and writing it is two SSH sessions.
 review_write_artifact: true
 
 # Pattern: code-review_<repo-branch>_job<N>.md. review_branch already
@@ -500,10 +501,12 @@ review_structured_output_max_attempts: 3
 # review_explore_enabled/review_verify_enabled: set false on a host
 # without ai-guardian installed rather than let every review fail-open
 # silently on a missing binary with no visible signal either way.
-# Unsandboxed runs (use_sandbox=false / review_delegate_host empty)
-# never self-install; missing binary is reported as
-# "ai-guardian not installed" and the scan is skipped. Sandboxed runs
-# still self-install when the binary is absent from the scan host.
+# The scan runs on the controller whether or not the review is sandboxed.
+# review_delegate_host is not the scan host. When the default binary name
+# is missing, guardian_scan.yml installs it into
+# ~/.cache/ansible-plaibook/ai-guardian. A binary already on PATH is
+# used as-is. An overridden review_guardian_binary that is missing is
+# reported as "ai-guardian not installed" and is not installed.
 review_guardian_scan_enabled: true
 # Binary name on PATH. Tests override this to a name that is never
 # installed so the missing-binary path always runs.

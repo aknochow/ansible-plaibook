@@ -87,79 +87,66 @@
       - not (review_source_ref | trim).startswith('-')
     fail_msg: "review_target_ref/review_source_ref must not start with '-' (possible git option injection)"
 
-# Trailing "--" on every git diff call below disambiguates the two
-# preceding args as refs, never paths, regardless of whether a file in
-# the repo happens to share a name with a ref. Defense in depth on top
-# of the leading-dash assert above: the assert guards option
-# injection, "--" guards ref/path ambiguity.
-- name: Fetch the full diff
+# One delegated session for every git diff, the commit count, and the
+# marker/diff-file reads. Each session on this gateway costs about 30s,
+# and an unreachable sandbox used to pay that timeout once per command
+# (four diffs, the file read, and rev-list) before the checklist. The
+# script keeps the same git argv, including the trailing "--" so the
+# two refs cannot be parsed as paths. The leading-dash assert above
+# still guards option injection. skills/ and evals/ paths stay in the
+# file list and are left out of the file-body map.
+# Checklist execution stays its own delegated module call further down:
+# those commands run untrusted project code and must stay in the sandbox.
+- name: Fetch the diff, commit count, and checkout text in one command
   ansible.builtin.command:
-    argv: [git, diff, "{{ review_target_ref }}", "{{ review_source_ref }}", --]
-    chdir: "{{ review_repo_path }}"
+    argv:
+      - python3
+      - -c
+      - "{{ lookup('ansible.builtin.file', role_path + '/files/briefing_snapshot.py') }}"
+      - "{{ review_repo_path }}"
+      - "{{ review_target_ref }}"
+      - "{{ review_source_ref }}"
+    stdin: >-
+      {{
+        {
+          'markers': [
+            'go.mod',
+            'PROJECT',
+            'galaxy.yml',
+            'galaxy.yaml',
+            'pyproject.toml',
+            'setup.py',
+            'setup.cfg',
+            'review-checklist.md'
+          ]
+        } | to_json
+      }}
   delegate_to: "{{ review_delegate_host | default(omit, true) }}"
   ignore_unreachable: true
   changed_when: false
-  register: _full_diff_result
+  register: _briefing_snapshot_result
   timeout: 120
 
 - name: Fail loudly if the sandbox connection was unreachable
   ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
   vars:
-    fail_if_unreachable_result_var: _full_diff_result
+    fail_if_unreachable_result_var: _briefing_snapshot_result
 
-- name: Fetch the list of changed files
-  ansible.builtin.command:
-    argv: [git, diff, --name-only, "{{ review_target_ref }}", "{{ review_source_ref }}", --]
-    chdir: "{{ review_repo_path }}"
-  delegate_to: "{{ review_delegate_host | default(omit, true) }}"
-  ignore_unreachable: true
-  changed_when: false
-  register: _diff_files_result
-  timeout: 120
-
-- name: Fail loudly if the sandbox connection was unreachable
-  ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
-  vars:
-    fail_if_unreachable_result_var: _diff_files_result
-
-- name: Fetch per-file diff stats
-  ansible.builtin.command:
-    argv: [git, diff, --numstat, "{{ review_target_ref }}", "{{ review_source_ref }}", --]
-    chdir: "{{ review_repo_path }}"
-  delegate_to: "{{ review_delegate_host | default(omit, true) }}"
-  ignore_unreachable: true
-  changed_when: false
-  register: _diff_numstat_result
-  timeout: 120
-
-- name: Fail loudly if the sandbox connection was unreachable
-  ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
-  vars:
-    fail_if_unreachable_result_var: _diff_numstat_result
-
-- name: Fetch the list of deleted files
-  ansible.builtin.command:
-    argv: [git, diff, --diff-filter=D, --name-only, "{{ review_target_ref }}", "{{ review_source_ref }}", --]
-    chdir: "{{ review_repo_path }}"
-  delegate_to: "{{ review_delegate_host | default(omit, true) }}"
-  ignore_unreachable: true
-  changed_when: false
-  register: _deleted_files_result
-  timeout: 120
-
-- name: Fail loudly if the sandbox connection was unreachable
-  ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
-  vars:
-    fail_if_unreachable_result_var: _deleted_files_result
+- name: Parse the briefing snapshot
+  ansible.builtin.set_fact:
+    _briefing_snapshot: "{{ _briefing_snapshot_result.stdout | from_json }}"
 
 - name: Set the real diff content and file list facts
   ansible.builtin.set_fact:
-    review_full_diff: "{{ _full_diff_result.stdout }}"
-    review_diff_files: "{{ _diff_files_result.stdout_lines }}"
+    review_full_diff: "{{ _briefing_snapshot.diff }}"
+    review_diff_files: "{{ _briefing_snapshot.name_only }}"
+    _marker_file_exists: "{{ _briefing_snapshot.markers }}"
+    _go_mod_content: "{{ _briefing_snapshot.go_mod }}"
+    _diff_file_contents: "{{ _briefing_snapshot.files }}"
 
 - name: Parse the per-file diff stats
   parse_diff_stat:
-    numstat_output: "{{ _diff_numstat_result.stdout }}"
+    numstat_output: "{{ _briefing_snapshot.numstat }}"
   register: _diff_stat_result
 
 - name: Categorize the changed files
@@ -171,7 +158,7 @@
 - name: Check diff completeness
   check_diff_completeness:
     diff_content: "{{ review_full_diff }}"
-    deleted_files: "{{ _deleted_files_result.stdout_lines }}"
+    deleted_files: "{{ _briefing_snapshot.deleted }}"
   register: _diff_completeness_result
 
 # diff_stats/diff_categories are summary.json-only structured metrics;
@@ -197,84 +184,25 @@
         'trailing_whitespace': _diff_completeness_result.trailing_whitespace | int
       } }}
 
-# One SSH session for every marker and diff file. A loop of stat/slurp
-# opens a new session per path, and each session on this gateway costs
-# about 30s. The run on 79fe397 spent 1739s in the diff-file stat loop
-# and 243s stating eight marker files, then lost SSH.
-- name: Exclude skill/eval paths from content-detection I/O
-  ansible.builtin.set_fact:
-    _content_detection_files: "{{ review_diff_files | reject('search', '(^|/)(skills|evals)/') | list }}"
-
-- name: Read marker files and diff-file contents in one command
-  ansible.builtin.command:
-    argv:
-      - python3
-      - -c
-      - "{{ lookup('ansible.builtin.file', role_path + '/files/read_checkout_files.py') }}"
-      - "{{ review_repo_path }}"
-    stdin: >-
-      {{
-        {
-          'markers': [
-            'go.mod',
-            'PROJECT',
-            'galaxy.yml',
-            'galaxy.yaml',
-            'pyproject.toml',
-            'setup.py',
-            'setup.cfg',
-            'review-checklist.md'
-          ],
-          'files': _content_detection_files
-        } | to_json
-      }}
-  delegate_to: "{{ review_delegate_host | default(omit, true) }}"
-  ignore_unreachable: true
-  changed_when: false
-  register: _checkout_read
-  timeout: 120
-
-- name: Fail loudly if the sandbox connection was unreachable
-  ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
-  vars:
-    fail_if_unreachable_result_var: _checkout_read
-
-- name: Store marker existence, go.mod text, and diff-file contents
-  ansible.builtin.set_fact:
-    _marker_file_exists: "{{ (_checkout_read.stdout | from_json).markers }}"
-    _go_mod_content: "{{ (_checkout_read.stdout | from_json).go_mod }}"
-    _diff_file_contents: "{{ (_checkout_read.stdout | from_json).files }}"
-
 - name: Detect the project type
   detect_project_type:
     file_exists: "{{ _marker_file_exists }}"
     go_mod_content: "{{ _go_mod_content }}"
   register: _project_type_result
 
-- name: Count total commits to detect a brand-new repo
-  ansible.builtin.command:
-    argv: [git, rev-list, --count, HEAD]
-    chdir: "{{ review_repo_path }}"
-  delegate_to: "{{ review_delegate_host | default(omit, true) }}"
-  ignore_unreachable: true
-  changed_when: false
-  failed_when: false
-  register: _commit_count_result
-  timeout: 120
-
-# failed_when: false above absorbs an ordinary non-zero exit (handled
-# below by rc == 0), but not an UNREACHABLE sandbox connection, a
-# different failure class that still needs its own explicit check.
-- name: Fail loudly if the sandbox connection was unreachable
-  ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
-  vars:
-    fail_if_unreachable_result_var: _commit_count_result
-
+# rev-list failure used to be failed_when: false (a missing HEAD is
+# "not a brand-new repo", not a failed review). The snapshot keeps that
+# rc instead of failing the play. An unreachable sandbox is already
+# rejected above.
 - name: Detect diff domains
   detect_diff_domains:
     diff_files: "{{ review_diff_files }}"
     file_contents: "{{ _diff_file_contents }}"
-    is_new_repo: "{{ (_commit_count_result.rc == 0) and ((_commit_count_result.stdout | trim | int) <= 10) }}"
+    is_new_repo: >-
+      {{
+        (_briefing_snapshot.commit_count.rc | int) == 0
+        and (_briefing_snapshot.commit_count.stdout | trim | int) <= 10
+      }}
   register: _diff_domains_result
 
 - name: Set briefing_type/briefing_domains/briefing_has_checklist from the real detection
