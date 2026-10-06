@@ -232,7 +232,7 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
     review.add_argument(
         "--notes",
         dest="review_extra_notes",
-        help="Trusted operator notes for this run (JSON extra-vars, colons are safe).",
+        help="Trusted operator notes for this run. A colon in the text is kept.",
     )
     review.add_argument(
         "--post",
