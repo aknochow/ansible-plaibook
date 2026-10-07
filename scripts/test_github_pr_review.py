@@ -313,7 +313,10 @@ def test_fill_pull_request_skips_a_fork(monkeypatch):
             "trigger": "pull_request_target",
         }
     )
-    assert resolved["action"] == "skip"
+    assert resolved == {
+        "action": "skip",
+        "reason": "pull request head is not in this repository",
+    }
 
 
 def test_fill_pull_request_reviews_a_maintainer_fork_from_a_comment(monkeypatch):
@@ -344,7 +347,57 @@ def test_fill_pull_request_skips_an_outside_fork_comment(monkeypatch):
     resolved = fill_pull_request(
         {"action": "review", "repo": "aknochow/ansible-plaibook", "pr": "79", "sha": "", "trigger": "issue_comment"}
     )
-    assert resolved["action"] == "skip"
+    assert resolved == {
+        "action": "skip",
+        "reason": "pull request head is not in this repository",
+    }
+
+
+def test_fill_pull_request_skips_a_fork_comment_with_no_association(monkeypatch):
+    """A missing or blank association is not treated as a maintainer."""
+
+    def fake_request(method, url, payload=None):
+        return 200, {
+            "head": {"sha": "a" * 40, "repo": {"full_name": "contributor/ansible-plaibook"}},
+        }, ""
+
+    monkeypatch.setattr("github_pr_review._request", fake_request)
+    resolved = fill_pull_request(
+        {"action": "review", "repo": "aknochow/ansible-plaibook", "pr": "79", "sha": "", "trigger": "issue_comment"}
+    )
+    assert resolved == {
+        "action": "skip",
+        "reason": "pull request author_association is missing",
+    }
+
+    def blank_request(method, url, payload=None):
+        return 200, {
+            "author_association": "  ",
+            "head": {"sha": "a" * 40, "repo": {"full_name": "contributor/ansible-plaibook"}},
+        }, ""
+
+    monkeypatch.setattr("github_pr_review._request", blank_request)
+    resolved = fill_pull_request(
+        {"action": "review", "repo": "aknochow/ansible-plaibook", "pr": "79", "sha": "", "trigger": "issue_comment"}
+    )
+    assert resolved["reason"] == "pull request author_association is missing"
+
+    def target_request(method, url, payload=None):
+        return 200, {
+            "head": {"sha": "a" * 40, "repo": {"full_name": "contributor/ansible-plaibook"}},
+        }, ""
+
+    monkeypatch.setattr("github_pr_review._request", target_request)
+    resolved = fill_pull_request(
+        {
+            "action": "review",
+            "repo": "aknochow/ansible-plaibook",
+            "pr": "79",
+            "sha": "",
+            "trigger": "pull_request_target",
+        }
+    )
+    assert resolved["reason"] == "pull request head is not in this repository"
 
 
 def test_fill_pull_request_uses_the_same_repo_head(monkeypatch):

@@ -384,15 +384,38 @@ def _foreign_head(pull: dict[str, Any], repo: str) -> dict[str, str] | None:
     return None
 
 
-def _maintainer_fork_comment(resolved: dict[str, str], pull: dict[str, Any]) -> bool:
-    """A /plai-review comment may review a fork opened by a maintainer.
+def _author_association(pull: dict[str, Any]) -> str | None:
+    """Return a non-blank association, or None when the field is absent."""
+    if "author_association" not in pull:
+        return None
+    raw = pull.get("author_association")
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return text or None
 
-    pull_request_target stays same-repository. The comment author is
-    already limited to OWNER, MEMBER, and COLLABORATOR. The pull request
-    author must be one of those too, so an outside fork still skips.
+
+def _fork_skip(resolved: dict[str, str], pull: dict[str, Any], repo: str) -> dict[str, str] | None:
+    """Skip a foreign head. A missing association has its own reason.
+
+    pull_request_target skips every foreign head. An issue_comment reviews
+    a foreign head only when the pull request author is OWNER, MEMBER, or
+    COLLABORATOR. A missing or blank association is not one of those. That
+    comment skips as ``pull request author_association is missing`` so an
+    API omission is not reported as an ordinary outside fork. A present
+    association outside that set keeps the foreign-head reason.
     """
-    association = str(pull.get("author_association") or "")
-    return resolved.get("trigger") == "issue_comment" and association in _ALLOWED_ASSOCIATION
+    foreign = _foreign_head(pull, repo)
+    if foreign is None:
+        return None
+    if resolved.get("trigger") != "issue_comment":
+        return foreign
+    association = _author_association(pull)
+    if association in _ALLOWED_ASSOCIATION:
+        return None
+    if association is None:
+        return {"action": "skip", "reason": "pull request author_association is missing"}
+    return foreign
 
 
 def _resolve_target_pull(event_name: str, event: dict[str, Any], repo: str) -> dict[str, str]:
@@ -540,8 +563,8 @@ def fill_pull_request(resolved: dict[str, str]) -> dict[str, str]:
         status, payload, _link = _request("GET", f"{_api(repo)}/pulls/{pr}")
         if status != 200 or not isinstance(payload, dict):
             raise RuntimeError(f"unable to read pull request {pr}")
-        foreign = _foreign_head(payload, repo)
-        if foreign and not _maintainer_fork_comment(resolved, payload):
+        foreign = _fork_skip(resolved, payload, repo)
+        if foreign:
             return foreign
         merge_sha = _merge_sha(payload)
         if not _SHA.fullmatch(sha):
@@ -554,8 +577,8 @@ def fill_pull_request(resolved: dict[str, str]) -> dict[str, str]:
         chosen = open_prs or [item for item in payload if isinstance(item, dict)]
         if not chosen:
             return {"action": "skip", "reason": "no pull request for this SHA"}
-        foreign = _foreign_head(chosen[0], repo)
-        if foreign and not _maintainer_fork_comment(resolved, chosen[0]):
+        foreign = _fork_skip(resolved, chosen[0], repo)
+        if foreign:
             return foreign
         merge_sha = _merge_sha(chosen[0])
         pr = str(chosen[0].get("number") or "")
