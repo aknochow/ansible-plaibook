@@ -16,6 +16,10 @@ pipx install plaibook
 plai review
 ```
 
+`plai --version` prints `plaibook 0.1.26` for that PyPI install. A git
+install of the same tree prints the revision and a short commit, for
+example `plaibook 0.1.26 (dev, main@664b8e1d39ac)`.
+
 `plai review` is unchanged. Homebrew and Debian
 refuse `pip install` into the system Python (PEP 668); `pipx` (or
 `uv tool install plaibook`) is the install that puts `plai` on `PATH`.

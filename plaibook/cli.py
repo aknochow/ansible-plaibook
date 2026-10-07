@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from plaibook import __version__
+from plaibook import version_text
 from plaibook.collections import CollectionInstallError, ensure_collections
 from plaibook.config import (
     FAMILIES,
@@ -119,7 +119,7 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"plaibook {__version__}",
+        version=version_text(),
     )
     sub = parser.add_subparsers(dest="command")
 
