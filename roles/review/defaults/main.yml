@@ -586,10 +586,18 @@ review_guardian_pip_timeout_seconds: 60
 # tokens (ghp_, glpat-, sk-ant-, AKIA, PEM private keys) block even
 # when the surrounding text is an env assignment.
 #
+# After verify, remaining blocking hits are classified locally. The
+# captured snippet is not sent to a model. A hit is cleared only when
+# the value is a placeholder or variable reference. credentials-in-git-url
+# and prefix-backed tokens stay blocking.
+#
 # A list, not a single hardcoded value, so adding another confirmed-
 # reliable blocking category later is a config change, not a code
 # change, and so the actual rule_id string lives in exactly one place.
 review_guardian_blocking_rule_ids: ["SECRET-001"]
+# Later agent pass over guardian_blocking_findings. False drops only
+# hits that are not prefix-backed tokens or git userinfo URLs.
+review_guardian_adjudicate_enabled: true
 # ai-guardian details.secret_type (toml rule id). SECRET-001 findings
 # with these subtypes still appear in findings.md; they do not override
 # the lens verdict.

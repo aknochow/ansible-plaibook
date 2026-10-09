@@ -525,6 +525,45 @@ def test_blocking_guardian_findings_uses_message_when_details_missing():
     assert [item["message"] for item in blocking] == ["Secret detected: Credentials In Git Url"]
 
 
+def test_apply_guardian_judgments_drops_false_positives_and_keeps_prefix_tokens():
+    mod = _filter()
+    findings = [
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+            "snippet": "export FOO=${FOO}",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+            "snippet": "export GITHUB_TOKEN=ghp_x",
+        },
+        {
+            "rule_id": "SECRET-001",
+            "message": "Secret detected: Environment Variable",
+            "details": {"secret_type": "env-variable"},
+            "snippet": "export TOKEN=literal-value",
+        },
+    ]
+    result = mod.apply_guardian_judgments(
+        findings,
+        [
+            {"index": 0, "valid_secret": True, "reason": "model called it real"},
+            {"index": 1, "valid_secret": False, "reason": "agent was wrong"},
+            {"index": 2, "valid_secret": False, "reason": "agent cannot clear a credential name"},
+        ],
+    )
+    assert [item["snippet"] for item in result["kept"]] == [
+        "export GITHUB_TOKEN=ghp_x",
+        "export TOKEN=literal-value",
+    ]
+    assert result["notes"][0]["kept"] is False
+    assert result["notes"][1]["kept"] is True
+    assert result["notes"][2]["kept"] is True
+
+
 def test_placeholder_userinfo_is_preserved():
     mod = _filter()
     # PASSWORD is an ai-guardian placeholder; host is concatenated so this

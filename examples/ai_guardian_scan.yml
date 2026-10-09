@@ -237,7 +237,7 @@
                 argv: [pip3, download, --no-deps, -d, /tmp/ai-guardian-wheelhouse, "ai-guardian=={{ ai_guardian_version }}"]
               changed_when: true
               vars:
-                ai_guardian_version: "1.15.0"
+                ai_guardian_version: "1.19.0"
 
             - name: Download ai-guardian's minimal runtime deps
               ansible.builtin.command:
@@ -278,7 +278,7 @@
               register: _guardian_install_result
               changed_when: true
               vars:
-                ai_guardian_version: "1.15.0"
+                ai_guardian_version: "1.19.0"
 
             - name: Fail loudly if the sandbox connection was unreachable
               ansible.builtin.include_tasks: ../roles/review/tasks/fail_if_sandbox_unreachable.yml

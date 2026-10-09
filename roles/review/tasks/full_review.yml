@@ -124,6 +124,9 @@
 # belongs at the orchestration level, same separation of concerns
 # verify.yml's own scores/verdict recompute already has from merge.yml's
 # initial computation.
+- name: Review blocking ai-guardian hits before they force the verdict
+  ansible.builtin.include_tasks: adjudicate_guardian.yml
+
 - name: Enforce SECRET-001-class ai-guardian findings as a blocking verdict
   ansible.builtin.include_tasks: guardian_scan_enforce_verdict.yml
 

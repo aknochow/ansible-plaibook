@@ -9,4 +9,4 @@
 #     --implementation py --abi none --only-binary=:all: \
 #     -d <dir> ai-guardian==<new-version>
 #   shasum -a 256 <dir>/*.whl
-ai-guardian==1.15.0 --hash=sha256:bed4d5bd5c1532feced9ee6f7d751692a29ae9950d2e6192cebecf6356cb14fb
+ai-guardian==1.19.0 --hash=sha256:8dea49db3d79ad9522faddfaecd4eab9408293491e588ce40c0439a55cc920cf

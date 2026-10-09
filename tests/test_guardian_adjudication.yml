@@ -1,0 +1,85 @@
+---
+# A blocking env-variable hit that is a code constant is cleared by the
+# later agent pass. A prefix-backed token stays blocking even when the
+# stub says it is not a secret. Requires the cursor agent stub.
+
+- name: Guardian adjudication clears a false positive and keeps a prefix token
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    agent_family: cursor
+    review_cursor_api_key: stub-not-a-real-key
+    review_cursor_model: gpt-5.6-luna
+    review_cursor_effort: high
+    review_repo_path: "{{ playbook_dir }}"
+    review_org_repo: aknochow/ansible-plaibook
+    review_number: "97"
+    cursor_agent_module: cursor_agent_stub
+    cursor_agent_stub_file: "{{ lookup('ansible.builtin.env', 'CURSOR_AGENT_STUB_FILE') | default(playbook_dir ~ '/.cursor_agent_stub.json', true) }}"
+    review_guardian_adjudicate_enabled: true
+    _false_positive:
+      rule_id: SECRET-001
+      message: "Secret detected: Environment Variable"
+      snippet: "export FOO=${FOO}"
+      details:
+        secret_type: env-variable
+    _prefix_token:
+      rule_id: SECRET-001
+      message: "Secret detected: Environment Variable"
+      snippet: "export GITHUB_TOKEN=ghp_x"
+      details:
+        secret_type: env-variable
+
+  environment:
+    CURSOR_AGENT_STUB_FILE: "{{ cursor_agent_stub_file }}"
+
+  tasks:
+    - name: Write a stub that clears every guardian hit
+      ansible.builtin.copy:
+        dest: "{{ cursor_agent_stub_file }}"
+        mode: "0600"
+        content: "{{ _stub | to_json }}"
+      vars:
+        _stub:
+          status: finished
+          resolved_model: gpt-5.6-luna
+          usage_normalized:
+            input_tokens: 3
+            output_tokens: 1
+            cache_write_tokens: 0
+            cache_read_tokens: 0
+            thinking_tokens: 0
+            total_tokens: 4
+          structured_tool_calls:
+            - name: judge_guardian_hit
+              caller: nested
+              agent_id:
+              args:
+                valid_secret: false
+                reason: code constant
+
+    - name: Adjudicate a code constant and a prefix-backed token
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: adjudicate_guardian
+      vars:
+        guardian_blocking_findings:
+          - "{{ _false_positive }}"
+          - "{{ _prefix_token }}"
+
+    - name: Confirm only the prefix-backed token still blocks
+      ansible.builtin.assert:
+        that:
+          - guardian_blocking_findings | length == 1
+          - "'ghp_x' in guardian_blocking_findings[0].snippet"
+          - guardian_adjudications | length == 2
+          - not (guardian_adjudications[0].kept | bool)
+          - guardian_adjudications[1].kept | bool
+        fail_msg: >-
+          A placeholder guardian hit must be cleared and a prefix-backed
+          token must stay blocking. A literal stays even if the agent says no.
+          kept={{ guardian_blocking_findings | default([]) }}
+          notes={{ guardian_adjudications | default([]) }}
+        success_msg: "Guardian adjudication cleared the false positive and kept the prefix token."

@@ -1,0 +1,34 @@
+---
+# Later agent pass over hits that would force NEEDS_CHANGES.
+# Runs after verify and before guardian_scan_enforce_verdict.yml.
+# No model call. A hit is cleared only when the captured value is a
+# variable reference or placeholder. Prefix-backed tokens and git
+# userinfo stay blocking.
+
+- name: Skip guardian adjudication when it is disabled or there is nothing to judge
+  when: >-
+    (review_guardian_adjudicate_enabled | default(true) | bool)
+    and (guardian_blocking_findings | default([]) | length > 0)
+  block:
+    - name: Reset guardian adjudication notes for this target
+      ansible.builtin.set_fact:
+        guardian_adjudications: []
+        _guardian_judged_blocking: []
+
+    - name: Classify each blocking guardian hit locally
+      ansible.builtin.include_tasks: adjudicate_one_guardian_finding.yml
+      loop: "{{ guardian_blocking_findings }}"
+      loop_control:
+        loop_var: guardian_hit
+        index_var: guardian_hit_index
+        label: "{{ guardian_hit.rule_id | default('guardian') }}"
+
+    - name: Apply agent judgments to the blocking set
+      ansible.builtin.set_fact:
+        _guardian_judgment_applied: >-
+          {{ guardian_blocking_findings | apply_guardian_judgments(guardian_adjudications) }}
+
+    - name: Keep only guardian hits the agent did not clear
+      ansible.builtin.set_fact:
+        guardian_blocking_findings: "{{ _guardian_judgment_applied.kept }}"
+        guardian_adjudications: "{{ _guardian_judgment_applied.notes }}"

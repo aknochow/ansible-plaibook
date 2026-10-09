@@ -1,0 +1,17 @@
+---
+# One blocking guardian hit. Classification is local. The captured
+# message and snippet are not sent to a model: a SECRET-001 hit can
+# contain the credential, and repository text in that snippet is not
+# instructions we will execute. apply_guardian_judgments clears a hit
+# only when the value is a placeholder or variable reference.
+
+- name: Record a local judgment for this guardian hit
+  ansible.builtin.set_fact:
+    guardian_hit_judgment:
+      index: "{{ guardian_hit_index }}"
+      valid_secret: true
+      reason: "local classification only; a literal stays blocking"
+
+- name: Append this guardian judgment
+  ansible.builtin.set_fact:
+    guardian_adjudications: "{{ guardian_adjudications + [guardian_hit_judgment] }}"
