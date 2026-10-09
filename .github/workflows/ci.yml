@@ -15,6 +15,12 @@ jobs:
     # status checks on main. Jobs on any other runner include the OS.
     name: "${{ matrix.os == 'ubuntu-latest' && format('Test (Python {0})', matrix.python-version) || format('Test (Python {0}, {1})', matrix.python-version, matrix.os) }}"
     runs-on: ${{ matrix.os }}
+    # Actions injects GITHUB_TOKEN into every step. This job runs the
+    # pull request's own scripts. Blank the token so that code cannot
+    # read it. actions/checkout still gets github.token as its action
+    # input. Collection clones are public GitHub mirrors.
+    env:
+      GITHUB_TOKEN: ""
     strategy:
       fail-fast: false
       matrix:
@@ -30,6 +36,10 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4.2.2
+        with:
+          # Checkout writes the token into .git/config by default. Later
+          # steps run this pull request's code, so do not leave it there.
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
@@ -54,7 +64,6 @@ jobs:
       - name: Install required collections
         env:
           GIT_TERMINAL_PROMPT: "0"
-          GITHUB_TOKEN: ${{ github.token }}
           PLAIBOOK_COLLECTIONS_DEST: ${{ runner.temp }}/plaibook-collections
         run: |
           dest="${PLAIBOOK_COLLECTIONS_DEST}"
@@ -95,6 +104,10 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4.2.2
+        with:
+          # Checkout writes the token into .git/config by default. Later
+          # steps run this pull request's code, so do not leave it there.
+          persist-credentials: false
 
       - name: Scan locked uv.lock with OSV-Scanner
         uses: google/osv-scanner-action/osv-scanner-action@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
@@ -115,6 +128,10 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4.2.2
+        with:
+          # Checkout writes the token into .git/config by default. Later
+          # steps run this pull request's code, so do not leave it there.
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
@@ -133,3 +150,85 @@ jobs:
           .venv-legacy/bin/python -m pip install . --no-build-isolation --no-deps
           test -x .venv-legacy/bin/plai
           .venv-legacy/bin/python -c "from importlib.metadata import version; print(version('plaibook'))"
+
+  # The locked ansible-core follows pyproject markers (2.16 on 3.10, 2.19 on
+  # 3.11+). This job overrides that pin and runs the offline playbooks so a
+  # 2.19-only task keyword cannot land quietly. ansible-lint is not run here:
+  # current ansible-lint forbids 2.17, and the Test job already lints the
+  # locked core. requires-python: 2.16/2.17 need >=3.10, 2.18/2.19 need >=3.11.
+  # 2.16 is not paired with 3.13.
+  ansible-compat:
+    name: Ansible ${{ matrix.ansible-core }} (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    # Same token blank as the Test job. Do not pass github.token into
+    # scripts/ci-install-collections.py from the pull request.
+    env:
+      GITHUB_TOKEN: ""
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ansible-core: "2.16.19"
+            python-version: "3.10"
+          - ansible-core: "2.16.19"
+            python-version: "3.12"
+          - ansible-core: "2.17.14"
+            python-version: "3.11"
+          - ansible-core: "2.18.19"
+            python-version: "3.12"
+          - ansible-core: "2.19.14"
+            python-version: "3.12"
+          - ansible-core: "2.19.14"
+            python-version: "3.13"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4.2.2
+        with:
+          # Checkout writes the token into .git/config by default. Later
+          # steps run this pull request's code, so do not leave it there.
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies with lockfile
+        run: uv sync --locked --extra dev --python ${{ matrix.python-version }}
+
+      - name: Install ansible-core ${{ matrix.ansible-core }}
+        run: uv pip install --python .venv "ansible-core==${{ matrix.ansible-core }}"
+
+      # uv run syncs uv.lock before the command and puts the locked
+      # ansible-core back (2.19.13 on Python 3.11+). --no-sync keeps the
+      # pin from the previous step. Python 3.10 already locks 2.16, which
+      # is why that one cell passed without this flag.
+      - name: Confirm ansible-core version
+        run: |
+          got="$(uv run --no-sync --python ${{ matrix.python-version }} python -c 'import ansible; print(ansible.__version__)')"
+          echo "ansible-core ${got}"
+          test "${got}" = "${{ matrix.ansible-core }}"
+
+      - name: Cache Ansible collections
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ${{ runner.temp }}/plaibook-collections
+          key: collections-${{ runner.os }}-${{ hashFiles('collections-requirements.yml', 'scripts/ci-install-collections.py', 'plaibook/collections.py') }}
+
+      - name: Install required collections
+        env:
+          GIT_TERMINAL_PROMPT: "0"
+          PLAIBOOK_COLLECTIONS_DEST: ${{ runner.temp }}/plaibook-collections
+        run: |
+          dest="${PLAIBOOK_COLLECTIONS_DEST}"
+          mkdir -p "$dest"
+          echo "ANSIBLE_COLLECTIONS_PATH=${dest}" >> "$GITHUB_ENV"
+          uv run --no-sync --python "${{ matrix.python-version }}" python scripts/ci-install-collections.py
+
+      - name: Run offline Ansible playbook tests
+        env:
+          ANSIBLE_COLLECTIONS_PATH: ${{ runner.temp }}/plaibook-collections
+        run: uv run --no-sync --python ${{ matrix.python-version }} ./scripts/run_playbook_tests.sh
