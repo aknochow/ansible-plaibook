@@ -71,17 +71,21 @@ def _is_external(dest: str) -> bool:
     return dest.startswith(("http://", "https://", "mailto:", "//"))
 
 
-def _links_contributing(destinations: list[str]) -> bool:
-    """True only for a relative link whose path is CONTRIBUTING.md.
+def _links_contributing(destinations: list[str], agents_md: Path) -> bool:
+    """True only for a relative link to this checkout's root CONTRIBUTING.md.
 
-    An external URL that happens to end in that filename does not count.
-    The file has to be the one in this checkout.
+    ``./CONTRIBUTING.md`` and ``CONTRIBUTING.md#section`` count. A different
+    file with the same name, a parent-directory link, and an external URL
+    that ends in that filename do not.
     """
+    required = (agents_md.parent / "CONTRIBUTING.md").resolve()
     for dest in destinations:
         if not dest or dest.startswith("#") or _is_external(dest):
             continue
         path = dest.split("#", 1)[0].split("?", 1)[0]
-        if Path(path).name == "CONTRIBUTING.md":
+        if not path or path.startswith("/"):
+            continue
+        if (agents_md.parent / path).resolve() == required:
             return True
     return False
 
@@ -163,7 +167,7 @@ def check_agents_md(root: Path) -> list[str]:
     if agents.is_file():
         agents_text = agents.read_text(encoding="utf-8")
         destinations = _link_destinations(agents_text)
-        if not _links_contributing(destinations):
+        if not _links_contributing(destinations, agents):
             errors.append("AGENTS.md does not link CONTRIBUTING.md")
         errors.extend(_unresolved_relative_links(agents, destinations))
         contributing = root / "CONTRIBUTING.md"
@@ -244,6 +248,37 @@ def test_external_link_is_not_required_to_exist_locally(tmp_path: Path) -> None:
         f"rules\n\n{_COMMANDS}\n",
     )
     assert check_agents_md(tmp_path) == []
+
+
+def test_dot_slash_and_anchor_contributing_links_count(tmp_path: Path) -> None:
+    _write_tree(
+        tmp_path,
+        "[CONTRIBUTING.md](./CONTRIBUTING.md#branch-names)\n\n" f"## Commands\n\n{_COMMANDS}\n",
+        f"rules\n\n{_COMMANDS}\n",
+    )
+    assert check_agents_md(tmp_path) == []
+
+
+def test_nested_contributing_link_does_not_count(tmp_path: Path) -> None:
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "CONTRIBUTING.md").write_text("other\n", encoding="utf-8")
+    _write_tree(
+        tmp_path,
+        "[CONTRIBUTING.md](docs/CONTRIBUTING.md)\n\n" f"## Commands\n\n{_COMMANDS}\n",
+        f"rules\n\n{_COMMANDS}\n",
+    )
+    assert check_agents_md(tmp_path) == ["AGENTS.md does not link CONTRIBUTING.md"]
+
+
+def test_parent_contributing_link_does_not_count(tmp_path: Path) -> None:
+    _write_tree(
+        tmp_path,
+        "[CONTRIBUTING.md](../CONTRIBUTING.md)\n\n" f"## Commands\n\n{_COMMANDS}\n",
+        f"rules\n\n{_COMMANDS}\n",
+    )
+    errors = check_agents_md(tmp_path)
+    assert "AGENTS.md does not link CONTRIBUTING.md" in errors
 
 
 def test_external_contributing_link_does_not_count(tmp_path: Path) -> None:
