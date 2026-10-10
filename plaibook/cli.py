@@ -22,6 +22,7 @@ from plaibook.config import (
 )
 from plaibook.openshell_sdk import OpenshellSdkError, reexec_sandbox_runtime
 from plaibook.playbook import (
+    PlaybookInterruptedError,
     PlaybookNotFoundError,
     PlaybookTimeoutError,
     ScratchDirError,
@@ -629,6 +630,12 @@ def cmd_review(args: argparse.Namespace) -> int:
                 verbose=False,
                 env=_playbook_env(failures_path),
             )
+    except PlaybookInterruptedError:
+        # On the spinner path, WaitSpinner.__exit__ has already restored
+        # the terminal. Drop the unused failure log and exit 128+SIGINT.
+        if failures_path:
+            discard_task_failure_log(failures_path)
+        return 130
     except (PlaybookTimeoutError, ScratchDirError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         _emit_task_failures(
@@ -1001,15 +1008,20 @@ def _cmd_update_tool(args, installer, git_installer, version_of, spec_of, label:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
-    if args.command == "review":
-        return cmd_review(args)
-    elif args.command == "update":
-        return cmd_update(args)
-    else:
-        parser.print_help()
-        return 2
+    try:
+        parser = build_parser()
+        args = parser.parse_args(list(argv) if argv is not None else None)
+        if args.command == "review":
+            return cmd_review(args)
+        elif args.command == "update":
+            return cmd_update(args)
+        else:
+            parser.print_help()
+            return 2
+    except PlaybookInterruptedError:
+        return 130
+    except KeyboardInterrupt:
+        return 130
 
 
 if __name__ == "__main__":

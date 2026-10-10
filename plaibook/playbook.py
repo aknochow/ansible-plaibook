@@ -45,6 +45,14 @@ class PlaybookTimeoutError(TimeoutError):
         )
 
 
+class PlaybookInterruptedError(Exception):
+    """The operator interrupted ansible-playbook with Ctrl-C."""
+
+    def __init__(self, command: list[str]):
+        self.command = command
+        super().__init__("Interrupted")
+
+
 def generate_run_id() -> str:
     """Match the playbook's password-lookup run_id alphabet and length."""
     return "".join(secrets.choice(RUN_ID_CHARS) for _ in range(RUN_ID_LENGTH))
@@ -246,7 +254,13 @@ def run_ansible_playbook(
     env: dict[str, str] | None = None,
     home: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run ansible-playbook. Quiet mode captures output; -v inherits the TTY."""
+    """Run ansible-playbook. Quiet mode captures output; -v inherits the TTY.
+
+    A timeout or Ctrl-C kills the playbook process group. The child is
+    started in its own session, so the terminal SIGINT does not reach it.
+    Ctrl-C raises PlaybookInterruptedError (not KeyboardInterrupt) so the
+    CLI can exit 130 without printing a traceback.
+    """
     from plaibook.collections import merge_collections_path
 
     timeout = playbook_timeout_seconds()
@@ -271,4 +285,13 @@ def run_ansible_playbook(
     except subprocess.TimeoutExpired as exc:
         _kill_process_group(proc)
         raise PlaybookTimeoutError(timeout, command) from exc
+    except KeyboardInterrupt:
+        # The child session does not see this SIGINT. Ignore a second
+        # Ctrl-C until the group is killed so the CLI can exit 130.
+        previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        try:
+            _kill_process_group(proc)
+        finally:
+            signal.signal(signal.SIGINT, previous)
+        raise PlaybookInterruptedError(command) from None
     return subprocess.CompletedProcess(command, proc.returncode, stdout or "", stderr or "")
