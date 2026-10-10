@@ -13,6 +13,7 @@ import yaml
 from plaibook.cli import (
     _FAILURE_LOG_UNAVAILABLE,
     _emit_task_failures,
+    _parse_extra_var,
     _progress_line,
     _validate_review_args,
     ansible_verbosity,
@@ -149,6 +150,16 @@ def test_extra_vars_commit_and_pr_and_notes():
     assert pr["review_targets_raw"] == "org/repo/123"
     assert pr["review_extra_notes"] == "Note: intentional"
     assert pr["post_results"] is True
+    noted = build_parser(prog="plai").parse_args(
+        ["review", "org/repo/1", "--notes", "Note: this is intentional"]
+    )
+    assert noted.review_extra_notes == "Note: this is intentional"
+    assert _parse_extra_var("review_extra_notes=Note: this is intentional") == (
+        "review_extra_notes",
+        "Note: this is intentional",
+    )
+    with pytest.raises(ValueError, match="must be KEY=VALUE"):
+        _parse_extra_var('{"review_extra_notes": "Note: this is intentional"}')
     branch = extra_vars_from_args(_args(branch_target="org/repo@main"), "abc")
     assert branch["review_type"] == "branch"
     assert branch["branch_review_target"] == "org/repo@main"
