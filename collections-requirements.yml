@@ -9,8 +9,8 @@
 collections:
   - name: https://github.com/aknochow/ansible-openshell.git
     type: git
-    # SHA is ansible-openshell #34 on main.
-    version: 5956e3d679bd739f6a58e84699f18b5a1128aec0
+    # SHA is ansible-openshell #36 on main (openshell>=0.1.3,<0.2).
+    version: 494420ce471eb81f88e5860ad2155e13bd3cda97
   - name: https://github.com/aknochow/ansible-claude.git
     type: git
     # SHA is ansible-claude #30 on main (anthropic 1.11.0, claude-agent-sdk 0.2.163).
