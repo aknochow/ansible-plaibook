@@ -53,11 +53,13 @@ provider collection, and a provider collection does not import OpenShell.
    `requirements.txt` at the SHA in rule 1. Regenerate with
    `./scripts/compile-hashed-sdks.sh` after editing the matching
    `plaibook/hashed/*.in` file.
-4. The execution environment bakes a second, separate Python list in
-   `execution-environment.yml`. That list is not the hashed lock.
-   A package baked into the image should use the same range the
-   collection declares. Packages the image does not bake are installed
-   later from the hashed files, on the interpreter that runs the play.
+4. The execution environment installs
+   `execution-environment-requirements.txt` with
+   `pip install --require-hashes`. Direct pins are
+   `execution-environment-requirements.in`. That file is not
+   `plaibook/hashed`. Rebuild it with the `uv pip compile` command in
+   its header when a pin changes. An image pin has to satisfy the
+   collection range at the SHA in rule 1.
 5. OpenShell is three pins. The Python SDK, the gateway installer, and
    the sandbox image move separately. Matching the SDK to the gateway's
    major version is required. Copying one version number onto the
@@ -127,23 +129,26 @@ The gateway and the Python SDK share a major version (`0.1`). They do
 not share a patch number. Bumping the SDK to 0.1.3 does not by itself
 move the installer or the image digest.
 
-The execution environment bakes `openshell>=0.1.3,<0.2`. That matches
-the plaibook range. It does not match the range inside
+The image lock pins `openshell==0.1.3`. That matches the plaibook
+hashed install. It does not match the range inside
 `collection.openshell` until that SHA moves.
 
-## Execution environment gaps
+## Execution environment pins
 
-`execution-environment.yml` `dependencies.python` today:
+`execution-environment.yml` installs
+`execution-environment-requirements.txt`. These are the direct pins in
+`execution-environment-requirements.in`, next to the runtime hashed
+install. They are allowed to differ. A watcher should treat a
+difference as a bump to decide, not as the same pin.
 
-| Package | Baked range | Hashed install | Notes |
-|---|---|---|---|
-| anthropic | `anthropic>=0.84.0` | `anthropic==1.11.0` | Floor matches the collection. The image does not hash-pin it. |
-| openai | `openai>=1.0.0,<4.0.0` | `openai==3.23.0` | Wider than the collection floor `openai>=1.58.0`. |
-| openshell | `openshell>=0.1.3,<0.2` | `openshell==0.1.3` | Matches the plaibook range. |
-| kubernetes | unpinned name | not a hashed SDK | Present because `kubernetes.core` needs it. |
-| claude-agent-sdk | not baked | `claude-agent-sdk==0.2.163` | Installed later from the hashed file when that interpreter runs. |
-| google-genai | not baked | `google-genai==2.27.0` | Same. |
-| cursor-sdk | not baked | `cursor-sdk==1.0.35` | Same. |
+| Package | Image pin | Runtime hashed install |
+|---|---|---|
+| anthropic | `anthropic[vertex]==1.13.0` | `anthropic==1.11.0` |
+| claude-agent-sdk | `claude-agent-sdk==0.2.165` | `claude-agent-sdk==0.2.163` |
+| google-genai | `google-genai==2.29.0` | `google-genai==2.27.0` |
+| openai | `openai==3.28.0` | `openai==3.23.0` |
+| cursor-sdk | `cursor-sdk==1.0.37` | `cursor-sdk==1.0.35` |
+| openshell | `openshell==0.1.3` | `openshell==0.1.3` |
 
 ## Review workflow pins
 
@@ -172,4 +177,4 @@ A dependency watcher should open a bump when any of these is true:
 - An ansible-collections SHA no longer matches the release named in its comment.
 - The OpenShell Python SDK and `openshell.gateway` are on different major versions.
 - `review.caller` moved without `review.checkout`, or the caller is `@main`.
-- The baked execution-environment range for a package is wider than the collection range for that package.
+- An image pin in `execution-environment-requirements.in` does not satisfy the collection range, or it differs from the runtime hashed install for the same package and nobody has decided which one moves.

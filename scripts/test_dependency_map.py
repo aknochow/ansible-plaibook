@@ -48,6 +48,19 @@ def test_dependency_map_names_every_collection_sha():
     assert missing == []
 
 
+def test_dependency_map_names_image_pins():
+    text = MAP.read_text(encoding="utf-8")
+    pins = {}
+    for line in (ROOT / "execution-environment-requirements.in").read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#") or "==" not in stripped:
+            continue
+        name = stripped.split("==", 1)[0].split("[", 1)[0]
+        pins[name] = stripped
+    missing = [pins[name] for name in _DIRECT if pins[name] not in text]
+    assert missing == []
+
+
 def test_dependency_map_names_hashed_sdk_pins():
     text = MAP.read_text(encoding="utf-8")
     missing = [pin for name in _DIRECT if (pin := _hashed_pin(name)) not in text]
