@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yaml
 
@@ -104,6 +106,7 @@ def test_pr_workflow_builds_both_arches_and_does_not_push():
     assert "persist-credentials: false" in text
     assert "ignore-unfixed: \"true\"" in text or 'ignore-unfixed: "true"' in text
     assert "severity: HIGH,CRITICAL" in text
+    assert "--require-hashes -r .github/ee-builder-requirements.txt" in text
 
 
 def test_publish_workflow_signs_only_on_push_and_release():
@@ -125,8 +128,13 @@ def test_publish_workflow_signs_only_on_push_and_release():
     assert "cosign sign" in text
     assert "cosign attest" in text
     assert "cosign verify" in text
-    assert "https://token.actions.githubusercontent.com" in text
+    issuer = re.search(r"--certificate-oidc-issuer (\S+)", text)
+    assert issuer is not None
+    parsed = urlparse(issuer.group(1))
+    assert parsed.scheme == "https"
+    assert parsed.hostname == "token.actions.githubusercontent.com"
     assert "ee-publish.yml@${GITHUB_REF}" in text
+    assert "--require-hashes -r .github/ee-builder-requirements.txt" in text
     assert text.count("persist-credentials: false") == 3
     assert CHECKOUT in text
     arches = {row["arch"] for row in build["strategy"]["matrix"]["include"]}

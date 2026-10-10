@@ -10,6 +10,7 @@ on:
       - collections-requirements.yml
       - scripts/ee_smoke.py
       - scripts/ee_manifest_arches.py
+      - .github/ee-builder-requirements.txt
       - .github/workflows/ee.yml
       - .github/workflows/ee-publish.yml
 
@@ -38,7 +39,7 @@ jobs:
 
       - name: Install ansible-builder
         run: |
-          python3 -m pip install --user 'ansible-builder==3.1.1'
+          python3 -m pip install --user --require-hashes -r .github/ee-builder-requirements.txt
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Create build context
