@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -101,8 +102,48 @@ def test_readme_points_at_the_published_image():
     assert ":main" in section and ":latest" in section
     assert "ssh_proxy.py" in section
     assert "cosign verify" in section
-    assert "ansible-builder build -t <your-registry>/plaibook-ee:latest" in section
+    assert "ansible-builder build --squash all -t <your-registry>/plaibook-ee:latest" in section
+    assert "docs/execution-environment.md" in section
+    guide = (ROOT / "docs" / "execution-environment.md").read_text(encoding="utf-8")
+    assert "--pull-policy missing" not in guide
+    assert "--pull-policy always" in guide
+    assert 'ghcr.io/aknochow/plaibook-ee@${digest}' in guide
+    assert "cosign verify" in guide
+    assert "refs/tags/v${tag}" in guide
+    navigator = guide.index("ansible-navigator run review.yml")
+    assert guide.rindex("cosign verify", 0, navigator) < navigator
+    assert '"ghcr.io/aknochow/plaibook-ee@${digest}" &&' in guide
     assert "build/collections/*.tar.gz" not in section
+
+
+def test_failed_cosign_verify_does_not_start_navigator(tmp_path: Path):
+    guide = (ROOT / "docs" / "execution-environment.md").read_text(encoding="utf-8")
+    start = guide.index("```bash\n") + len("```bash\n")
+    script = guide[start : guide.index("```", start)]
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    marker = tmp_path / "navigator-ran"
+    (bindir / "podman").write_text(
+        "#!/bin/sh\nif [ \"$1\" = image ]; then echo sha256:abc; fi\nexit 0\n",
+        encoding="utf-8",
+    )
+    (bindir / "cosign").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    (bindir / "ansible-navigator").write_text(
+        f"#!/bin/sh\ntouch {marker}\nexit 0\n",
+        encoding="utf-8",
+    )
+    for path in bindir.iterdir():
+        path.chmod(0o755)
+    completed = subprocess.run(
+        ["bash", "-c", script],
+        check=False,
+        cwd=tmp_path,
+        env={"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(tmp_path)},
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    assert not marker.exists()
 
 
 def test_pr_workflow_builds_both_arches_and_does_not_push():
@@ -117,6 +158,13 @@ def test_pr_workflow_builds_both_arches_and_does_not_push():
     assert "packages:" not in text
     assert "id-token:" not in text
     assert "podman push" not in text
+    assert "ansible-builder create" not in text
+    assert "podman build" not in text
+    assert "ansible-builder build" in text
+    assert "--squash all" in text
+    assert '--context "$RUNNER_TEMP/ee-context"' in text
+    assert "--file execution-environment.yml" in text
+    assert '--extra-build-cli-args "--platform linux/${{ matrix.arch }}"' in text
     assert "secrets." not in text
     assert text.count(CHECKOUT) == 1
     assert "persist-credentials: false" in text
@@ -149,6 +197,13 @@ def test_publish_workflow_signs_only_on_push_and_release():
     assert smoke["permissions"] == {"contents": "read", "packages": "read"}
     assert "id-token" not in smoke["permissions"]
     assert "cosign sign" in text
+    assert "ansible-builder create" not in text
+    assert "podman build" not in text
+    assert "ansible-builder build" in text
+    assert "--squash all" in text
+    assert '--context "$RUNNER_TEMP/ee-context"' in text
+    assert "--file execution-environment.yml" in text
+    assert '--extra-build-cli-args "--platform linux/${{ matrix.arch }}"' in text
     assert "cosign attest" in text
     assert 'syft "docker-archive:${RUNNER_TEMP}/plaibook-ee.tar"' in text
     assert "podman:plaibook-ee:smoke" not in text

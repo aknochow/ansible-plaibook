@@ -46,16 +46,15 @@ jobs:
           python3 -m pip install --user --require-hashes -r .github/ee-builder-requirements.txt
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Create build context
-        run: ansible-builder create -f execution-environment.yml -c "$RUNNER_TEMP/ee-context"
-
       - name: Build image
         run: |
-          podman build \
-            --platform "linux/${{ matrix.arch }}" \
-            -f "$RUNNER_TEMP/ee-context/Containerfile" \
-            -t plaibook-ee:smoke \
-            "$RUNNER_TEMP/ee-context"
+          ansible-builder build \
+            --container-runtime podman \
+            --squash all \
+            --tag plaibook-ee:smoke \
+            --context "$RUNNER_TEMP/ee-context" \
+            --file execution-environment.yml \
+            --extra-build-cli-args "--platform linux/${{ matrix.arch }}"
 
       - name: Smoke test
         run: python3 scripts/ee_smoke.py --image plaibook-ee:smoke
