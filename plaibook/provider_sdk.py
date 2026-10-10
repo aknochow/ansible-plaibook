@@ -13,13 +13,20 @@ ranges in ``execution-environment.yml``.
 
 from __future__ import annotations
 
+import fcntl
+import hashlib
+import os
+import shutil
 import subprocess
 import sys
-from typing import TextIO
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Iterator, TextIO
 
 from packaging.requirements import Requirement
 
 from plaibook.pip_hashed import HASHED_DIR, pinned_versions, pip_install_hashed_argv
+from plaibook.playbook import last_run_dir
 from plaibook.runtime import interpreter_is_externally_managed
 
 # (import-name, distribution-name). Import names are what find_spec must see.
@@ -50,6 +57,44 @@ class ProviderSdkError(RuntimeError):
     """Could not put the provider SDK on this interpreter."""
 
 
+def provider_sdk_lock_path(python: str) -> Path:
+    """One lock file per interpreter. pip into that prefix is not concurrent-safe."""
+    digest = hashlib.sha256(_resolved_python(python).encode("utf-8")).hexdigest()
+    return last_run_dir() / f"provider-sdk-{digest}.lock"
+
+
+@contextmanager
+def _exclusive_provider_sdk_lock(python: str) -> Iterator[None]:
+    """Serialize check, pip, and the cursor HTTP/2 patch for one interpreter.
+
+    POSIX ``fcntl.flock`` only. Windows is not a supported plaibook host.
+    """
+    lock_path = provider_sdk_lock_path(python)
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    except OSError as exc:
+        raise ProviderSdkError(f"Cannot open provider SDK lock {lock_path}: {exc}") from exc
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        except OSError as exc:
+            raise ProviderSdkError(f"Cannot lock provider SDK install {lock_path}: {exc}") from exc
+        yield
+    finally:
+        os.close(fd)
+
+
+def _resolved_python(python: str) -> str:
+    """Absolute path of the interpreter, including a bare name on PATH."""
+    found = shutil.which(python)
+    candidate = found or python
+    try:
+        return str(Path(candidate).resolve())
+    except OSError:
+        return candidate
+
+
 def ensure_provider_sdk(
     family: str | None,
     python: str | None = None,
@@ -62,6 +107,18 @@ def ensure_provider_sdk(
     hashed_file = FAMILY_HASHED_FILE.get(key)
     if not requirements or not hashed_file:
         return
+    with _exclusive_provider_sdk_lock(python or sys.executable):
+        _ensure_provider_sdk_locked(key, requirements, hashed_file, python, stderr=stderr)
+
+
+def _ensure_provider_sdk_locked(
+    key: str,
+    requirements: tuple[tuple[str, str], ...],
+    hashed_file: str,
+    python: str | None,
+    *,
+    stderr: TextIO | None,
+) -> None:
     try:
         pins = pinned_versions(hashed_file)
     except OSError as exc:

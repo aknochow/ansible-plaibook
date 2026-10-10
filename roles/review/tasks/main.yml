@@ -4,6 +4,10 @@
 # the review engine, with pr/mr post-processing handled after engine completion.
 # Restrict review_type to known dispatch targets before interpolating into
 # include_tasks filename to fail early on invalid values.
+- name: Record the active review target for failure reporting
+  ansible.builtin.set_fact:
+    review_active_target: "{{ review_target | default('local review target') }}"
+
 - name: Validate review_type is a known dispatch target
   ansible.builtin.assert:
     that:
