@@ -103,6 +103,10 @@ def test_readme_points_at_the_published_image():
     assert "cosign verify" in section
     assert "ansible-builder build --squash all -t <your-registry>/plaibook-ee:latest" in section
     assert "docs/execution-environment.md" in section
+    guide = (ROOT / "docs" / "execution-environment.md").read_text(encoding="utf-8")
+    assert "--pull-policy missing" not in guide
+    assert "--pull-policy always" in guide
+    assert 'ghcr.io/aknochow/plaibook-ee@${digest}' in guide
     assert "build/collections/*.tar.gz" not in section
 
 
@@ -118,8 +122,12 @@ def test_pr_workflow_builds_both_arches_and_does_not_push():
     assert "packages:" not in text
     assert "id-token:" not in text
     assert "podman push" not in text
+    assert "ansible-builder create" not in text
+    assert "podman build" not in text
     assert "ansible-builder build" in text
     assert "--squash all" in text
+    assert '--context "$RUNNER_TEMP/ee-context"' in text
+    assert "--file execution-environment.yml" in text
     assert '--extra-build-cli-args "--platform linux/${{ matrix.arch }}"' in text
     assert "secrets." not in text
     assert text.count(CHECKOUT) == 1
@@ -153,8 +161,12 @@ def test_publish_workflow_signs_only_on_push_and_release():
     assert smoke["permissions"] == {"contents": "read", "packages": "read"}
     assert "id-token" not in smoke["permissions"]
     assert "cosign sign" in text
+    assert "ansible-builder create" not in text
+    assert "podman build" not in text
     assert "ansible-builder build" in text
     assert "--squash all" in text
+    assert '--context "$RUNNER_TEMP/ee-context"' in text
+    assert "--file execution-environment.yml" in text
     assert '--extra-build-cli-args "--platform linux/${{ matrix.arch }}"' in text
     assert "cosign attest" in text
     assert 'syft "docker-archive:${RUNNER_TEMP}/plaibook-ee.tar"' in text

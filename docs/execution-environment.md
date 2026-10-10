@@ -12,13 +12,16 @@ status: stable
 
 ## Run it
 
-Pin a release tag on a job template. A GitHub release `v0.1.26` publishes `:0.1.26`. `:main` and `:latest` follow `main` and can be ahead of the newest package on PyPI. `:latest` is a copy of `:main`, not of the newest release tag.
+Pin a release tag on a job template. A GitHub release `v0.1.26` publishes `:0.1.26`. `:main` and `:latest` follow `main` and can be ahead of the newest package on PyPI. `:latest` is a copy of `:main`, not of the newest release tag. A tag can be moved, so resolve it to a digest and run that digest. `--pull-policy always` fetches that digest instead of reusing a local image.
 
 ```bash
+tag=0.1.26
+podman pull "ghcr.io/aknochow/plaibook-ee:${tag}"
+digest="$(podman image inspect --format '{{.Digest}}' "ghcr.io/aknochow/plaibook-ee:${tag}")"
 ansible-navigator run review.yml \
-  --eei ghcr.io/aknochow/plaibook-ee:main \
+  --eei "ghcr.io/aknochow/plaibook-ee@${digest}" \
   --mode stdout \
-  --pull-policy missing
+  --pull-policy always
 ```
 
 Pass the same extra vars you would pass to `ansible-playbook` (`-e review_type=commit`, and so on). GitHub, GitLab, and OpenShell credentials are job inputs. They are not baked into the image. `ssh_proxy.py` and OpenShell certs are not in the image either.
