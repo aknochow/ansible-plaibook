@@ -130,7 +130,7 @@ jobs:
           trivyignores: .trivyignore.yaml
 
       - name: SBOM
-        run: syft "podman:plaibook-ee:smoke" -o spdx-json=sbom.spdx.json
+        run: syft "docker-archive:${RUNNER_TEMP}/plaibook-ee.tar" -o spdx-json=sbom.spdx.json
 
       - name: Log in to GHCR
         env:
