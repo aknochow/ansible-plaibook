@@ -196,6 +196,124 @@
             fail_msg: "Parent-only rescue leaked or did not fail: {{ ansible_failed_result.msg | default('') }}"
             success_msg: "Parent-only verify status=error stays fail-closed."
 
+    - name: Nested verdict with a parent execute still bills usage
+      block:
+        - name: Reset flags before the mixed parent and nested failure
+          ansible.builtin.set_fact:
+            pipeline_agent_calls: []
+            verify_dispatch_valid: false
+            verify_dispatch_provider_error: true
+            verify_last_turn: false
+            verify_attempt_number: 1
+            verify_turn_result:
+              stop_reason: unset
+
+        - name: Write a status=error stub with both a parent and a nested verdict
+          ansible.builtin.copy:
+            dest: "{{ cursor_agent_stub_file }}"
+            mode: "0600"
+            content: "{{ _mixed_error | to_json }}"
+          vars:
+            _mixed_error:
+              failed: true
+              msg: "Cursor run finished with status error (run_id=run-mixed)"
+              status: error
+              resolved_model: gpt-5.6-luna
+              structured_tool_calls:
+                - name: report_verdict
+                  caller: parent
+                  agent_id: parent-1
+                  args: "{{ _parent_draft }}"
+                - name: report_verdict
+                  caller: nested
+                  agent_id: verify-lens
+                  args: "{{ _nested_verdict }}"
+              usage_normalized:
+                input_tokens: 7
+                output_tokens: 2
+                cache_write_tokens: 0
+                cache_read_tokens: 0
+                thinking_tokens: 0
+                total_tokens: 9
+
+        - name: Dispatch the mixed parent and nested status=error
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: dispatch_verify_turn_attempt_cursor.yml
+
+        - name: Confirm the nested verdict bound and usage was recorded
+          ansible.builtin.assert:
+            that:
+              - verify_dispatch_valid | bool
+              - not (verify_dispatch_provider_error | bool)
+              - verify_turn_result.stop_reason == "tool_use"
+              - verify_turn_result.tool_calls[0].input.evidence_status == "inconclusive"
+              - "'SECRET_DRAFT_MUST_NOT_APPEAR' not in (verify_turn_result | to_json)"
+              - pipeline_agent_calls | length == 1
+              - pipeline_agent_calls[0].lens == "verify"
+              - pipeline_agent_calls[0].usage.input_tokens | int == 7
+            fail_msg: >-
+              Mixed parent+nested return did not bill the nested verdict:
+              calls={{ pipeline_agent_calls | default([]) }}
+              result={{ verify_turn_result | default({}) }}
+            success_msg: "Nested verdict with a parent execute still bills usage."
+
+    - name: A non-status module failure on a non-final turn is re-raised
+      block:
+        - name: Reset the turn loop before the start failure
+          ansible.builtin.set_fact:
+            agent_family: cursor
+            review_verify_max_turns: 3
+            review_structured_output_max_attempts: 3
+            review_verify_model: unused
+            review_verify_claude_cli_model: unused
+            review_verify_openai_model: unused
+            review_verify_gemini_model: unused
+            pipeline_agent_calls: []
+            review_verify_done: false
+            verify_turn_count: 0
+            verify_last_turn: false
+            verify_messages: []
+            verify_dispatch_provider_error: false
+            verify_dispatch_valid: false
+            verify_result_status: ""
+            verify_result_rationale: ""
+            verify_turn_result:
+              stop_reason: unset
+
+        - name: Write a start failure that is not a status=error
+          ansible.builtin.copy:
+            dest: "{{ cursor_agent_stub_file }}"
+            mode: "0600"
+            content: "{{ _start_failure | to_json }}"
+          vars:
+            _start_failure:
+              failed: true
+              msg: "Cursor agent failed to start: authentication failed"
+              structured_tool_calls: []
+
+        - name: Run a non-final verify turn over the start failure
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: verify_turn.yml
+
+        - name: Fail the test if the start failure became an end turn
+          ansible.builtin.fail:
+            msg: "TEST BUG: a non-status module failure was accepted"
+      rescue:
+        - name: Confirm the start failure aborted the turn
+          ansible.builtin.assert:
+            that:
+              - "'failed to start' in (ansible_failed_result.msg | default(''))"
+              - "'TEST BUG' not in (ansible_failed_result.msg | default(''))"
+              - "'status error' not in (ansible_failed_result.msg | default('') | lower)"
+              - not (review_verify_done | bool)
+              - verify_result_status | default('') != 'inconclusive'
+              - verify_turn_result.stop_reason | default('') != 'end_turn'
+              - pipeline_agent_calls | length == 0
+            fail_msg: "Non-status module failure did not re-raise: {{ ansible_failed_result.msg | default('') }}"
+            success_msg: "A non-status module failure on a non-final turn is re-raised."
+
     - name: verify_turn retries a status error and then accepts a verdict
       block:
         - name: Reset the turn loop before the success sequence

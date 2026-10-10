@@ -36,10 +36,13 @@
 # tools: [mcp] fabrication) always fails closed.
 # A module fail_json (Cursor status=error with an empty body) is one
 # failed attempt. Rescue only that module call and retry. A nested
-# report_verdict on that failed return still binds. Do not abort the
+# report_verdict on that failed return still binds, and its usage is
+# recorded even when a parent execute is also present. Do not abort the
 # playbook before persist. Nonce validation and named-lens selection
 # stay outside the rescue: a mismatch or a parent-only fabrication
-# fails the play, including on a non-final verify turn.
+# fails the play, including on a non-final verify turn. Any other
+# module failure (auth, config, transport) is re-raised. Do not turn
+# it into end_turn.
 #
 # prompt_nonce is a cheap spawn canary after a nested execute. The
 # nested execute is the payload bind. Do not print .text in fail_msg.
@@ -168,10 +171,12 @@
           cursor_nonce_structured: "{{ cursor_lens_structured }}"
           cursor_nonce_lens_label: "Verify"
 
+      # Parent-only is not a lens call. A nested report_verdict is,
+      # even when that same return also has a parent execute.
       - name: "Cursor: record usage from a failed verify return"
         when:
           - _cursor_verify_failed_result.usage_normalized is defined
-          - _verify_failed_parent | length == 0
+          - (_verify_failed_nested | length > 0) or (_verify_failed_parent | length == 0)
         ansible.builtin.set_fact:
           pipeline_agent_calls: >-
             {{ (pipeline_agent_calls | default([])) + [{
@@ -197,21 +202,13 @@
             stop_reason: error
             usage: "{{ _cursor_verify_failed_result.usage_normalized | default({}) }}"
 
-      - name: "Cursor: a named-lens miss stays invalid for the last-turn retry"
+      - name: "Cursor: re-raise a module failure that is not an empty status=error"
         when:
           - _verify_failed_nested | length == 0
           - _verify_failed_parent | length == 0
           - not (_verify_failed_status_error | bool)
-        ansible.builtin.set_fact:
-          verify_dispatch_provider_error: false
-          verify_dispatch_valid: false
-          verify_turn_result:
-            message:
-              content: []
-              model: "{{ review_verify_cursor_model }}"
-            tool_calls: []
-            stop_reason: end_turn
-            usage: {}
+        ansible.builtin.fail:
+          msg: "{{ _cursor_verify_failed_result.msg | default('Cursor verify module failed') }}"
 
   - name: Record a successful Cursor verify return
     when: not (_cursor_verify_module_failed | bool)
