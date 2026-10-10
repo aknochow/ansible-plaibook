@@ -107,6 +107,10 @@ def test_readme_points_at_the_published_image():
     assert "--pull-policy missing" not in guide
     assert "--pull-policy always" in guide
     assert 'ghcr.io/aknochow/plaibook-ee@${digest}' in guide
+    assert "cosign verify" in guide
+    assert "refs/tags/v${tag}" in guide
+    navigator = guide.index("ansible-navigator run review.yml")
+    assert guide.rindex("cosign verify", 0, navigator) < navigator
     assert "build/collections/*.tar.gz" not in section
 
 

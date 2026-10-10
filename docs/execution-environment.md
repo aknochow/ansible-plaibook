@@ -18,11 +18,17 @@ Pin a release tag on a job template. A GitHub release `v0.1.26` publishes `:0.1.
 tag=0.1.26
 podman pull "ghcr.io/aknochow/plaibook-ee:${tag}"
 digest="$(podman image inspect --format '{{.Digest}}' "ghcr.io/aknochow/plaibook-ee:${tag}")"
+cosign verify \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity "https://github.com/aknochow/ansible-plaibook/.github/workflows/ee-publish.yml@refs/tags/v${tag}" \
+  "ghcr.io/aknochow/plaibook-ee@${digest}"
 ansible-navigator run review.yml \
   --eei "ghcr.io/aknochow/plaibook-ee@${digest}" \
   --mode stdout \
   --pull-policy always
 ```
+
+`cosign verify` has to succeed before navigator runs. The identity is this release's workflow ref, `refs/tags/v0.1.26` for tag `0.1.26`, not a signature minted for `main` or for another release.
 
 Pass the same extra vars you would pass to `ansible-playbook` (`-e review_type=commit`, and so on). GitHub, GitLab, and OpenShell credentials are job inputs. They are not baked into the image. `ssh_proxy.py` and OpenShell certs are not in the image either.
 
