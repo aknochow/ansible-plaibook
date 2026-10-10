@@ -78,7 +78,7 @@ def test_execution_environment_builds_from_the_pin_file():
         "google-genai==2.29.0",
         "openai==3.28.0",
         "cursor-sdk==1.0.37",
-        "openshell==0.0.116",
+        "openshell==0.1.3",
     ):
         assert pin in locked
     assert "--hash=sha256:" in locked
