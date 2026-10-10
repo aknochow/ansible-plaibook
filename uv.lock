@@ -826,7 +826,7 @@ wheels = [
 
 [[package]]
 name = "openshell"
-version = "0.1.2"
+version = "0.1.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cloudpickle" },
@@ -836,7 +836,7 @@ dependencies = [
     { name = "protobuf" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9e/0d/9f0c2e133bd4bfc96b9e261b870d58230d7d98fc6c51ae8f7f71f8520157/openshell-0.1.2-py3-none-any.whl", hash = "sha256:8c409da4f176d42418d92366fe201f47cceef2c0fa432bfbce2bf938649d59cf", size = 150901, upload-time = "2026-09-28T03:58:28.39Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/32/abced5a8175714c36c93bdd0937e019989301f2cb3a9e51c42422bfae7b8/openshell-0.1.3-py3-none-any.whl", hash = "sha256:d1eaa6abcd714e2f19d4a8ecbc2079bebeb7b56d81e9f8d3f5a9b5165ed1956c", size = 131882, upload-time = "2026-10-09T15:23:07.155Z" },
 ]
 
 [[package]]
@@ -890,7 +890,7 @@ requires-dist = [
     { name = "cursor-sdk", specifier = ">=1.0.31,<2.0.0" },
     { name = "cursor-sdk", marker = "extra == 'cursor'", specifier = ">=1.0.31,<2.0.0" },
     { name = "jinja2", specifier = ">=3.1.0" },
-    { name = "openshell", marker = "python_full_version >= '3.11'", specifier = ">=0.1.2,<0.2" },
+    { name = "openshell", marker = "python_full_version >= '3.11'", specifier = ">=0.1.3,<0.2" },
     { name = "packaging", specifier = ">=21.3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0,<10.0.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0.0,<8.0.0" },

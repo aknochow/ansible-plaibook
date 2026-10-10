@@ -40,11 +40,12 @@ def _capable(monkeypatch):
         ("0.0.115", False),
         ("0.0.116", False),
         ("0.1.1", False),
-        ("0.1.2", True),
+        ("0.1.2", False),
+        ("0.1.3", True),
         ("0.1.9", True),
         ("0.1.9+local", True),
         ("0.2.0", False),
-        ("0.1.2rc1", False),
+        ("0.1.3rc1", False),
     ],
 )
 def test_version_satisfies_pin(version, ok):

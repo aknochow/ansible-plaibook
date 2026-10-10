@@ -32,6 +32,7 @@ and tested like any other piece of infrastructure.
 - **[GitHub review check](github-review-check.md)**: the `plaibook review` check that runs after the other CI checks pass.
 - **[Architecture](architecture.md)**: how the pipeline is built: the review role, domain-specific steering, and the independent verification pass.
 - **[Reference](reference.md)**: every variable that controls a run.
+- **[Dependency map](dependency-map.md)**: collection SHAs, Python SDK pins, the OpenShell gateway, and the review-workflow SHAs. Update the row in the same commit as the pin.
 
 ## Why "deterministic" matters here
 

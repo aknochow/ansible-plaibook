@@ -34,7 +34,7 @@ def test_pip_install_hashed_argv_require_hashes():
 
 def test_pinned_versions_reads_top_level_dists():
     pins = pinned_versions("openshell-requirements.txt")
-    assert pins["openshell"] == "0.1.2"
+    assert pins["openshell"] == "0.1.3"
     openai = pinned_versions("openai-requirements.txt")
     assert "openai" in openai
     runtime = pinned_versions("sandbox-runtime-requirements.txt")
