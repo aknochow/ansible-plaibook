@@ -101,7 +101,7 @@ def test_readme_points_at_the_published_image():
     assert ":main" in section and ":latest" in section
     assert "ssh_proxy.py" in section
     assert "cosign verify" in section
-    assert "ansible-builder build -t <your-registry>/plaibook-ee:latest" in section
+    assert "podman build --squash-all -t <your-registry>/plaibook-ee:latest" in section
     assert "build/collections/*.tar.gz" not in section
 
 
@@ -117,6 +117,7 @@ def test_pr_workflow_builds_both_arches_and_does_not_push():
     assert "packages:" not in text
     assert "id-token:" not in text
     assert "podman push" not in text
+    assert "--squash-all" in text
     assert "secrets." not in text
     assert text.count(CHECKOUT) == 1
     assert "persist-credentials: false" in text
@@ -149,6 +150,7 @@ def test_publish_workflow_signs_only_on_push_and_release():
     assert smoke["permissions"] == {"contents": "read", "packages": "read"}
     assert "id-token" not in smoke["permissions"]
     assert "cosign sign" in text
+    assert "--squash-all" in text
     assert "cosign attest" in text
     assert 'syft "docker-archive:${RUNNER_TEMP}/plaibook-ee.tar"' in text
     assert "podman:plaibook-ee:smoke" not in text

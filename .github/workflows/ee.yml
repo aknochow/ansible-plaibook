@@ -52,6 +52,7 @@ jobs:
       - name: Build image
         run: |
           podman build \
+            --squash-all \
             --platform "linux/${{ matrix.arch }}" \
             -f "$RUNNER_TEMP/ee-context/Containerfile" \
             -t plaibook-ee:smoke \

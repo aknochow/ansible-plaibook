@@ -274,7 +274,8 @@ cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.
 To build and host your own, from a clean checkout:
 
 ```bash
-ansible-builder build -t <your-registry>/plaibook-ee:latest -f execution-environment.yml
+ansible-builder create -f execution-environment.yml -c context
+podman build --squash-all -t <your-registry>/plaibook-ee:latest -f context/Containerfile context
 podman push <your-registry>/plaibook-ee:latest
 ```
 
