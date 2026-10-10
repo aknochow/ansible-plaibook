@@ -1,0 +1,81 @@
+# Fixable highs the image cannot clear. The gate stays HIGH,CRITICAL with
+# ignore-unfixed and exit-code 1. Each entry expires 2026-11-09.
+# pip 26.2.1 still vendors msgpack 1.1.2, setuptools 70.3.0, and urllib3 2.7.0.
+# The installed distributions are newer; these purls are only the vendored copies.
+vulnerabilities:
+  - id: CVE-2026-19481
+    paths:
+      - usr/local/lib/python3.12/site-packages/cursor_sdk/_vendor/bridge/node_modules/@fastify/busboy/package.json
+    purls:
+      - pkg:npm/%40fastify/busboy@2.1.1
+    statement: upstream-vendored, no fix we can apply
+    expired_at: 2026-11-09
+  - id: CVE-2026-12151
+    paths:
+      - usr/local/lib/python3.12/site-packages/cursor_sdk/_vendor/bridge/node_modules/undici/package.json
+    purls:
+      - pkg:npm/undici@5.29.0
+    statement: upstream-vendored, no fix we can apply
+    expired_at: 2026-11-09
+  - id: CVE-2026-1526
+    paths:
+      - usr/local/lib/python3.12/site-packages/cursor_sdk/_vendor/bridge/node_modules/undici/package.json
+    purls:
+      - pkg:npm/undici@5.29.0
+    statement: upstream-vendored, no fix we can apply
+    expired_at: 2026-11-09
+  - id: CVE-2026-2229
+    paths:
+      - usr/local/lib/python3.12/site-packages/cursor_sdk/_vendor/bridge/node_modules/undici/package.json
+    purls:
+      - pkg:npm/undici@5.29.0
+    statement: upstream-vendored, no fix we can apply
+    expired_at: 2026-11-09
+  - id: GHSA-6v7p-g79w-8964
+    purls:
+      - pkg:pypi/msgpack@1.1.2
+    statement: upstream-vendored, no fix we can apply
+    expired_at: 2026-11-09
+  - id: CVE-2025-47273
+    purls:
+      - pkg:pypi/setuptools@70.3.0
+    statement: upstream-vendored, no fix we can apply
+    expired_at: 2026-11-09
+  - id: CVE-2026-97687
+    purls:
+      - pkg:pypi/urllib3@2.7.0
+    statement: upstream-vendored, no fix we can apply
+    expired_at: 2026-11-09
+  - id: CVE-2026-97689
+    purls:
+      - pkg:pypi/urllib3@2.7.0
+    statement: upstream-vendored, no fix we can apply
+    expired_at: 2026-11-09
+  - id: CVE-2026-78669
+    paths:
+      - usr/bin/gh
+    purls:
+      - pkg:golang/golang.org/x/net@v0.58.0
+    statement: upstream-vendored, no fix we can apply
+    expired_at: 2026-11-09
+  - id: CVE-2026-78669
+    paths:
+      - usr/bin/gh
+    purls:
+      - pkg:golang/stdlib@v1.27.1
+    statement: upstream-vendored, no fix we can apply
+    expired_at: 2026-11-09
+  - id: CVE-2026-78667
+    paths:
+      - usr/bin/gh
+    purls:
+      - pkg:golang/stdlib@v1.27.1
+    statement: upstream-vendored, no fix we can apply
+    expired_at: 2026-11-09
+  - id: CVE-2026-97031
+    paths:
+      - usr/bin/gh
+    purls:
+      - pkg:golang/stdlib@v1.27.1
+    statement: upstream-vendored, no fix we can apply
+    expired_at: 2026-11-09

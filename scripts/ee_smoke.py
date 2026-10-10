@@ -21,6 +21,7 @@ import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import NoReturn
 
 SOURCE_LABEL = "https://github.com/aknochow/ansible-plaibook"
 IMPORTS = (
@@ -36,11 +37,22 @@ _NAME = re.compile(r"^\s*-\s*name:\s*(\S+)\s*$")
 _VERSION = re.compile(r"^\s*version:\s*([0-9a-f]{7,40})\b")
 _FIELD = re.compile(r"(?m)^([A-Za-z0-9_]+):\s*(\S+)\s*$")
 _GITHUB = re.compile(r"^https://github\.com/([^/]+)/([^/]+?)(?:\.git)?$")
+COMMAND_TIMEOUT = 120
+PODMAN_TIMEOUT = 300
 
 
-def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
+def _run(argv: list[str], timeout: int = COMMAND_TIMEOUT) -> subprocess.CompletedProcess[str]:
     print("+", " ".join(argv), file=sys.stderr)
-    completed = subprocess.run(argv, check=False, capture_output=True, text=True)
+    try:
+        completed = subprocess.run(
+            argv,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        _fail(f"{' '.join(argv)} timed out after {timeout}s")
     if completed.stdout:
         print(completed.stdout, file=sys.stderr, end="" if completed.stdout.endswith("\n") else "\n")
     if completed.stderr:
@@ -48,7 +60,7 @@ def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
     return completed
 
 
-def _fail(message: str) -> None:
+def _fail(message: str) -> NoReturn:
     print(message, file=sys.stderr)
     raise SystemExit(1)
 
@@ -155,12 +167,7 @@ def expected_collections(requirements: Path) -> dict[str, str]:
 
 
 def image_labels(image: str) -> dict[str, str]:
-    completed = subprocess.run(
-        ["podman", "image", "inspect", image],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    completed = _run(["podman", "image", "inspect", image], timeout=COMMAND_TIMEOUT)
     if completed.returncode != 0:
         _fail(completed.stderr.strip() or f"podman image inspect {image} failed")
     meta = json.loads(completed.stdout)[0]
@@ -179,7 +186,7 @@ def smoke_image(image: str, requirements: Path) -> None:
         _fail(f"org.opencontainers.image.source is {source!r}")
 
     script = Path(__file__).resolve()
-    completed = subprocess.run(
+    completed = _run(
         [
             "podman",
             "run",
@@ -191,12 +198,8 @@ def smoke_image(image: str, requirements: Path) -> None:
             "/ee_smoke.py",
             "--inside",
         ],
-        check=False,
-        capture_output=True,
-        text=True,
+        timeout=PODMAN_TIMEOUT,
     )
-    if completed.stderr:
-        print(completed.stderr, file=sys.stderr, end="" if completed.stderr.endswith("\n") else "\n")
     if completed.returncode != 0:
         _fail(f"in-image smoke failed ({completed.returncode})")
     try:

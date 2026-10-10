@@ -107,6 +107,13 @@ def test_pr_workflow_builds_both_arches_and_does_not_push():
     assert "ignore-unfixed: \"true\"" in text or 'ignore-unfixed: "true"' in text
     assert "severity: HIGH,CRITICAL" in text
     assert "--require-hashes -r .github/ee-builder-requirements.txt" in text
+    assert document["on"]["pull_request"]["paths"].count("scripts/ee_smoke.py") == 1
+    assert ".trivyignore.yaml" in document["on"]["pull_request"]["paths"]
+    _assert_trivy_gate(job)
+    ee = EE.read_text(encoding="utf-8")
+    assert "sha256sum -c -" in ee
+    assert "8ab5addd123aa50ffb4ca5cbfe16c62bc4ab5dc4f146e3e7f9fd086f41778f8d" in ee
+    assert "951891c88b76bb8ff3e1fedea4b84015edc498eb44c5f8a636752bda9f48cfe8" in ee
 
 
 def test_publish_workflow_signs_only_on_push_and_release():
@@ -135,10 +142,61 @@ def test_publish_workflow_signs_only_on_push_and_release():
     assert parsed.hostname == "token.actions.githubusercontent.com"
     assert "ee-publish.yml@${GITHUB_REF}" in text
     assert "--require-hashes -r .github/ee-builder-requirements.txt" in text
+    assert ".trivyignore.yaml" in document["on"]["push"]["paths"]
+    login = 'printf \'%s\' "$GHCR_TOKEN" | podman login --username "$GHCR_USER" --password-stdin ghcr.io'
+    assert text.count(login) == 3
+    assert '-p "$GHCR_TOKEN"' not in text
+    _assert_trivy_gate(build)
     assert text.count("persist-credentials: false") == 3
     assert CHECKOUT in text
     arches = {row["arch"] for row in build["strategy"]["matrix"]["include"]}
     assert arches == {"amd64", "arm64"}
+
+
+def _assert_trivy_gate(job: dict) -> None:
+    steps = {step["name"]: step for step in job["steps"]}
+    gate = steps["Fail on fixable high and critical vulnerabilities"]["with"]
+    report = steps["Report vulnerabilities"]["with"]
+    assert gate["severity"] == "HIGH,CRITICAL"
+    assert gate["exit-code"] == "1"
+    assert gate["ignore-unfixed"] == "true"
+    assert gate["trivyignores"] == ".trivyignore.yaml"
+    assert "trivyignores" not in report
+
+
+def test_trivyignore_covers_the_unfixed_vendor_highs():
+    document = _load(ROOT / ".trivyignore.yaml")
+    findings = document["vulnerabilities"]
+    ids = {item["id"] for item in findings}
+    assert ids == {
+        "CVE-2026-19481",
+        "CVE-2026-12151",
+        "CVE-2026-1526",
+        "CVE-2026-2229",
+        "GHSA-6v7p-g79w-8964",
+        "CVE-2025-47273",
+        "CVE-2026-97687",
+        "CVE-2026-97689",
+        "CVE-2026-78669",
+        "CVE-2026-78667",
+        "CVE-2026-97031",
+    }
+    for item in findings:
+        assert item["statement"] == "upstream-vendored, no fix we can apply"
+        assert str(item["expired_at"]) == "2026-11-09"
+        assert item["purls"]
+
+
+def test_smoke_subprocess_timeout_fails_closed():
+    smoke = _load_script("ee_smoke")
+    assert smoke.COMMAND_TIMEOUT == 120
+    assert smoke.PODMAN_TIMEOUT == 300
+    try:
+        smoke._run(["sleep", "30"], timeout=1)
+    except SystemExit as exc:
+        assert exc.code == 1
+    else:
+        raise AssertionError("a timed-out smoke command must exit")
 
 
 def test_manifest_check_requires_both_arches():

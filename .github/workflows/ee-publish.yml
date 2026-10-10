@@ -13,6 +13,7 @@ on:
       - collections-requirements.yml
       - scripts/ee_smoke.py
       - scripts/ee_manifest_arches.py
+      - .trivyignore.yaml
       - .github/ee-builder-requirements.txt
       - .github/workflows/ee.yml
       - .github/workflows/ee-publish.yml
@@ -123,6 +124,7 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: "true"
+          trivyignores: .trivyignore.yaml
 
       - name: SBOM
         run: syft "podman:plaibook-ee:smoke" -o spdx-json=sbom.spdx.json
@@ -131,7 +133,7 @@ jobs:
         env:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: podman login -u "$GHCR_USER" -p "$GHCR_TOKEN" ghcr.io
+        run: printf '%s' "$GHCR_TOKEN" | podman login --username "$GHCR_USER" --password-stdin ghcr.io
 
       - name: Push architecture image
         id: push
@@ -179,7 +181,7 @@ jobs:
         env:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: podman login -u "$GHCR_USER" -p "$GHCR_TOKEN" ghcr.io
+        run: printf '%s' "$GHCR_TOKEN" | podman login --username "$GHCR_USER" --password-stdin ghcr.io
 
       - name: Image tag
         id: tag
@@ -269,7 +271,7 @@ jobs:
         env:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: podman login -u "$GHCR_USER" -p "$GHCR_TOKEN" ghcr.io
+        run: printf '%s' "$GHCR_TOKEN" | podman login --username "$GHCR_USER" --password-stdin ghcr.io
 
       - name: Image tag
         id: tag

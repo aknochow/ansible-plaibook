@@ -10,6 +10,7 @@ on:
       - collections-requirements.yml
       - scripts/ee_smoke.py
       - scripts/ee_manifest_arches.py
+      - .trivyignore.yaml
       - .github/ee-builder-requirements.txt
       - .github/workflows/ee.yml
       - .github/workflows/ee-publish.yml
@@ -76,3 +77,4 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: "true"
+          trivyignores: .trivyignore.yaml
