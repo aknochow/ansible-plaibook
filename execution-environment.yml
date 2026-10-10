@@ -1,121 +1,81 @@
 ---
-# Execution Environment for running review.yml/bug_pipeline.yml on AAP.
+# Execution environment for review.yml on AAP.
 #
-# Based on quay.io/aknochow/minee:ubi10 — "a minimal Execution
-# Environment for AWX" (already purpose-built as a runnable EE, unlike
-# minee-builder which adds buildah/podman/golang for BUILDING other
-# images, or a much heavier UBI10 Claude-Code-sandbox image built for a
-# different purpose — neither is the right base for a plain Ansible EE).
+# Published image: ghcr.io/aknochow/plaibook-ee
+# Multi-arch (linux/amd64, linux/arm64). Tags :main and :latest follow
+# main. A release tag vX.Y.Z publishes :X.Y.Z.
 #
-# UBI10, not UBI9: historically the openshell PyPI package only shipped
-# manylinux_2_39 wheels (glibc >=2.39) — minee:ubi9's glibc 2.34 could
-# never satisfy that (only a stray 0.0.0a0 alpha resolved on ubi9).
-# openshell 0.0.113+ is a pure-Python py3-none-any wheel, so the glibc
-# floor is no longer the reason to stay on UBI10; keep UBI10 anyway
-# (python3.12 default, the python3.11-symlink workaround ubi9 needed
-# is gone, ansible-core and the harness scripts share the same
-# interpreter). The pip range below must match ansible-openshell's
-# on-purpose ceiling (not an unpinned latest — 0.0.9x broke the
-# Python API once already).
+# Base: registry.access.redhat.com/hi/python:3.12-builder, pinned by the
+# multi-arch index digest. The runtime hi/python image has no /bin/sh, and
+# Ansible runs every task through /bin/sh, so this is the -builder variant.
+# The image defaults to uid 65532. ansible-builder switches to root for the
+# build stages and leaves the final image as uid 1000, which AAP accepts.
+# package_manager_path is /usr/bin/dnf (dnf5). python_path is
+# /usr/bin/python3 (Python 3.12). Do not install the python3-pip RPM: on
+# this Hummingbird repo that package depends on the python3 RPM, which is
+# Python 3.14 and would replace the interpreter. ansible-builder installs
+# pip for 3.12 with ensurepip.
 #
-# Build:
-#   ansible-builder build -t quay.io/aknochow/ansible-plaibook-ee:latest -f execution-environment.yml
-#   podman push quay.io/aknochow/ansible-plaibook-ee:latest
+# Collections are the git pins in collections-requirements.yml. A pin bump
+# changes this image's inputs with no other wiring. ssh_proxy.py and
+# OpenShell certs are not in the image.
+#
+# Build from a clean checkout:
+#   ansible-builder build -t ghcr.io/aknochow/plaibook-ee:latest -f execution-environment.yml
 
 version: 3
+
 images:
   base_image:
-    name: quay.io/aknochow/minee:ubi10
+    name: registry.access.redhat.com/hi/python:3.12-builder@sha256:aa64794afb234eac11f21e2ca7c8430753f268a1a755d16f7f9c88ca5975bc33
+
+options:
+  package_manager_path: /usr/bin/dnf
+  # AAP runs Execution Environments as a non-root user. 1000 is the user
+  # ansible-builder and AAP both accept. relax_passwd_permissions lets an
+  # arbitrary OpenShift UID rewrite /etc/passwd at start.
+  user: "1000"
+  relax_passwd_permissions: true
+  workdir: /runner
+
 dependencies:
-  # build/requirements.yml (local tarballs), not the repo-root
-  # requirements.yml (git sources, correct for anyone else installing
-  # these collections but unusable inside the isolated build stage,
-  # which has no git credentials for these private repos) — see
-  # build/requirements.yml's own header comment for the full story.
-  galaxy: build/requirements.yml
+  python_interpreter:
+    python_path: /usr/bin/python3
+  ansible_core:
+    package_pip: ansible-core>=2.16.0,<2.20.0
+  ansible_runner:
+    package_pip: ansible-runner>=2.4.0,<3.0.0
+  # Same file the collection pin-bump workflow maintains.
+  galaxy: collections-requirements.yml
   python:
-    - anthropic>=0.84.0
-    - openai>=1.0.0,<4.0.0
+    # Runtime pins copied from each provider collection's requirements.txt
+    # at the commit collections-requirements.yml currently names.
+    - anthropic[vertex]>=0.84.0
+    - claude-agent-sdk>=0.2.144
+    - google-genai>=1.0.0
+    - openai>=1.58.0
+    - cursor-sdk>=1.0.31,<2.0.0
     - openshell>=0.0.116,<0.0.120
-    # Runtime dependency of kubernetes.core.k8s_info (build/requirements.yml).
-    - kubernetes
+    - grpcio>=1.60
+    - protobuf>=4.25
+    # kubernetes.core requirements.txt (also pinned in the galaxy file).
+    - kubernetes>=24.2.0
+    - requests-oauthlib
+    - jsonpatch
+    # Floors above vulnerable transitive versions. They do not relax the
+    # collection pins above.
+    - msgpack>=1.2.1
+    - setuptools>=78.1.1
+    - urllib3>=2.8.0
 
-# ansible-builder only auto-copies requirements.yml/txt into its _build/
-# staging dir (which becomes /build in the image, flattened — NOT
-# nested under the original build/ path) — local collection tarballs
-# referenced by requirements.yml need to be brought along explicitly.
-additional_build_files:
-  - src: build/collections/aknochow-claude-0.1.0.tar.gz
-    dest: collections
-  - src: build/collections/aknochow-openai-0.1.0.tar.gz
-    dest: collections
-  - src: build/collections/aknochow-openshell-0.1.0.tar.gz
-    dest: collections
-  - src: build/collections/kubernetes-core-6.5.0.tar.gz
-    dest: collections
-  # If your own git targets are cloned from a host signed by an
-  # internal/private CA (see the append_final block below), add your
-  # own cert file(s) under build/certs/ (gitignored -- never this
-  # repo's own source, an org-specific trust anchor has no business
-  # being a default for anyone else building this EE) and list them
-  # here, e.g.:
-  #   - src: build/certs/your-internal-root-ca.crt
-  #     dest: certs
-  - src: build/scripts/ssh_proxy.py
-    dest: scripts
-
-# minee's base image uses microdnf (a minimal dnf variant — see
-# minEE-builder's own Containerfile), but ansible-builder's generated
-# assemble script hardcodes `dnf clean all` for post-install cache
-# cleanup, assuming a full-dnf lineage (ee-minimal-rhel9 etc). The
-# actual package install already succeeds before this — only the
-# cleanup call fails — so a symlink is enough, not a real dnf install.
-#
-# A private/internal CA chain, if your own review targets need one, is
-# needed in the FINAL stage only — that's where review.yml's `git
-# clone` of an internally-CA-signed git host actually runs at job time.
-# NOT baked in by default — this EE has no idea what git hosts you'll
-# point it at, and an org-specific trust anchor isn't a sane default
-# for anyone else building this image. If you need one: extract it
-# directly from the live TLS handshake (`openssl s_client -showcerts`),
-# not a filename guess (confirmed the hard way once: a plausible-
-# looking cert file turned out to be a DIFFERENT root than the one that
-# actually signed the target host's chain, and fixed nothing). Add your
-# cert file(s) under build/certs/ (gitignored, see additional_build_files
-# above), then uncomment and adapt the two COPY lines below:
-#   - COPY _build/certs/your-internal-root-ca.crt /etc/pki/ca-trust/source/anchors/your-internal-root-ca.crt
-#   - RUN update-ca-trust extract
-#
-# fetch_pr_context.py/post_review_comment.py shell out to the `gh` CLI for real
-# GitHub PR data (minee has no VCS tooling beyond bare git) — installed
-# from GitHub's own RPM repo since microdnf can consume a plain
-# .repo file the same as dnf; auth is via GH_TOKEN, injected by an AAP
-# credential at job-run time, not baked into the image.
-#
-# Same scripts shell out to `glab` for GitLab MR data — unlike gh,
-# GitLab doesn't publish a dnf/yum repo for glab, only per-release
-# packages, so this installs a specific pinned RPM directly via `rpm
-# -i` (microdnf can't install straight from a URL the way dnf can).
-# Auth is via GITLAB_TOKEN, injected by an AAP credential, same pattern
-# as GH_TOKEN.
-#
-# ssh_proxy.py: review.yml's ssh_proxy_script default points at a
-# personal git checkout path (~/code/ansible-openshell/scripts/), which
-# doesn't exist in this image — only the openshell PyPI package is
-# installed, and ssh_proxy.py isn't bundled inside that package. Baking
-# in a vendored copy here means AAP job templates can point
-# ssh_proxy_script at /opt/openshell/ssh_proxy.py via extra_vars instead
-# of needing a full ansible-openshell checkout inside the EE.
 additional_build_steps:
-  prepend_builder:
-    - RUN command -v dnf || ln -s /usr/bin/microdnf /usr/bin/dnf
-  prepend_final:
-    - RUN command -v dnf || ln -s /usr/bin/microdnf /usr/bin/dnf
+  # git has to be present before the galaxy stage clones the pin file.
+  # The final stage is FROM this base, so these packages stay in the image.
+  prepend_base:
+    - RUN $PKGMGR install -y git tar openssh-clients jq
   append_final:
-    # See the comment above additional_build_steps for how to re-enable
-    # internal-CA trust if your own review targets need it -- not on by
-    # default.
-    - RUN curl -fsSL https://cli.github.com/packages/rpm/gh-cli.repo -o /etc/yum.repos.d/gh-cli.repo && microdnf install -y gh
-    - RUN curl -fsSL -o /tmp/glab.rpm "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/generic/glab/1.109.0/glab_1.109.0_linux_amd64.rpm" && rpm -i /tmp/glab.rpm && rm -f /tmp/glab.rpm
-    - RUN mkdir -p /opt/openshell
-    - COPY _build/scripts/ssh_proxy.py /opt/openshell/ssh_proxy.py
+    - LABEL org.opencontainers.image.source="https://github.com/aknochow/ansible-plaibook"
+    - RUN curl -fsSL https://cli.github.com/packages/rpm/gh-cli.repo -o /etc/yum.repos.d/gh-cli.repo && $PKGMGR install -y gh
+    # GitLab publishes this RPM without a signature. Hummingbird rpm rejects
+    # an unsigned package; --nosignature installs that same vendor RPM.
+    - 'RUN arch="$(uname -m)"; case "$arch" in x86_64) rpm_arch=amd64 ;; aarch64) rpm_arch=arm64 ;; *) echo "unsupported architecture ${arch}" >&2; exit 1 ;; esac; curl -fsSL -o /tmp/glab.rpm "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/generic/glab/1.122.0/glab_1.122.0_linux_${rpm_arch}.rpm" && rpm -i --nosignature /tmp/glab.rpm && rm -f /tmp/glab.rpm'

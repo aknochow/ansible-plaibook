@@ -1,0 +1,289 @@
+name: Publish execution environment
+
+# Push ghcr.io/aknochow/plaibook-ee. A new GHCR package starts private;
+# making it public is a package setting this workflow cannot change.
+# Does not run on pull requests. packages: write and id-token: write are
+# only on the jobs that push or sign.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - execution-environment.yml
+      - collections-requirements.yml
+      - scripts/ee_smoke.py
+      - scripts/ee_manifest_arches.py
+      - .github/workflows/ee.yml
+      - .github/workflows/ee-publish.yml
+  release:
+    types: [published]
+
+permissions: {}
+
+concurrency:
+  group: ee-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/aknochow/plaibook-ee
+
+jobs:
+  build:
+    name: "Publish EE (${{ matrix.arch }})"
+    if: github.event_name == 'push' || github.event.release.prerelease == false
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Image tag
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "release" ]; then
+            printf 'tag=%s\n' "${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            printf 'tag=%s\n' main >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install ansible-builder
+        run: |
+          python3 -m pip install --user 'ansible-builder==3.1.1'
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+        with:
+          cosign-release: v2.5.3
+
+      - name: Install syft
+        run: |
+          set -euo pipefail
+          version=1.54.1
+          case "${{ matrix.arch }}" in
+            amd64) sum=c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47 ;;
+            arm64) sum=dfdf0537610113edbefe1f1fc6548bc957b2d77439636ec824fcf0e10d46d054 ;;
+            *) echo "unsupported arch ${{ matrix.arch }}" >&2; exit 1 ;;
+          esac
+          curl -fsSL -o syft.tar.gz \
+            "https://github.com/anchore/syft/releases/download/v${version}/syft_${version}_linux_${{ matrix.arch }}.tar.gz"
+          echo "${sum}  syft.tar.gz" | sha256sum -c -
+          tar -xzf syft.tar.gz syft
+          mkdir -p "$HOME/.local/bin"
+          mv syft "$HOME/.local/bin/syft"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Create build context
+        run: ansible-builder create -f execution-environment.yml -c "$RUNNER_TEMP/ee-context"
+
+      - name: Build image
+        run: |
+          podman build \
+            --platform "linux/${{ matrix.arch }}" \
+            -f "$RUNNER_TEMP/ee-context/Containerfile" \
+            -t plaibook-ee:smoke \
+            "$RUNNER_TEMP/ee-context"
+
+      - name: Smoke test
+        run: python3 scripts/ee_smoke.py --image plaibook-ee:smoke
+
+      - name: Save image archive
+        run: podman save --format docker-archive -o "$RUNNER_TEMP/plaibook-ee.tar" plaibook-ee:smoke
+
+      - name: Report vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          input: ${{ runner.temp }}/plaibook-ee.tar
+          format: table
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          exit-code: "0"
+          ignore-unfixed: "false"
+
+      - name: Fail on fixable high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          input: ${{ runner.temp }}/plaibook-ee.tar
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: "true"
+
+      - name: SBOM
+        run: syft "podman:plaibook-ee:smoke" -o spdx-json=sbom.spdx.json
+
+      - name: Log in to GHCR
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: podman login -u "$GHCR_USER" -p "$GHCR_TOKEN" ghcr.io
+
+      - name: Push architecture image
+        id: push
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          ref="${IMAGE}:${TAG}-${ARCH}"
+          podman tag plaibook-ee:smoke "$ref"
+          podman push --digestfile "$RUNNER_TEMP/digest" "$ref"
+          printf 'digest=%s\n' "$(cat "$RUNNER_TEMP/digest")" >> "$GITHUB_OUTPUT"
+
+      - name: Sign architecture image
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Attest SBOM
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign attest --yes --predicate sbom.spdx.json --type spdxjson "${IMAGE}@${DIGEST}"
+
+  manifest:
+    name: Publish multi-arch manifest
+    needs: build
+    if: needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+        with:
+          cosign-release: v2.5.3
+
+      - name: Log in to GHCR
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: podman login -u "$GHCR_USER" -p "$GHCR_TOKEN" ghcr.io
+
+      - name: Image tag
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "release" ]; then
+            printf 'tag=%s\n' "${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            printf 'tag=%s\n' main >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create and push manifest
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          podman manifest create "${IMAGE}:${TAG}"
+          podman manifest add "${IMAGE}:${TAG}" "docker://${IMAGE}:${TAG}-amd64"
+          podman manifest add "${IMAGE}:${TAG}" "docker://${IMAGE}:${TAG}-arm64"
+          podman manifest push "${IMAGE}:${TAG}" "docker://${IMAGE}:${TAG}"
+
+      - name: Tag latest from main
+        if: github.event_name == 'push'
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          authfile="${XDG_RUNTIME_DIR:-$HOME/.config}/containers/auth.json"
+          if [ ! -f "$authfile" ]; then
+            authfile="$HOME/.config/containers/auth.json"
+          fi
+          skopeo copy --authfile "$authfile" --all \
+            "docker://${IMAGE}:${TAG}" \
+            "docker://${IMAGE}:latest"
+
+      - name: Require both architectures
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          authfile="${XDG_RUNTIME_DIR:-$HOME/.config}/containers/auth.json"
+          if [ ! -f "$authfile" ]; then
+            authfile="$HOME/.config/containers/auth.json"
+          fi
+          skopeo inspect --authfile "$authfile" --raw "docker://${IMAGE}:${TAG}" | python3 scripts/ee_manifest_arches.py
+
+      - name: Sign and verify the manifest
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          authfile="${XDG_RUNTIME_DIR:-$HOME/.config}/containers/auth.json"
+          if [ ! -f "$authfile" ]; then
+            authfile="$HOME/.config/containers/auth.json"
+          fi
+          digest="$(skopeo inspect --authfile "$authfile" --format '{{.Digest}}' "docker://${IMAGE}:${TAG}")"
+          identity="https://github.com/aknochow/ansible-plaibook/.github/workflows/ee-publish.yml@${GITHUB_REF}"
+          cosign sign --yes "${IMAGE}@${digest}"
+          cosign verify \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "$identity" \
+            "${IMAGE}@${digest}"
+
+  smoke:
+    name: "Smoke published image (${{ matrix.arch }})"
+    needs: manifest
+    if: needs.manifest.result == 'success'
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: podman login -u "$GHCR_USER" -p "$GHCR_TOKEN" ghcr.io
+
+      - name: Image tag
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "release" ]; then
+            printf 'tag=%s\n' "${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            printf 'tag=%s\n' main >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pull and smoke-test the published tag
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          podman pull "${IMAGE}:${TAG}"
+          python3 scripts/ee_smoke.py --image "${IMAGE}:${TAG}"
