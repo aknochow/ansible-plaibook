@@ -265,6 +265,17 @@ def sanitize_failure_field(text: object, *, limit: int = _FIELD_LIMIT) -> str:
     return raw
 
 
+def redact_failure_text(text: object) -> str:
+    """Redact secrets in display text without inventing a replacement message.
+
+    Each line is capped and redacted the same way as a failure log, including
+    bearer tokens, credential assignments, and known token prefixes. Empty
+    input stays empty.
+    """
+    raw = text if isinstance(text, str) else ""
+    return _redact_log_lines(raw)
+
+
 def clean_failure_message(text: object, *, limit: int = _MESSAGE_LIMIT) -> str:
     """One failure message, with URL secrets removed and length capped.
 

@@ -70,7 +70,7 @@ jobs:
           # the pull request head. Move this to a commit that contains the
           # review code, then point plai-review.yml at the commit that
           # contains this line.
-          ref: "fa91f72b0f0ad11363ed7f37f66dfc2c689434bf"
+          ref: "2cfe75b24d9619b793757914a57d5cb5284b3739"
           persist-credentials: false
 
       - name: Resolve the pull request
@@ -164,7 +164,7 @@ jobs:
           # the pull request head. Move this to a commit that contains the
           # review code, then point plai-review.yml at the commit that
           # contains this line.
-          ref: "fa91f72b0f0ad11363ed7f37f66dfc2c689434bf"
+          ref: "2cfe75b24d9619b793757914a57d5cb5284b3739"
           persist-credentials: false
 
       - name: Require CURSOR_API_KEY

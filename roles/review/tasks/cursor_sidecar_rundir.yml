@@ -1,0 +1,21 @@
+---
+# One directory per review run. A shared ~/.cache/ansible-cursor-sidecar
+# lets a second CURSOR_AGENT review stop the first run's bridge.
+- name: Choose an id for this Cursor sidecar
+  ansible.builtin.set_fact:
+    _cursor_sidecar_run: >-
+      {{
+        (
+          (
+            (last_run_id | default('', true) | trim)
+            if ((last_run_id | default('', true) | trim) is match('^[A-Za-z0-9_-]+$'))
+            else 'run'
+          )
+          ~ '-' ~ lookup('password', '/dev/null length=16 chars=ascii_letters,digits')
+        )
+      }}
+
+- name: Give this Cursor run its own sidecar directory
+  ansible.builtin.set_fact:
+    review_cursor_bridge_rundir: >-
+      {{ lookup('ansible.builtin.env', 'HOME') }}/.cache/ansible-cursor-sidecar/{{ _cursor_sidecar_run }}
