@@ -54,7 +54,12 @@ def test_execution_environment_builds_from_the_pin_file():
     assert "ansible-plaibook-ee" not in text
     assert "ghcr.io/aknochow/plaibook-ee" in header
     assert "ssh_proxy.py" not in text.split("additional_build_steps:", 1)[-1]
-    assert "additional_build_files" not in document
+    assert document["additional_build_files"] == [
+        {"src": "execution-environment-gh-key.asc", "dest": "keys"}
+    ]
+    assert "BEGIN PGP PUBLIC KEY BLOCK" in (ROOT / "execution-environment-gh-key.asc").read_text(encoding="utf-8")
+    assert "rpm --import /tmp/gh-key.asc && rpm -i /tmp/gh.rpm" in text
+    assert "sha256sum -c - && rpm -i --nosignature /tmp/glab.rpm" in text
     assert document["images"]["base_image"]["name"] == BASE
     assert document["options"]["package_manager_path"] == "/usr/bin/dnf"
     assert document["options"]["user"] == "1000"

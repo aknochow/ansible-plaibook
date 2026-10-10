@@ -20,10 +20,15 @@
 # dependencies are the exact pins in execution-environment-requirements.txt,
 # installed with pip --require-hashes. ssh_proxy.py and OpenShell certs
 # are not in the image. gh 2.102.0 and glab 1.122.0 are the vendor RPMs,
-# checked by per-arch SHA-256 before install.
+# checked by per-arch SHA-256 before install. gh is signed with the
+# GitHub CLI key in execution-environment-gh-key.asc.
 #
 # Build from a clean checkout:
 #   ansible-builder build -t ghcr.io/aknochow/plaibook-ee:latest -f execution-environment.yml
+
+additional_build_files:
+  - src: execution-environment-gh-key.asc
+    dest: keys
 
 version: 3
 
@@ -77,8 +82,10 @@ additional_build_steps:
     - ENV PIP_OPTS="--require-hashes"
   append_final:
     - LABEL org.opencontainers.image.source="https://github.com/aknochow/ansible-plaibook"
-    # GitHub's release RPM for 2.102.0. Digest first, then install.
-    - 'RUN arch="$(uname -m)"; case "$arch" in x86_64) rpm_arch=amd64; sum=eba164e2b9be93d210690010436ff4fb7834221dd902b4fbac37a61d0124520e ;; aarch64) rpm_arch=arm64; sum=51d3e63d4c323c336ddfb710dad6e1ed40a960baa950bcbe5e21b2e7475d7388 ;; *) echo "unsupported architecture ${arch}" >&2; exit 1 ;; esac; curl -fsSL -o /tmp/gh.rpm "https://github.com/cli/cli/releases/download/v2.102.0/gh_2.102.0_linux_${rpm_arch}.rpm"; echo "${sum}  /tmp/gh.rpm" | sha256sum -c -; rpm -i /tmp/gh.rpm; rm -f /tmp/gh.rpm'
+    - COPY _build/keys/execution-environment-gh-key.asc /tmp/gh-key.asc
+    # GitHub's signed release RPM for 2.102.0. Digest, then the vendored key,
+    # then install. && so a rejected signature fails the build.
+    - 'RUN arch="$(uname -m)"; case "$arch" in x86_64) rpm_arch=amd64; sum=eba164e2b9be93d210690010436ff4fb7834221dd902b4fbac37a61d0124520e ;; aarch64) rpm_arch=arm64; sum=51d3e63d4c323c336ddfb710dad6e1ed40a960baa950bcbe5e21b2e7475d7388 ;; *) echo "unsupported architecture ${arch}" >&2; exit 1 ;; esac; curl -fsSL -o /tmp/gh.rpm "https://github.com/cli/cli/releases/download/v2.102.0/gh_2.102.0_linux_${rpm_arch}.rpm" && echo "${sum}  /tmp/gh.rpm" | sha256sum -c - && rpm --import /tmp/gh-key.asc && rpm -i /tmp/gh.rpm && rm -f /tmp/gh.rpm /tmp/gh-key.asc'
     # GitLab's generic RPM is unsigned. Hummingbird rpm rejects it, so the
     # install checks the pinned digest and then uses --nosignature.
-    - 'RUN arch="$(uname -m)"; case "$arch" in x86_64) rpm_arch=amd64; sum=8ab5addd123aa50ffb4ca5cbfe16c62bc4ab5dc4f146e3e7f9fd086f41778f8d ;; aarch64) rpm_arch=arm64; sum=951891c88b76bb8ff3e1fedea4b84015edc498eb44c5f8a636752bda9f48cfe8 ;; *) echo "unsupported architecture ${arch}" >&2; exit 1 ;; esac; curl -fsSL -o /tmp/glab.rpm "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/generic/glab/1.122.0/glab_1.122.0_linux_${rpm_arch}.rpm"; echo "${sum}  /tmp/glab.rpm" | sha256sum -c -; rpm -i --nosignature /tmp/glab.rpm; rm -f /tmp/glab.rpm'
+    - 'RUN arch="$(uname -m)"; case "$arch" in x86_64) rpm_arch=amd64; sum=8ab5addd123aa50ffb4ca5cbfe16c62bc4ab5dc4f146e3e7f9fd086f41778f8d ;; aarch64) rpm_arch=arm64; sum=951891c88b76bb8ff3e1fedea4b84015edc498eb44c5f8a636752bda9f48cfe8 ;; *) echo "unsupported architecture ${arch}" >&2; exit 1 ;; esac; curl -fsSL -o /tmp/glab.rpm "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/generic/glab/1.122.0/glab_1.122.0_linux_${rpm_arch}.rpm" && echo "${sum}  /tmp/glab.rpm" | sha256sum -c - && rpm -i --nosignature /tmp/glab.rpm && rm -f /tmp/glab.rpm'
