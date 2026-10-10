@@ -150,6 +150,8 @@ def test_publish_workflow_signs_only_on_push_and_release():
     assert "id-token" not in smoke["permissions"]
     assert "cosign sign" in text
     assert "cosign attest" in text
+    assert 'syft "docker-archive:${RUNNER_TEMP}/plaibook-ee.tar"' in text
+    assert "podman:plaibook-ee:smoke" not in text
     assert "cosign verify" in text
     issuer = re.search(r"--certificate-oidc-issuer (\S+)", text)
     assert issuer is not None
