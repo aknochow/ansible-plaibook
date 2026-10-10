@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
-"""Refresh SHA pins in collections-requirements.yml to each repo's default-branch HEAD.
+"""Refresh SHA pins in collections-requirements.yml only by fast-forward.
 
 Dependabot has no Ansible Galaxy / collections-requirements.yml ecosystem, so
 `.github/dependabot.yml` cannot keep git SHA pins current. Floating
 `version: main` entries are left alone if any remain — those already
 track HEAD. Only `type: git` collections whose `version` is a hex SHA
-and whose GitHub owner is in BUMP_OWNERS (aknochow pins) are bumped.
+and whose GitHub owner is in BUMP_OWNERS (aknochow pins) are candidates.
 ansible-collections release SHAs stay on the tagged commit.
+
+A candidate moves only when GitHub's compare API says the pinned commit
+is an ancestor of the default-branch HEAD (`ahead`) or is that same
+commit (`identical`, which is a no-op). `diverged` and `behind` stay
+put and are listed in the PR body. If nothing moves, the workflow opens
+no pull request.
 
 Usage:
     python3 scripts/bump_collection_pins.py              # dry-run
@@ -64,10 +70,19 @@ class PinChange:
     repo: str
     current: str
     latest: str
+    # ahead: pin is an ancestor of default-branch HEAD (fast-forward).
+    # identical: pin already names that HEAD. diverged/behind: do not move.
+    compare_status: str = "ahead"
 
     @property
     def stale(self) -> bool:
-        return not _sha_matches(self.current, self.latest)
+        """True when the pin should move forward to default-branch HEAD."""
+        return self.compare_status == "ahead" and not _sha_matches(self.current, self.latest)
+
+    @property
+    def held(self) -> bool:
+        """True when the pin is not an ancestor of default-branch HEAD."""
+        return self.compare_status in {"diverged", "behind"}
 
 
 def _sha_matches(current: str, latest: str) -> bool:
@@ -170,6 +185,21 @@ def fetch_json(url: str, *, opener=None) -> dict:
         raise RuntimeError(f"GET {url} failed: {exc.reason}") from exc
 
 
+def compare_pin_to_head(owner: str, repo: str, current: str, latest: str, *, opener=None) -> str:
+    """Return GitHub compare status of default-branch HEAD against the pin.
+
+    `base` is the pinned commit and `head` is default-branch HEAD.
+    `ahead` means HEAD is a descendant of the pin. `behind` means the pin
+    is a descendant of HEAD. `diverged` means neither is an ancestor.
+    """
+    url = f"{GITHUB_API}/repos/{owner}/{repo}/compare/{current}...{latest}"
+    payload = fetch_json(url, opener=opener)
+    status = payload.get("status")
+    if status not in {"ahead", "behind", "diverged", "identical"}:
+        raise RuntimeError(f"unexpected compare status {status!r} at {url}")
+    return status
+
+
 def fetch_default_branch_sha(owner: str, repo: str, *, opener=None) -> str:
     repo_url = f"{GITHUB_API}/repos/{owner}/{repo}"
     repo_info = fetch_json(repo_url, opener=opener)
@@ -186,11 +216,17 @@ def plan_changes(
     pins: list[GitShaPin],
     *,
     sha_fetcher=None,
+    compare_fetcher=None,
 ) -> list[PinChange]:
     fetcher = sha_fetcher or fetch_default_branch_sha
+    comparer = compare_fetcher or compare_pin_to_head
     changes: list[PinChange] = []
     for pin in pins:
         latest = fetcher(pin.owner, pin.repo)
+        if _sha_matches(pin.current, latest):
+            status = "identical"
+        else:
+            status = comparer(pin.owner, pin.repo, pin.current, latest)
         changes.append(
             PinChange(
                 name=pin.name,
@@ -198,36 +234,57 @@ def plan_changes(
                 repo=pin.repo,
                 current=pin.current,
                 latest=latest,
+                compare_status=status,
             )
         )
     return changes
 
 
+def _compare_url(change: PinChange) -> str:
+    return (
+        f"https://github.com/{change.owner}/{change.repo}/compare/"
+        f"{change.current}...{change.latest}"
+    )
+
+
 def format_pr_body(changes: list[PinChange]) -> str:
     stale = [change for change in changes if change.stale]
+    held = [change for change in changes if change.held]
     lines = [
         "## Summary",
         "",
-        "Bump SHA-pinned git collections in `collections-requirements.yml` to each",
-        "repo's default-branch HEAD. Dependabot cannot update this file.",
+        "Bump SHA-pinned git collections in `collections-requirements.yml` only when",
+        "the pinned commit is an ancestor of the repo's default-branch HEAD",
+        "(GitHub compare status `ahead`). A pin whose compare status is `diverged`",
+        "or `behind` stays on its current commit.",
         "",
         "## Changes",
         "",
     ]
     if not stale:
-        lines.append("No stale SHA pins.")
+        lines.append("No pins moved.")
         lines.append("")
-        return "\n".join(lines)
-    for change in stale:
-        compare = (
-            f"https://github.com/{change.owner}/{change.repo}/compare/"
-            f"{change.current}...{change.latest}"
-        )
-        lines.append(
-            f"- `{change.owner}/{change.repo}`: `{change.current[:12]}` → "
-            f"`{change.latest[:12]}` ([compare]({compare}))"
-        )
-    lines.append("")
+    else:
+        for change in stale:
+            compare = _compare_url(change)
+            lines.append(
+                f"- `{change.owner}/{change.repo}`: `{change.current[:12]}` → "
+                f"`{change.latest[:12]}` ([compare]({compare}))"
+            )
+        lines.append("")
+    if held:
+        lines.append("## Left in place")
+        lines.append("")
+        for change in held:
+            if change.compare_status == "diverged":
+                reason = "diverged from default-branch HEAD"
+            else:
+                reason = "behind default-branch HEAD, so it is not an ancestor"
+            lines.append(
+                f"- `{change.owner}/{change.repo}`: `{change.current[:12]}` was left in place. "
+                f"It has {reason} (`{change.latest[:12]}`). [compare]({_compare_url(change)})"
+            )
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -236,7 +293,12 @@ def _print_plan(changes: list[PinChange]) -> None:
         print("No SHA-pinned git collections found.")
         return
     for change in changes:
-        status = "stale" if change.stale else "current"
+        if change.stale:
+            status = "fast-forward"
+        elif change.held:
+            status = f"left in place ({change.compare_status})"
+        else:
+            status = "current"
         print(f"{change.owner}/{change.repo}: {change.current} -> {change.latest} ({status})")
 
 

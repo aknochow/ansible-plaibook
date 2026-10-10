@@ -5,6 +5,11 @@ name: Bump collection git pins
 # (openai / cursor / openshell / claude / gemini). ansible-collections
 # release SHAs are left alone.
 #
+# A pin moves only when it is an ancestor of that repo's default-branch
+# HEAD (GitHub compare status ahead). Diverged and behind pins stay, and
+# are listed in the PR body when a fast-forward also opens a PR. If no
+# pin moves, this job opens no pull request.
+#
 # GitHub Actions cannot subscribe to another repository's events. Sibling
 # default-branch pushes reach this workflow via repository_dispatch
 # (see notify-plaibook-pin-bump.yml). A GitHub webhook URL cannot POST
@@ -56,7 +61,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if git diff --quiet -- collections-requirements.yml; then
-            echo "SHA-pinned git collections already match default-branch HEAD"
+            echo "No SHA pin moved. Diverged or behind pins are listed below and were left in place."
+            if [ -f /tmp/collection-pin-pr.md ]; then
+              cat /tmp/collection-pin-pr.md
+            fi
             exit 0
           fi
           git config user.name "github-actions[bot]"
