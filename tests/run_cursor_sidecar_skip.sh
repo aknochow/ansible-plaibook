@@ -35,4 +35,7 @@ run_case "URL_FILE+TOKEN_FILE" false \
 run_case "URL_FILE only" true \
   CURSOR_SDK_BRIDGE_URL_FILE=/tmp/ansible-plaibook-test-bridge-url
 
+echo "--- sidecar rundir: two run ids ---"
+ansible-playbook tests/test_cursor_sidecar_rundir.yml
+
 echo "All sidecar skip scenarios passed."

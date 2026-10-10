@@ -234,7 +234,9 @@ review_verify_cursor_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_VE
 
 # Playbook-owned cursor-sdk-bridge sidecar. Nested launch_bridge under
 # CURSOR_AGENT=1 is SIGKILL'd (137); aknochow.cursor.bridge double-forks
-# so the vendor node is not a child of ansible-playbook. Attach env that
+# so the vendor node is not a child of ansible-playbook. Each run gets a
+# child of this directory (see cursor_sidecar_rundir.yml) so two
+# CURSOR_AGENT reviews do not stop each other's bridge. Attach env that
 # is already set (URL+token or URL_FILE+TOKEN_FILE) wins — do not start
 # a second sidecar. Not used in iTerm/CI/AAP — those keep in-process
 # launch_bridge.

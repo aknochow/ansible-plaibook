@@ -326,6 +326,10 @@
             )
           }}
 
+    - name: Choose this run's cursor sidecar directory
+      when: review_cursor_sidecar_wanted | bool
+      ansible.builtin.include_tasks: roles/review/tasks/cursor_sidecar_rundir.yml
+
     - name: Start a playbook-owned cursor-sdk-bridge sidecar
       when: review_cursor_sidecar_wanted | bool
       ansible.builtin.include_tasks: roles/review/tasks/cursor_sidecar_start.yml

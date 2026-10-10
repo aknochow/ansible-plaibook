@@ -147,6 +147,71 @@ def test_pip_failure_surfaces(monkeypatch):
         ensure_provider_sdk("openai")
 
 
+def test_pip_install_holds_the_interpreter_lock(monkeypatch, tmp_path):
+    import subprocess
+    import sys
+
+    import plaibook.provider_sdk as sdk
+
+    real_run = subprocess.run
+    monkeypatch.setattr(sdk, "last_run_dir", lambda home=None: tmp_path)
+    monkeypatch.setattr(sdk, "interpreter_is_externally_managed", lambda *_a: False)
+    monkeypatch.setattr(sdk, "_patch_cursor_http2_proxy", lambda *_a, **_k: None)
+    state = {"checks": 0}
+
+    def fake_satisfied(*_a):
+        state["checks"] += 1
+        return state["checks"] > 1
+
+    held = []
+
+    def fake_run(cmd, **kwargs):
+        lock_path = sdk.provider_sdk_lock_path(sys.executable)
+        probe = real_run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import fcntl, os, sys\n"
+                    f"fd = os.open({str(lock_path)!r}, os.O_RDWR)\n"
+                    "try:\n"
+                    "    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
+                    "except BlockingIOError:\n"
+                    "    sys.exit(2)\n"
+                    "else:\n"
+                    "    sys.exit(0)\n"
+                    "finally:\n"
+                    "    os.close(fd)\n"
+                ),
+            ],
+            check=False,
+            timeout=5,
+        )
+        held.append(probe.returncode)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(sdk, "_requirement_satisfied", fake_satisfied)
+    monkeypatch.setattr("plaibook.provider_sdk.subprocess.run", fake_run)
+    ensure_provider_sdk("cursor", stderr=None)
+    assert held == [2]
+    assert sdk.provider_sdk_lock_path(sys.executable).is_file()
+    assert sdk.provider_sdk_lock_path("/usr/bin/python3") != sdk.provider_sdk_lock_path("/other/bin/python3")
+
+
+def test_lock_path_follows_a_path_lookup(monkeypatch, tmp_path):
+    import stat
+
+    import plaibook.provider_sdk as sdk
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    exe = bindir / "pybin"
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", str(bindir))
+    assert sdk.provider_sdk_lock_path("pybin") == sdk.provider_sdk_lock_path(str(exe.resolve()))
+
+
 def test_hashed_files_pin_every_family_distribution():
     from plaibook.pip_hashed import pinned_versions
 
