@@ -1,0 +1,83 @@
+name: Execution environment
+
+# Pull requests build and smoke-test both arches and push nothing.
+# Publish lives in ee-publish.yml and does not run on pull_request.
+
+on:
+  pull_request:
+    paths:
+      - execution-environment.yml
+      - execution-environment-requirements.in
+      - execution-environment-requirements.txt
+      - execution-environment-gh-key.asc
+      - collections-requirements.yml
+      - scripts/ee_smoke.py
+      - scripts/ee_manifest_arches.py
+      - .trivyignore.yaml
+      - .github/ee-builder-requirements.txt
+      - .github/workflows/ee.yml
+      - .github/workflows/ee-publish.yml
+
+permissions: {}
+
+jobs:
+  build:
+    name: "EE (${{ matrix.arch }})"
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install ansible-builder
+        run: |
+          python3 -m pip install --user --require-hashes -r .github/ee-builder-requirements.txt
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Create build context
+        run: ansible-builder create -f execution-environment.yml -c "$RUNNER_TEMP/ee-context"
+
+      - name: Build image
+        run: |
+          podman build \
+            --platform "linux/${{ matrix.arch }}" \
+            -f "$RUNNER_TEMP/ee-context/Containerfile" \
+            -t plaibook-ee:smoke \
+            "$RUNNER_TEMP/ee-context"
+
+      - name: Smoke test
+        run: python3 scripts/ee_smoke.py --image plaibook-ee:smoke
+
+      - name: Save image archive
+        run: podman save --format docker-archive -o "$RUNNER_TEMP/plaibook-ee.tar" plaibook-ee:smoke
+
+      - name: Report vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          input: ${{ runner.temp }}/plaibook-ee.tar
+          format: table
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          exit-code: "0"
+          ignore-unfixed: "false"
+
+      - name: Fail on fixable high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          input: ${{ runner.temp }}/plaibook-ee.tar
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: "true"
+          trivyignores: .trivyignore.yaml

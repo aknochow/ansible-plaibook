@@ -1,0 +1,24 @@
+# Direct pins for the execution environment. The compiled file is
+# execution-environment-requirements.txt. Rebuild that file with
+# `uv pip compile` when a pin here changes; the image build installs it
+# with `pip install --require-hashes` and does not resolve ranges.
+#
+# Versions are the ones the smoked image already ran, which satisfy the
+# ranges in each collection requirements.txt.
+ansible-core==2.19.14
+ansible-runner==2.4.3
+anthropic[vertex]==1.13.0
+claude-agent-sdk==0.2.165
+google-genai==2.29.0
+openai==3.28.0
+cursor-sdk==1.0.37
+openshell==0.0.116
+grpcio==1.84.0
+protobuf==7.36.2
+kubernetes==37.0.1
+requests-oauthlib==2.0.0
+jsonpatch==1.34
+msgpack==1.2.3
+setuptools==84.0.0
+urllib3==2.8.0
+dumb-init==1.2.5
