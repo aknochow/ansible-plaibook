@@ -61,7 +61,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if git diff --quiet -- collections-requirements.yml; then
-            echo "No SHA pin moved. Diverged or behind pins are listed below and were left in place."
+            echo "No SHA pin moved."
             if [ -f /tmp/collection-pin-pr.md ]; then
               cat /tmp/collection-pin-pr.md
             fi
