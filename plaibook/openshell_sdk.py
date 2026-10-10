@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Install the OpenShell SDK into an interpreter that can import it.
 
-``openshell>=0.1.2`` requires Python 3.11. Ansible runs controller
+``openshell>=0.1.3`` requires Python 3.11. Ansible runs controller
 modules, including ``aknochow.openshell.sandbox``, with the same
 interpreter as ``ansible-playbook``. A Python 3.10 ``plai`` therefore
 prepares ``~/.cache/ansible-plaibook/sandbox-runtime`` from the first
@@ -30,9 +30,10 @@ from plaibook.pip_hashed import lock_digest, pip_install_hashed_argv
 from plaibook.playbook import last_run_dir
 from plaibook.runtime import interpreter_is_externally_managed
 
-# Matches the OpenShell 0.1 gateway started by the upstream installer.
-# 0.0.116 encodes CreateSandboxRequest fields the 0.1 gateway rejects.
-SDK_SPEC = "openshell>=0.1.2,<0.2"
+# Matches aknochow.openshell (OPENSHELL_SDK_SPEC) and the 0.1 gateway
+# started by the upstream installer. 0.0.116 encodes CreateSandboxRequest
+# fields that gateway rejects. 0.1.3 is current PyPI; <0.2 is the ceiling.
+SDK_SPEC = "openshell>=0.1.3,<0.2"
 HASHED_REQUIREMENTS = "openshell-requirements.txt"
 RUNTIME_HASHED_REQUIREMENTS = "sandbox-runtime-requirements.txt"
 BUILD_BACKEND_REQUIREMENTS = "build-backend-requirements.txt"
@@ -41,7 +42,7 @@ RUNTIME_DIRNAME = "sandbox-runtime"
 STAMP_NAME = "sandbox-runtime.json"
 LOCK_NAME = "sandbox-runtime.lock"
 ENV_REEXEC = "PLAIBOOK_SANDBOX_RUNTIME"
-_MIN = (0, 1, 2)
+_MIN = (0, 1, 3)
 _MAX = (0, 2, 0)
 _RELEASE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:\+.*)?$")
 _BREW_BIN = (Path("/opt/homebrew/bin"), Path("/usr/local/bin"))
