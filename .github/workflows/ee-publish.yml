@@ -136,7 +136,9 @@ jobs:
         env:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: printf '%s' "$GHCR_TOKEN" | podman login --username "$GHCR_USER" --password-stdin ghcr.io
+        run: |
+          printf '%s' "$GHCR_TOKEN" | podman login --username "$GHCR_USER" --password-stdin ghcr.io
+          printf '%s' "$GHCR_TOKEN" | cosign login ghcr.io --username "$GHCR_USER" --password-stdin
 
       - name: Push architecture image
         id: push
@@ -184,7 +186,9 @@ jobs:
         env:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: printf '%s' "$GHCR_TOKEN" | podman login --username "$GHCR_USER" --password-stdin ghcr.io
+        run: |
+          printf '%s' "$GHCR_TOKEN" | podman login --username "$GHCR_USER" --password-stdin ghcr.io
+          printf '%s' "$GHCR_TOKEN" | cosign login ghcr.io --username "$GHCR_USER" --password-stdin
 
       - name: Image tag
         id: tag
