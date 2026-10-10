@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -111,7 +112,38 @@ def test_readme_points_at_the_published_image():
     assert "refs/tags/v${tag}" in guide
     navigator = guide.index("ansible-navigator run review.yml")
     assert guide.rindex("cosign verify", 0, navigator) < navigator
+    assert '"ghcr.io/aknochow/plaibook-ee@${digest}" &&' in guide
     assert "build/collections/*.tar.gz" not in section
+
+
+def test_failed_cosign_verify_does_not_start_navigator(tmp_path: Path):
+    guide = (ROOT / "docs" / "execution-environment.md").read_text(encoding="utf-8")
+    start = guide.index("```bash\n") + len("```bash\n")
+    script = guide[start : guide.index("```", start)]
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    marker = tmp_path / "navigator-ran"
+    (bindir / "podman").write_text(
+        "#!/bin/sh\nif [ \"$1\" = image ]; then echo sha256:abc; fi\nexit 0\n",
+        encoding="utf-8",
+    )
+    (bindir / "cosign").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    (bindir / "ansible-navigator").write_text(
+        f"#!/bin/sh\ntouch {marker}\nexit 0\n",
+        encoding="utf-8",
+    )
+    for path in bindir.iterdir():
+        path.chmod(0o755)
+    completed = subprocess.run(
+        ["bash", "-c", script],
+        check=False,
+        cwd=tmp_path,
+        env={"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(tmp_path)},
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    assert not marker.exists()
 
 
 def test_pr_workflow_builds_both_arches_and_does_not_push():

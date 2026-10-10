@@ -21,7 +21,7 @@ digest="$(podman image inspect --format '{{.Digest}}' "ghcr.io/aknochow/plaibook
 cosign verify \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity "https://github.com/aknochow/ansible-plaibook/.github/workflows/ee-publish.yml@refs/tags/v${tag}" \
-  "ghcr.io/aknochow/plaibook-ee@${digest}"
+  "ghcr.io/aknochow/plaibook-ee@${digest}" &&
 ansible-navigator run review.yml \
   --eei "ghcr.io/aknochow/plaibook-ee@${digest}" \
   --mode stdout \
