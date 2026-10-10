@@ -60,16 +60,27 @@ def test_execution_environment_builds_from_the_pin_file():
     assert document["options"]["user"] == "1000"
     assert document["dependencies"]["python_interpreter"]["python_path"] == "/usr/bin/python3"
     assert document["dependencies"]["galaxy"] == "collections-requirements.yml"
-    python_deps = document["dependencies"]["python"]
+    assert document["dependencies"]["python"] == "execution-environment-requirements.txt"
+    assert document["dependencies"]["ansible_core"]["package_pip"] == "--require-hashes -r /tmp/ee-requirements.txt"
+    assert "ansible_runner" not in document["dependencies"]
+    locked = (ROOT / "execution-environment-requirements.txt").read_text(encoding="utf-8")
+    assert ">=" not in locked
     for pin in (
-        "anthropic[vertex]>=0.84.0",
-        "claude-agent-sdk>=0.2.144",
-        "google-genai>=1.0.0",
-        "openai>=1.58.0",
-        "cursor-sdk>=1.0.31,<2.0.0",
-        "openshell>=0.0.116,<0.0.120",
+        "ansible-core==2.19.14",
+        "ansible-runner==2.4.3",
+        "anthropic[vertex]==1.13.0",
+        "claude-agent-sdk==0.2.165",
+        "google-genai==2.29.0",
+        "openai==3.28.0",
+        "cursor-sdk==1.0.37",
+        "openshell==0.0.116",
     ):
-        assert pin in python_deps
+        assert pin in locked
+    assert "--hash=sha256:" in locked
+    assert "gh-cli.repo" not in text
+    assert "eba164e2b9be93d210690010436ff4fb7834221dd902b4fbac37a61d0124520e" in text
+    assert "51d3e63d4c323c336ddfb710dad6e1ed40a960baa950bcbe5e21b2e7475d7388" in text
+    assert "sha256sum -c -" in text
 
 
 def test_readme_points_at_the_published_image():

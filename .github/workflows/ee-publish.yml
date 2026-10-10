@@ -10,6 +10,8 @@ on:
     branches: [main]
     paths:
       - execution-environment.yml
+      - execution-environment-requirements.in
+      - execution-environment-requirements.txt
       - collections-requirements.yml
       - scripts/ee_smoke.py
       - scripts/ee_manifest_arches.py

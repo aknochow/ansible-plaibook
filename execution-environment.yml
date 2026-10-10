@@ -16,9 +16,11 @@
 # Python 3.14 and would replace the interpreter. ansible-builder installs
 # pip for 3.12 with ensurepip.
 #
-# Collections are the git pins in collections-requirements.yml. A pin bump
-# changes this image's inputs with no other wiring. ssh_proxy.py and
-# OpenShell certs are not in the image.
+# Collections are the git pins in collections-requirements.yml. Python
+# dependencies are the exact pins in execution-environment-requirements.txt,
+# installed with pip --require-hashes. ssh_proxy.py and OpenShell certs
+# are not in the image. gh 2.102.0 and glab 1.122.0 are the vendor RPMs,
+# checked by per-arch SHA-256 before install.
 #
 # Build from a clean checkout:
 #   ansible-builder build -t ghcr.io/aknochow/plaibook-ee:latest -f execution-environment.yml
@@ -41,41 +43,42 @@ options:
 dependencies:
   python_interpreter:
     python_path: /usr/bin/python3
+  # ansible-builder runs `pip install $ANSIBLE_INSTALL_REFS` in the base
+  # stage, before galaxy. That string is the hashed lock, not a version
+  # range. ansible-runner is in the same file.
   ansible_core:
-    package_pip: ansible-core>=2.16.0,<2.20.0
-  ansible_runner:
-    package_pip: ansible-runner>=2.4.0,<3.0.0
+    package_pip: "--require-hashes -r /tmp/ee-requirements.txt"
   # Same file the collection pin-bump workflow maintains.
   galaxy: collections-requirements.yml
-  python:
-    # Runtime pins copied from each provider collection's requirements.txt
-    # at the commit collections-requirements.yml currently names.
-    - anthropic[vertex]>=0.84.0
-    - claude-agent-sdk>=0.2.144
-    - google-genai>=1.0.0
-    - openai>=1.58.0
-    - cursor-sdk>=1.0.31,<2.0.0
-    - openshell>=0.0.116,<0.0.120
-    - grpcio>=1.60
-    - protobuf>=4.25
-    # kubernetes.core requirements.txt (also pinned in the galaxy file).
-    - kubernetes>=24.2.0
-    - requests-oauthlib
-    - jsonpatch
-    # Floors above vulnerable transitive versions. They do not relax the
-    # collection pins above.
-    - msgpack>=1.2.1
-    - setuptools>=78.1.1
-    - urllib3>=2.8.0
+  python: execution-environment-requirements.txt
+  # Collection requirements.txt files are ranges. Drop them so introspect
+  # cannot install those ranges beside the lockfile.
+  exclude:
+    python:
+      - anthropic
+      - claude-agent-sdk
+      - google-genai
+      - openai
+      - cursor-sdk
+      - openshell
+      - grpcio
+      - protobuf
+      - kubernetes
+      - requests-oauthlib
+      - jsonpatch
 
 additional_build_steps:
   # git has to be present before the galaxy stage clones the pin file.
   # The final stage is FROM this base, so these packages stay in the image.
   prepend_base:
     - RUN $PKGMGR install -y git tar openssh-clients jq
+    - COPY _build/requirements.txt /tmp/ee-requirements.txt
+  prepend_builder:
+    - ENV PIP_OPTS="--require-hashes"
   append_final:
     - LABEL org.opencontainers.image.source="https://github.com/aknochow/ansible-plaibook"
-    - RUN curl -fsSL https://cli.github.com/packages/rpm/gh-cli.repo -o /etc/yum.repos.d/gh-cli.repo && $PKGMGR install -y gh
+    # GitHub's release RPM for 2.102.0. Digest first, then install.
+    - 'RUN arch="$(uname -m)"; case "$arch" in x86_64) rpm_arch=amd64; sum=eba164e2b9be93d210690010436ff4fb7834221dd902b4fbac37a61d0124520e ;; aarch64) rpm_arch=arm64; sum=51d3e63d4c323c336ddfb710dad6e1ed40a960baa950bcbe5e21b2e7475d7388 ;; *) echo "unsupported architecture ${arch}" >&2; exit 1 ;; esac; curl -fsSL -o /tmp/gh.rpm "https://github.com/cli/cli/releases/download/v2.102.0/gh_2.102.0_linux_${rpm_arch}.rpm"; echo "${sum}  /tmp/gh.rpm" | sha256sum -c -; rpm -i /tmp/gh.rpm; rm -f /tmp/gh.rpm'
     # GitLab's generic RPM is unsigned. Hummingbird rpm rejects it, so the
     # install checks the pinned digest and then uses --nosignature.
     - 'RUN arch="$(uname -m)"; case "$arch" in x86_64) rpm_arch=amd64; sum=8ab5addd123aa50ffb4ca5cbfe16c62bc4ab5dc4f146e3e7f9fd086f41778f8d ;; aarch64) rpm_arch=arm64; sum=951891c88b76bb8ff3e1fedea4b84015edc498eb44c5f8a636752bda9f48cfe8 ;; *) echo "unsupported architecture ${arch}" >&2; exit 1 ;; esac; curl -fsSL -o /tmp/glab.rpm "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/generic/glab/1.122.0/glab_1.122.0_linux_${rpm_arch}.rpm"; echo "${sum}  /tmp/glab.rpm" | sha256sum -c -; rpm -i --nosignature /tmp/glab.rpm; rm -f /tmp/glab.rpm'
