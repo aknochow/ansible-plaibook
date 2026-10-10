@@ -51,6 +51,11 @@ or `plaibook/openshell_sdk.py`.
 
 ## Collection pins
 
+The cross-project matrix is [docs/dependency-map.md](docs/dependency-map.md).
+Update the matching row in the same commit as the pin. The map is the
+list a dependency check should read. Do not copy it into another
+repository.
+
 `collections-requirements.yml` is git sources at commit SHAs: aknochow
 interface pins (`aknochow.cursor`, `aknochow.openai`, and the other
 family collections) plus ansible-collections release commits.

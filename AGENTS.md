@@ -9,6 +9,7 @@ output, check these first:
 - [README.md](README.md): project overview (separate from `docs/` for now, not flydocs-generated)
 - [docs/](docs/): OKF-compliant docs (`flydocs build`/`flydocs lint` to render/validate)
 - [docs/architecture.md](docs/architecture.md): how the review pipeline is built: the consolidated review role, domain-specific steering, and independent verification
+- [docs/dependency-map.md](docs/dependency-map.md): which project pins which collection SHA, SDK, OpenShell gateway, and review-workflow ref. Update the row in the same commit as the pin. A sibling checkout is not a pin.
 - [docs/getting-started.md](docs/getting-started.md): run a first review with `plai review` / `plaibook review`, and `ansible-playbook review.yml` for AAP, and read its output
 - [docs/github-review-check.md](docs/github-review-check.md): the pull-request check that runs `plai review` after the other checks pass and posts one review
 - [docs/index.md](docs/index.md): navigation index

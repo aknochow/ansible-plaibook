@@ -30,6 +30,13 @@ same wheel is `pip install .` from this checkout. Put that venv under
 `$HOME`, not `/tmp` (macOS XProtect). Contributors still
 `uv sync --extra dev` — see [CONTRIBUTING](CONTRIBUTING.md).
 
+## Dependencies
+
+Plaibook pins provider collections, Python SDKs, the OpenShell
+gateway, and the review workflow in different files. Those numbers
+are not interchangeable. The map, and the order a bump has to follow,
+is [docs/dependency-map.md](docs/dependency-map.md).
+
 ## Why Ansible?
 
 The question everyone asks first. A few concrete reasons this isn't
