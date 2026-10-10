@@ -1,16 +1,22 @@
 # ansible-plaibook: Project Context
 
-## Documentation: Read First
+## Read first
 
 Before asking the user how to invoke a playbook or interpret its
 output, check these first:
 
-- **[docs/](docs/)**: OKF-compliant docs (`flydocs build`/`flydocs lint` to render/validate)
-- **[docs/index.md](docs/index.md)**: navigation index
-- **[.claude/skills/ansible-plaibook-review/SKILL.md](.claude/skills/ansible-plaibook-review/SKILL.md)**: how to run `plai review` / `plaibook review` (and the AAP path `ansible-playbook review.yml`) and read `last_run.<run_id>.json` correctly
-- **[README.md](README.md)**: project overview (separate from `docs/` for now, not flydocs-generated)
+- [CONTRIBUTING.md](CONTRIBUTING.md): branch names, commits, test and lint commands
+- [README.md](README.md): project overview (separate from `docs/` for now, not flydocs-generated)
+- [docs/](docs/): OKF-compliant docs (`flydocs build`/`flydocs lint` to render/validate)
+- [docs/architecture.md](docs/architecture.md): how the review pipeline is built: the consolidated review role, domain-specific steering, and independent verification
+- [docs/getting-started.md](docs/getting-started.md): run a first review with `plai review` / `plaibook review`, and `ansible-playbook review.yml` for AAP, and read its output
+- [docs/github-review-check.md](docs/github-review-check.md): the pull-request check that runs `plai review` after the other checks pass and posts one review
+- [docs/index.md](docs/index.md): navigation index
+- [docs/reference.md](docs/reference.md): every variable that controls a `review.yml` run, its default, and what it changes
+- [docs/sandbox-and-agent-safety.md](docs/sandbox-and-agent-safety.md): how OpenShell sandboxes combine with model calls, and the pattern deliberately not used
+- [.claude/skills/ansible-plaibook-review/SKILL.md](.claude/skills/ansible-plaibook-review/SKILL.md): how to run `plai review` / `plaibook review` (and the AAP path `ansible-playbook review.yml`) and read `last_run.<run_id>.json` correctly
 
-## What This Is
+## What this repo is
 
 ansible-plaibook is an **Ansible-native AI code-review pipeline**,
 deterministic Ansible orchestration around
@@ -19,7 +25,31 @@ provider modules, not an interactive agent loop. The human entry point
 is `plai review` / `plaibook review` (same program). AAP keeps
 `ansible-playbook review.yml`. `bug_pipeline.yml` is not on `main`.
 
-## Security & Privacy Context: Critical
+## Commands
+
+Test, lint, and sanity commands, copied from [CONTRIBUTING.md](CONTRIBUTING.md):
+
+```bash
+uv run pytest                                      # Python unit test suite (action plugins, modules, filters, scripts)
+uv run ruff check                                  # same ruff CI runs
+uv run ansible-lint --offline                      # profile is min, not production; see .ansible-lint
+uv run ./scripts/run_playbook_tests.sh             # Offline Ansible playbook test suite
+uv run ansible-playbook review.yml --syntax-check  # Playbook syntax check
+```
+
+Single-file pytest, and review commands that are not in that block:
+
+```bash
+uv run pytest action_plugins/test_foo.py                  # single file
+plai review --commit                                      # fast, cheap, local (same as plaibook review --commit)
+plai review org/repo/N                                    # full GitHub PR review
+# AAP / EE keep ansible-playbook review.yml.
+# If .venv is not on PATH, uv run plai is the CONTRIBUTING invocation.
+```
+
+## Repo-specific gotchas
+
+### Security & Privacy Context: Critical
 
 **Sanitize before anything leaves the machine.** This repo is public.
 Never put private hostnames, internal domains, cluster service names, or
@@ -37,7 +67,7 @@ carry explicit prompt-injection defense framing (see
 the template to match). `review_extra_notes` is the one exception:
 operator-supplied at run time, trusted.
 
-### What NOT to flag as a real finding (confirmed false, repeatedly)
+#### What NOT to flag as a real finding (confirmed false, repeatedly)
 
 - A boolean value (bare literal or dot-accessed) claimed to get
   "stringified" to `"True"`/`"False"` by this repo's non-native Jinja
@@ -56,7 +86,7 @@ See `handoff.ansible-plaibook-review-false-positives.yaml` (VAIL) for the
 full catalog (29+ patterns). Check it before spending a round
 re-deriving a claim from scratch.
 
-### What IS worth flagging
+#### What IS worth flagging
 
 - A finding whose `evidence` matches injected prior-round content
   verbatim but doesn't independently appear in the current diff
@@ -65,7 +95,7 @@ re-deriving a claim from scratch.
   `fix`/`description` text but still shipped in the findings array.
   `merge.yml` has a regex backstop, but it's reactive and imperfect.
 
-## Known Gaps: Critical
+### Known Gaps: Critical
 
 - **`~/.cache/ansible-plaibook/last_run.json` is a single global path.**
   It races across concurrent sessions on the same machine. Always
@@ -78,7 +108,7 @@ re-deriving a claim from scratch.
   `main` produces a bogus diff that looks like unrelated work was
   "removed."
 
-## Architecture
+### Architecture
 
 - `roles/review/` is the single consolidated role behind all three
   review entry points (`pr_review`/`branch_review`/`code_review`
@@ -91,7 +121,7 @@ re-deriving a claim from scratch.
 - `bug_pipeline.yml` is not on `main` (parked on `wip/bug-fix-pipeline`).
   There is no `plai fix`.
 
-## Key Files
+### Key Files
 
 | File | Purpose |
 |---|---|
@@ -102,7 +132,7 @@ re-deriving a claim from scratch.
 | `action_plugins/` | Real Python for anything beyond trivial Jinja |
 | `roles/review/templates/domain_steering/` | Per-domain reviewer guidance, auto-selected |
 
-## Conventions
+### Conventions
 
 - Real Python (`action_plugins/`) for logic beyond trivial Jinja, not
   a long `rejectattr`/ternary chain. Established precedent
@@ -110,25 +140,7 @@ re-deriving a claim from scratch.
 - Per-task-config-var for multi-provider dispatch (Claude/Gemini/
   Qwen), never a generic abstraction-class layer. Decided, don't
   re-litigate (see `handoff.ansible-plaibook-multi-provider-agents.yaml`).
-- Commits: `-s` sign-off plus an accurate `Assisted-by: Provider (model)`
-  trailer when AI assisted. Record the provider/tool and exact model that
-  performed the work (for example, `Assisted-by: Codex
-  (gpt-5.6-luna-xhigh)`); never copy a provider or model from another
-  session. Never use `Co-Authored-By:` (it creates phantom accounts).
+- Commit rules: see CONTRIBUTING.md and the umbrella AGENTS.md (attribution, `scripts/agent-commit.sh`).
 - Dogfood every real MR (`review_type=commit` **and**
   `review_type=pr` against your own diff) before merging. A passing
   test suite alone has missed real bugs here more than once.
-
-## Build & Test
-
-```bash
-uv run pytest                                             # full Python unit suite
-uv run pytest action_plugins/test_foo.py                  # single file
-uv run ./scripts/run_playbook_tests.sh                    # offline Ansible playbook test suite
-uv run ansible-playbook review.yml --syntax-check
-uv run ruff check && uv run ansible-lint --offline        # same lint CI runs; .ansible-lint profile is min, not production
-plai review --commit                                      # fast, cheap, local (same as plaibook review --commit)
-plai review org/repo/N                                    # full GitHub PR review
-# AAP / EE keep ansible-playbook review.yml.
-# If .venv is not on PATH, uv run plai is the CONTRIBUTING invocation.
-```

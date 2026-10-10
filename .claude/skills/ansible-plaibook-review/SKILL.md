@@ -200,8 +200,19 @@ structured summary the playbook already wrote — verdict, scores,
 findings, cost, `run_id`, paths — not ansible stdout. Quiet mode hides
 the playbook wall; `-v` shows it.
 
-If you invoked `ansible-playbook review.yml` directly (AAP / EE), every
-run prints two clean debug lines at the end:
+If you invoked `ansible-playbook review.yml` directly (AAP / EE), the
+playbook prints a **Review Summary after PLAY RECAP**. It lists each
+PR/MR title and target, the findings report path, and
+the reason for any failed or skipped review. A failed run that stops
+before summary data is written gets a sanitized failure-task fallback.
+
+The summary is printed by the `plaibook_review_summary` aggregate
+callback. Local runs load it from this checkout's `ansible.cfg`. For an
+AAP Job Template, add `plaibook_review_summary` to **Ansible Callback
+Plugins** and make this repository's `callback_plugins/` directory
+available as the callback plugin path. The existing end-of-run paths
+remain available as debug lines:
+
 - `RESULT_SUMMARY_RUN_SCOPED: ~/.cache/ansible-plaibook/last_run.<run_id>.json`
   — **read this one. Always.** It's this invocation's own result, named
   after the run's own `run_id`, immune to being overwritten by any other

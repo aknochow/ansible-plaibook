@@ -45,6 +45,8 @@
         pipeline_findings_reports: >-
           {{ (pipeline_findings_reports | default([])) + [{
             'target': review_org_repo + '#' + review_number,
+            'title': _pr_context.title | default(''),
+            'url': _pr_context.url | default(''),
             'report': _ci_preflight_report,
             'verdict': 'SKIPPED',
             'score': 0.0,
@@ -55,5 +57,6 @@
             'ci_preflight_failed': true,
             'skip_reason': review_skip_reason,
             'skip_hint': review_skip_hint,
+            'cache_hit': false,
             'failing_checks': review_ci_failing_checks | default([])
           }] }}

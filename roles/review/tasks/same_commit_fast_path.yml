@@ -36,6 +36,8 @@
     pipeline_findings_reports: >-
       {{ pipeline_findings_reports + [{
         'target': review_org_repo + '#' + review_number,
+        'title': (_pr_context.title | default('')) if (review_type == 'pr' and _pr_context is defined) else '',
+        'url': (_pr_context.url | default('')) if (review_type == 'pr' and _pr_context is defined) else '',
         'report': review_final_report,
         'verdict': review_prior_summary.verdict,
         'score': review_prior_summary.score_overall | float,
