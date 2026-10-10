@@ -13,6 +13,7 @@ import inspect
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -23,6 +24,10 @@ from plaibook.pip_hashed import pinned_versions
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIREMENTS = ROOT / "collections-requirements.yml"
+# Fetch only this reviewed commit. A pull request that changes the pin
+# must change these constants too; the YAML values are never passed to git.
+ALLOWED_REMOTE = "https://github.com/aknochow/ansible-openshell.git"
+ALLOWED_SHA = "494420ce471eb81f88e5860ad2155e13bd3cda97"
 
 
 def _openshell_pin() -> tuple[str, str]:
@@ -50,11 +55,20 @@ def _sdk_spec(collection: Path) -> str:
     raise AssertionError("pinned collection does not assign OPENSHELL_SDK_SPEC")
 
 
-def _checkout(url: str, sha: str, dest: Path) -> None:
+def _require_reviewed_pin() -> None:
+    url, sha = _openshell_pin()
+    if url != ALLOWED_REMOTE or sha != ALLOWED_SHA:
+        raise AssertionError(f"refusing to fetch {url}@{sha}; only {ALLOWED_REMOTE}@{ALLOWED_SHA} is allowed")
+
+
+def _checkout(dest: Path) -> None:
+    _require_reviewed_pin()
+    if not ALLOWED_REMOTE.startswith("https://github.com/aknochow/"):
+        raise AssertionError(f"refusing non-allowlisted remote {ALLOWED_REMOTE}")
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
     subprocess.run(["git", "init", "-q", dest], check=True, env=env, timeout=30)
     subprocess.run(
-        ["git", "fetch", "--depth", "1", url, sha],
+        ["git", "fetch", "--depth", "1", ALLOWED_REMOTE, ALLOWED_SHA],
         cwd=dest,
         check=True,
         env=env,
@@ -70,14 +84,13 @@ def _checkout(url: str, sha: str, dest: Path) -> None:
         env=env,
         timeout=30,
     )
-    assert head.stdout.strip() == sha
+    assert head.stdout.strip() == ALLOWED_SHA
 
 
 @pytest.fixture(scope="module")
 def pinned_collection(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    url, sha = _openshell_pin()
     dest = tmp_path_factory.mktemp("openshell-pin") / "collection"
-    _checkout(url, sha, dest)
+    _checkout(dest)
     return dest
 
 
@@ -87,7 +100,7 @@ def test_pinned_collection_accepts_the_hashed_sdk(pinned_collection: Path):
     assert spec.specifier.contains(installed), f"{installed} not in {spec}"
 
 
-def _load_collection(collection: Path):
+def _load_collection(collection: Path) -> tuple[Callable[..., object], Callable[..., object]]:
     namespace = collection.parent / "ansible_collections" / "aknochow" / "openshell"
     if namespace.exists() or namespace.is_symlink():
         namespace.unlink()
@@ -112,15 +125,19 @@ def _load_collection(collection: Path):
 
 
 def test_pinned_collection_calls_the_installed_sdk(pinned_collection: Path):
-    pytest.importorskip("openshell")
+    if sys.version_info < (3, 11):
+        pytest.skip("openshell publishes no wheels for Python 3.10")
     from openshell import SandboxClient
     from openshell._proto import openshell_pb2
 
     exec_command, ssh_forward_messages = _load_collection(pinned_collection)
     signature = inspect.signature(SandboxClient.exec)
+    seen: dict[str, object] = {}
 
     def exec_fn(*args, **kwargs):
         signature.bind(None, *args, **kwargs)
+        seen["args"] = args
+        seen["kwargs"] = kwargs
         return SimpleNamespace(exit_code=0, stdout="", stderr="")
 
     exec_fn.__signature__ = signature
@@ -136,7 +153,16 @@ def test_pinned_collection_calls_the_installed_sdk(pinned_collection: Path):
         timeout_seconds=5,
     )
     assert result.exit_code == 0
+    assert seen["args"] == ("meek-grison", ["true"])
+    assert seen["kwargs"] == {
+        "workspace": "default",
+        "workdir": "/work",
+        "env": {"A": "b"},
+        "stdin": b"x",
+        "timeout_seconds": 5,
+    }
 
     session, init = ssh_forward_messages(openshell_pb2, "meek-grison", "id-1", "default")
-    assert session is not None
-    assert init is not None
+    assert session.sandbox == "meek-grison"
+    assert init.sandbox == "meek-grison"
+    assert init.workspace == "default"
