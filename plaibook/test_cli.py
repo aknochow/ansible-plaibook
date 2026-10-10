@@ -1880,6 +1880,232 @@ def test_run_ansible_playbook_times_out(tmp_path, monkeypatch):
         raise AssertionError("expected PlaybookTimeoutError")
 
 
+def _pid_is_dead(pid: int, timeout: float = 2.0) -> bool:
+    import os
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            return False
+        time.sleep(0.02)
+    return False
+
+
+@pytest.mark.parametrize("verbose", [False, True])
+def test_run_ansible_playbook_keyboard_interrupt_kills_process_group(tmp_path, monkeypatch, verbose):
+    """Ctrl-C during communicate kills the playbook group and does not chain KeyboardInterrupt."""
+    import os
+    import signal
+    import subprocess
+    import time
+    import traceback
+
+    from plaibook.playbook import PlaybookInterruptedError, run_ansible_playbook
+
+    leader_file = tmp_path / "leader.pid"
+    child_file = tmp_path / "child.pid"
+    holder: dict[str, int] = {}
+    killpg_calls: list[tuple[int, int]] = []
+    real_killpg = os.killpg
+
+    def spy_killpg(pid: int, sig: int) -> None:
+        killpg_calls.append((pid, sig))
+        real_killpg(pid, sig)
+
+    real_popen = subprocess.Popen
+
+    def wrapping_popen(**kwargs):
+        assert kwargs.get("start_new_session") is True
+        proc = real_popen(**kwargs)
+        holder["pid"] = proc.pid
+
+        def communicate(timeout=None):
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                if leader_file.is_file() and child_file.is_file():
+                    leader_txt = leader_file.read_text().strip()
+                    child_txt = child_file.read_text().strip()
+                    if leader_txt and child_txt:
+                        holder["leader"] = int(leader_txt)
+                        holder["child"] = int(child_txt)
+                        break
+                time.sleep(0.01)
+            else:
+                raise AssertionError("playbook process group did not record its pids")
+            assert os.getpgid(holder["leader"]) == holder["leader"]
+            assert os.getpgid(holder["child"]) == holder["leader"]
+            assert holder["leader"] != os.getpgrp()
+            raise KeyboardInterrupt
+
+        proc.communicate = communicate
+        return proc
+
+    monkeypatch.setenv("PLAIBOOK_PLAYBOOK_TIMEOUT", "5")
+    monkeypatch.setattr("plaibook.playbook.os.killpg", spy_killpg)
+    monkeypatch.setattr("plaibook.playbook.subprocess.Popen", wrapping_popen)
+    (tmp_path / "ansible.cfg").write_text("[defaults]\n")
+    command = [
+        "bash",
+        "-c",
+        'echo $$ > "$1"; sleep 30 & echo $! > "$2"; wait',
+        "bash",
+        str(leader_file),
+        str(child_file),
+    ]
+    try:
+        try:
+            run_ansible_playbook(command, playbook_root=tmp_path, verbose=verbose, home=tmp_path / "home")
+        except PlaybookInterruptedError as exc:
+            interrupted = exc
+        except KeyboardInterrupt:
+            pytest.fail("KeyboardInterrupt escaped run_ansible_playbook")
+        else:
+            pytest.fail("expected PlaybookInterruptedError")
+
+        assert holder["leader"] == holder["pid"]
+        assert killpg_calls == [(holder["leader"], signal.SIGKILL)]
+        assert _pid_is_dead(holder["leader"])
+        assert _pid_is_dead(holder["child"])
+        assert interrupted.command == command
+        assert interrupted.__cause__ is None
+        assert interrupted.__suppress_context__ is True
+        rendered = "".join(traceback.format_exception(type(interrupted), interrupted, interrupted.__traceback__))
+        assert "KeyboardInterrupt" not in rendered
+    finally:
+        pid = holder.get("pid")
+        if pid:
+            try:
+                real_killpg(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        for extra in (holder.get("leader"), holder.get("child"), holder.get("pid")):
+            if not extra:
+                continue
+            try:
+                os.kill(extra, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+class _CapturedStream:
+    def __init__(self, tty: bool) -> None:
+        self._tty = tty
+        self.buf: list[str] = []
+
+    def isatty(self) -> bool:
+        return self._tty
+
+    def write(self, data: str) -> int:
+        self.buf.append(data)
+        return len(data)
+
+    def flush(self) -> None:
+        return None
+
+    def text(self) -> str:
+        return "".join(self.buf)
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "tty"),
+    [
+        pytest.param([], True, id="spinner"),
+        pytest.param([], False, id="quiet"),
+        pytest.param(["-v"], False, id="verbose"),
+    ],
+)
+def test_review_ctrl_c_exits_130_without_traceback(tmp_path, monkeypatch, extra_args, tty):
+    """KeyboardInterrupt in communicate kills the child and the CLI exits 130."""
+    import os
+    import signal
+    import subprocess
+
+    home = tmp_path / "home"
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    (checkout / "review.yml").write_text("---\n")
+    (checkout / "ansible.cfg").write_text("[defaults]\n")
+    holder: dict[str, int] = {}
+    killpg_calls: list[tuple[int, int]] = []
+    real_killpg = os.killpg
+    real_popen = subprocess.Popen
+
+    def spy_killpg(pid: int, sig: int) -> None:
+        killpg_calls.append((pid, sig))
+        real_killpg(pid, sig)
+
+    def wrapping_popen(**kwargs):
+        assert kwargs.get("start_new_session") is True
+        proc = real_popen(**kwargs)
+        holder["pid"] = proc.pid
+
+        def communicate(timeout=None):
+            raise KeyboardInterrupt
+
+        proc.communicate = communicate
+        return proc
+
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("ANSIBLE_REVIEW_AGENT_FAMILY", "cursor")
+    monkeypatch.setenv("PLAIBOOK_PLAYBOOK_TIMEOUT", "5")
+    monkeypatch.delenv("PLAIBOOK_SPINNER", raising=False)
+    monkeypatch.setattr("plaibook.playbook.os.killpg", spy_killpg)
+    monkeypatch.setattr("plaibook.playbook.subprocess.Popen", wrapping_popen)
+    monkeypatch.setattr("plaibook.cli.build_ansible_command", lambda **kwargs: ["sleep", "30"])
+    stderr = _CapturedStream(tty)
+    monkeypatch.setattr("plaibook.cli.sys.stderr", stderr)
+    monkeypatch.setattr("plaibook.cli.sys.stdout", _CapturedStream(False))
+
+    class _Stdin:
+        def isatty(self) -> bool:
+            return False
+
+    monkeypatch.setattr("plaibook.cli.sys.stdin", _Stdin())
+    try:
+        code = main(["review", "--commit", "--no-sandbox", "--root", str(checkout), *extra_args])
+        text = stderr.text()
+        assert code == 130
+        assert "Traceback" not in text
+        assert "KeyboardInterrupt" not in text
+        assert killpg_calls == [(holder["pid"], signal.SIGKILL)]
+        assert _pid_is_dead(holder["pid"])
+        scratch = home / ".cache" / "ansible-plaibook" / "tmp"
+        names = [path.name for path in scratch.iterdir()] if scratch.is_dir() else []
+        assert not any(name.startswith("plaibook-task-failures-") for name in names)
+        assert not any(name.startswith("plaibook-progress-") for name in names)
+        if tty and not extra_args:
+            assert "\033[?25l" in text
+            assert "\033[?25h" in text
+        if extra_args == ["-v"] or not tty:
+            assert "\033[?25h" not in text
+    finally:
+        pid = holder.get("pid")
+        if pid:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def test_main_keyboard_interrupt_returns_130_without_traceback(monkeypatch, capsys):
+    def boom(args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("plaibook.cli.cmd_review", boom)
+    code = main(["review", "--commit"])
+    captured = capsys.readouterr()
+    assert code == 130
+    assert "Traceback" not in captured.err
+    assert "KeyboardInterrupt" not in captured.err
+    assert captured.out == ""
+
+
 def test_extra_vars_rejects_last_run_id_override():
     try:
         extra_vars_from_args(
