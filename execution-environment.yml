@@ -23,8 +23,10 @@
 # checked by per-arch SHA-256 before install. gh is signed with the
 # GitHub CLI key in execution-environment-gh-key.asc.
 #
-# Build from a clean checkout:
-#   ansible-builder build -t ghcr.io/aknochow/plaibook-ee:latest -f execution-environment.yml
+# Build from a clean checkout. --squash all is required: the Hummingbird
+# base is 32 filesystem layers, and Podman with metacopy=on cannot mount
+# that stack plus the layers this build adds.
+#   ansible-builder build --squash all -t ghcr.io/aknochow/plaibook-ee:latest -f execution-environment.yml
 
 additional_build_files:
   - src: execution-environment-gh-key.asc

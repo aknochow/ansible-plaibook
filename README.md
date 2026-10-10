@@ -271,11 +271,10 @@ Verify a published tag before using it:
 cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity-regexp '^https://github.com/aknochow/ansible-plaibook/\.github/workflows/ee-publish\.yml@refs/(heads/main|tags/v.+)$' ghcr.io/aknochow/plaibook-ee:0.1.26
 ```
 
-To build and host your own, from a clean checkout:
+To build and host your own, from a clean checkout. `--squash all` is the same flag CI uses. The build process, the layer count, and why `new` does not fix a local Podman mount are in [Execution environment](docs/execution-environment.md).
 
 ```bash
-ansible-builder create -f execution-environment.yml -c context
-podman build --squash-all -t <your-registry>/plaibook-ee:latest -f context/Containerfile context
+ansible-builder build --squash all -t <your-registry>/plaibook-ee:latest -f execution-environment.yml
 podman push <your-registry>/plaibook-ee:latest
 ```
 
