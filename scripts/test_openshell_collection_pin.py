@@ -94,7 +94,7 @@ def pinned_collection(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return dest
 
 
-def test_pinned_collection_accepts_the_hashed_sdk(pinned_collection: Path):
+def test_pinned_collection_accepts_the_hashed_sdk(pinned_collection: Path) -> None:
     spec = Requirement(_sdk_spec(pinned_collection))
     installed = pinned_versions("openshell-requirements.txt")["openshell"]
     assert spec.specifier.contains(installed), f"{installed} not in {spec}"
@@ -124,7 +124,7 @@ def _load_collection(collection: Path) -> tuple[Callable[..., object], Callable[
     return exec_command, proxy.ssh_forward_messages
 
 
-def test_pinned_collection_calls_the_installed_sdk(pinned_collection: Path):
+def test_pinned_collection_calls_the_installed_sdk(pinned_collection: Path) -> None:
     if sys.version_info < (3, 11):
         pytest.skip("openshell publishes no wheels for Python 3.10")
     from openshell import SandboxClient
