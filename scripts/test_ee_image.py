@@ -162,7 +162,12 @@ def test_publish_workflow_signs_only_on_push_and_release():
     assert "--require-hashes -r .github/ee-builder-requirements.txt" in text
     assert ".trivyignore.yaml" in document["on"]["push"]["paths"]
     login = 'printf \'%s\' "$GHCR_TOKEN" | podman login --username "$GHCR_USER" --password-stdin ghcr.io'
+    cosign_login = (
+        'printf \'%s\' "$GHCR_TOKEN" | cosign login ghcr.io '
+        '--username "$GHCR_USER" --password-stdin'
+    )
     assert text.count(login) == 3
+    assert text.count(cosign_login) == 2
     assert '-p "$GHCR_TOKEN"' not in text
     _assert_trivy_gate(build)
     assert text.count("persist-credentials: false") == 3
