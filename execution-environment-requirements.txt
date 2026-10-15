@@ -908,9 +908,9 @@ jiter==0.17.0 \
     --hash=sha256:fd7790aa79c8b518e512ebcdfce9f11d8ef5f30efd43720c8a19a548b39fa489 \
     --hash=sha256:fe15ddf316f1f1f643347d3a474e74ce61880c79a11ec5dca53df20c071bd3e8 \
     --hash=sha256:ffa0380ad091de7d3fc33e17a97ff479851ee18a0a2a3ee56ff3215cdc886656
-jsonpatch==1.34 \
-    --hash=sha256:be7726e7fa0969bc4100b3d9f4259f16aadda68a244c6e9e1066157a0c524ec3 \
-    --hash=sha256:e60c9f2d903d261d6eddcbd12cf3193efdb58cd9376a36ccc4db2e29d6cc88e3
+jsonpatch==1.35 \
+    --hash=sha256:417e05303ebf7aef98d3ebf1e1ae7e7a4de6ec57bc5d243cd3509eff650e959f \
+    --hash=sha256:679ad08672b4663c7ef1e5f3331d940f5e7786661b9acc1530104be1638e7a4f
 jsonpointer==3.2.0 \
     --hash=sha256:3e25c9bcadf5ae20c3420922234eaba1ae36ab9bef64cd72454aeaceb0b29aad \
     --hash=sha256:807db557622fbe07a0d49e19cf4795a269d55eee5ba345fb9959d148eba5ef94
@@ -1351,9 +1351,9 @@ multidict==6.9.1 \
 oauthlib==4.0.0 \
     --hash=sha256:624c28c13a0a59cabf9747dfa52af63be3e512a7f2714df16e91b5b3a145e6cd \
     --hash=sha256:efb274799819440f95b4ab3b818869f1ce9ae26c5beacba0201d1a1b76b54f86
-openai==3.28.0 \
-    --hash=sha256:1ea40a084ffe2f9f16fd3bea6e870f757853b536b18d8e737c518ef849a2920c \
-    --hash=sha256:cf0509d32d7bd8eb6a3db02417957cb455212b6629d071826b9ea1f61659e2a4
+openai==3.29.0 \
+    --hash=sha256:860d3bad424c5d38cd9ba0a0a2050d558b58ce027596a39f9ccbc0f51a2090b7 \
+    --hash=sha256:bc70a46d97b70ba64daedfcb3227f610a395f297ec68d39f735676190a92be94
 openshell==0.1.3 \
     --hash=sha256:d1eaa6abcd714e2f19d4a8ecbc2079bebeb7b56d81e9f8d3f5a9b5165ed1956c
 opentelemetry-api==1.45.1 \
