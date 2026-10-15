@@ -10,15 +10,15 @@ collections:
   - name: https://github.com/aknochow/ansible-openshell.git
     type: git
     # SHA is ansible-openshell #37 on main (notify dispatch). SDK range is still openshell>=0.1.3,<0.2 from #36.
-    version: 213d2bd1efb0a40d7df13b3443ee90811617126a
+    version: 09cd2f193a77b3d59b263c62224e23fe364fa6e8
   - name: https://github.com/aknochow/ansible-claude.git
     type: git
     # SHA is ansible-claude #33 on main (notify dispatch). SDK pins are still anthropic 1.11.0 and claude-agent-sdk 0.2.163 from #30.
-    version: 288d2be05acbc9059752254d9829dc30d81dcfe7
+    version: dfc061b6bf0bf0c1462435ef1c1f106d830a52b0
   - name: https://github.com/aknochow/ansible-gemini.git
     type: git
     # SHA is ansible-gemini #26 on main (notify dispatch). google-genai 2.27.0 is still the pin from #22.
-    version: 9c75960832656ab58aa91e2ba6e7f38b44e7b012
+    version: 016d7e2e5eceb2052304c740ee6a4abf44ca48ce
   - name: https://github.com/aknochow/ansible-openai.git
     type: git
     # Pin the interface this role calls; moving main can silently change
@@ -27,7 +27,7 @@ collections:
     # the default branch, then checks out this SHA. 60a9cc1 had the same
     # tree but is not on current main (history rewrite).
     # SHA is ansible-openai #29 on main (notify dispatch). openai 3.23.0 is still the pin from #25.
-    version: d38fefbca72185c81b651affa097f1be53332070
+    version: 3657a671018dfda9f18328d2b0c179038f100797
   - name: https://github.com/aknochow/ansible-cursor.git
     type: git
     # Pin the interface this role calls (effort mapping, structured_tool
@@ -35,7 +35,7 @@ collections:
     # parent vs nested caller, WaitLiveRun-after-drain flake fix). Moving
     # main can silently change module arguments. SHA is ansible-cursor
     # #32 on main (notify dispatch). Serialized starts from #30 are unchanged.
-    version: 407669d619c2d0d59561042286fa01249928c822
+    version: f06929b212e25e3c114c8dca81564a37c4f15f47
   # GitHub clones, not Galaxy FQCNs. version is the commit SHA of a
   # release tag (tags move). First-run install uses git + ansible-galaxy
   # install --no-deps and never calls galaxy.ansible.com (Python OpenSSL
