@@ -86,8 +86,22 @@
 # review_verify_done flips true on the very first outer turn once a
 # verdict lands, and the assert/retry machinery for a stalled forced
 # final turn applies exactly as written for the other two providers.
+#
+# aknochow.claude.agent fail_json's on timeout and ClaudeSDKError with
+# a message. It does not set status: error. Rescue only that module
+# call. A msg-only return is one failed verify attempt. Do not copy
+# the Cursor empty status=error match onto this task. A parent
+# fabrication, a nested report_verdict, and an auth failure that is
+# not this msg-only shape still fail the play. claude_agent_module is
+# an allowlist so playbook tests can load verify_provider_stub.
+
+- name: Resolve the Claude CLI verify module name
+  ansible.builtin.set_fact:
+    _claude_cli_verify_module: "{{ claude_agent_module | default('aknochow.claude.agent') }}"
+    _claude_cli_verify_attempt_open: "{{ not (verify_dispatch_valid | default(false) | bool) }}"
 
 - name: "Claude CLI: show this verify turn's request configuration"
+  when: _claude_cli_verify_attempt_open | bool
   ansible.builtin.debug:
     msg:
       - "model: {{ review_verify_claude_cli_model if review_verify_claude_cli_model is string else '(CLI default)' }}"
@@ -98,27 +112,60 @@
       - "cwd: {{ review_repo_path }}"
       - "output_format: json_schema (verify_verdict_schema)"
 
-- name: "Claude CLI: dispatch the verify agent (single call runs its own explore-then-verdict loop)"
-  aknochow.claude.agent:
-    prompt: >-
-      Try to refute the finding described in your system prompt using
-      your available tools, then give your final verdict.
-    system_prompt: "{{ verify_system_prompt }}"
-    model: "{{ review_verify_claude_cli_model }}"
-    effort: "{{ review_claude_cli_effort }}"
-    tools: [Read, Grep, Glob]
-    output_format:
-      type: json_schema
-      schema: "{{ verify_verdict_schema }}"
-    max_turns: "{{ review_verify_claude_cli_max_turns }}"
-    timeout: "{{ review_claude_cli_timeout }}"
-    setting_sources: "{{ review_claude_cli_setting_sources }}"
-    cwd: "{{ review_repo_path }}"
-  environment:
-    ANTHROPIC_API_KEY: ""
-  register: _claude_cli_verify_raw
+- name: Reject a Claude CLI verify module outside the allowlist
+  when: _claude_cli_verify_attempt_open | bool
+  ansible.builtin.assert:
+    that:
+      - _claude_cli_verify_module in ['aknochow.claude.agent', 'verify_provider_stub']
+    fail_msg: >-
+      claude_agent_module '{{ _claude_cli_verify_module }}' is not allowed.
+      Verify will only load aknochow.claude.agent or the offline test stub.
+
+- name: Claude CLI verify module call
+  when: _claude_cli_verify_attempt_open | bool
+  block:
+    - name: Remember that this Claude CLI verify module call has not failed yet
+      ansible.builtin.set_fact:
+        _claude_cli_verify_module_failed: false
+
+    - name: Call the Claude CLI verify agent
+      block:
+        - name: "Claude CLI: dispatch the verify agent (single call runs its own explore-then-verdict loop)"
+          action:
+            module: "{{ _claude_cli_verify_module }}"
+            prompt: >-
+              Try to refute the finding described in your system prompt using
+              your available tools, then give your final verdict.
+            system_prompt: "{{ verify_system_prompt }}"
+            model: "{{ review_verify_claude_cli_model }}"
+            effort: "{{ review_claude_cli_effort }}"
+            tools: [Read, Grep, Glob]
+            output_format:
+              type: json_schema
+              schema: "{{ verify_verdict_schema }}"
+            max_turns: "{{ review_verify_claude_cli_max_turns }}"
+            timeout: "{{ review_claude_cli_timeout }}"
+            setting_sources: "{{ review_claude_cli_setting_sources }}"
+            cwd: "{{ review_repo_path }}"
+          environment:
+            ANTHROPIC_API_KEY: ""
+          register: _claude_cli_verify_raw
+      rescue:
+        - name: Keep the failed Claude CLI verify return
+          ansible.builtin.set_fact:
+            _claude_cli_verify_module_failed: true
+            _claude_cli_verify_failed_result: "{{ ansible_failed_result }}"
+
+        - name: Classify the failed Claude CLI verify return
+          ansible.builtin.include_tasks: classify_verify_provider_failure.yml
+          vars:
+            verify_provider_failed_result: "{{ _claude_cli_verify_failed_result }}"
+            verify_provider_model: "{{ review_verify_claude_cli_model | default('claude-cli', true) }}"
 
 - name: "Claude CLI: record this attempt's usage for the pipeline-wide stats summary"
+  when:
+    - _claude_cli_verify_attempt_open | bool
+    - not (_claude_cli_verify_module_failed | default(false) | bool)
   ansible.builtin.set_fact:
     pipeline_agent_calls: >-
       {{ pipeline_agent_calls + [{
@@ -129,6 +176,9 @@
          }] }}
 
 - name: "Claude CLI: find the tool_use id the SDK assigned this attempt's structured verdict (if any)"
+  when:
+    - _claude_cli_verify_attempt_open | bool
+    - not (_claude_cli_verify_module_failed | default(false) | bool)
   ansible.builtin.set_fact:
     _claude_cli_verify_structured_calls: >-
       {{ _claude_cli_verify_raw.tool_calls | default([]) | selectattr('name', 'equalto', 'StructuredOutput') | list }}
@@ -137,6 +187,9 @@
 # both .message.content and .tool_calls below -- empty list when the SDK
 # never produced a conforming structured output this attempt.
 - name: "Claude CLI: build this attempt's synthesized report_verdict tool_use (if any)"
+  when:
+    - _claude_cli_verify_attempt_open | bool
+    - not (_claude_cli_verify_module_failed | default(false) | bool)
   ansible.builtin.set_fact:
     _claude_cli_verify_report_call: >-
       {{ [{'id': (_claude_cli_verify_structured_calls[-1].id if _claude_cli_verify_structured_calls | length > 0 else 'claude_cli_report_verdict'),
@@ -150,6 +203,9 @@
 # deliberately narrowed to just report_verdict (or empty), never the
 # real Read/Grep/Glob calls already resolved inside this one module call.
 - name: "Claude CLI: normalize this attempt's result into the shared verify_turn_result shape"
+  when:
+    - _claude_cli_verify_attempt_open | bool
+    - not (_claude_cli_verify_module_failed | default(false) | bool)
   ansible.builtin.set_fact:
     verify_turn_result:
       message:
@@ -161,9 +217,16 @@
       usage: "{{ _claude_cli_verify_raw.usage }}"
 
 - name: "Claude CLI: check whether this attempt produced a structured verdict"
+  when:
+    - _claude_cli_verify_attempt_open | bool
+    - not (_claude_cli_verify_module_failed | default(false) | bool)
   ansible.builtin.set_fact:
     _verify_claude_cli_structured_present: "{{ _claude_cli_verify_raw.structured is defined }}"
 
 - name: "Claude CLI: mark this attempt valid unless it's the forced last turn with no verdict at all"
+  when:
+    - _claude_cli_verify_attempt_open | bool
+    - not (_claude_cli_verify_module_failed | default(false) | bool)
   ansible.builtin.set_fact:
+    verify_dispatch_provider_error: false
     verify_dispatch_valid: "{{ (not verify_last_turn) or (_verify_claude_cli_structured_present | bool) }}"

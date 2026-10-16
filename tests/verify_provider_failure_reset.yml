@@ -1,0 +1,19 @@
+---
+# Reset one verify turn. provider_case_family selects the dispatch file.
+- name: Reset verify state for {{ provider_case_family }}
+  ansible.builtin.set_fact:
+    agent_family: "{{ provider_case_family }}"
+    review_verify_max_turns: 3
+    review_structured_output_max_attempts: 2
+    pipeline_agent_calls: []
+    review_verify_done: false
+    verify_turn_count: 0
+    verify_last_turn: false
+    verify_first_turn: false
+    verify_is_reachability_claim: false
+    verify_messages: []
+    verify_dispatch_provider_error: false
+    verify_dispatch_valid: false
+    verify_result_status: ""
+    verify_result_rationale: ""
+    posted_findings: []

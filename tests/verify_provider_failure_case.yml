@@ -1,0 +1,158 @@
+---
+# One provider: two msg-only failures, then the review's own persist and
+# post path still carry finding F115.
+- name: Reset verify state for {{ provider_case_family }}
+  ansible.builtin.include_tasks: verify_provider_failure_reset.yml
+
+- name: Write a msg-only provider failure for {{ provider_case_family }}
+  ansible.builtin.copy:
+    dest: "{{ verify_provider_stub_file }}"
+    mode: "0600"
+    content: "{{ _provider_error | to_json }}"
+  vars:
+    _provider_error:
+      failed: true
+      msg: "{{ provider_case_message }}"
+      calls: 0
+
+- name: Run one verify turn over the {{ provider_case_family }} failure
+  ansible.builtin.include_role:
+    name: review
+    tasks_from: verify_turn.yml
+
+- name: Read the stub after the {{ provider_case_family }} turn
+  ansible.builtin.slurp:
+    src: "{{ verify_provider_stub_file }}"
+  register: _provider_stub_raw
+
+- name: Confirm {{ provider_case_family }} retried without aborting verify
+  vars:
+    _stub_state: "{{ _provider_stub_raw.content | b64decode | from_json }}"
+  ansible.builtin.assert:
+    that:
+      - _stub_state.calls | int == 2
+      - verify_dispatch_provider_error | bool
+      - not (verify_dispatch_valid | bool)
+      - review_verify_done | bool
+      - verify_result_status == "inconclusive"
+      - verify_turn_result.stop_reason == "error"
+    fail_msg: >-
+      {{ provider_case_family }} verify failure aborted the turn.
+      calls={{ _stub_state.calls | default('missing') }}
+      done={{ review_verify_done | default('') }}
+      status={{ verify_result_status | default('') }}
+      error={{ verify_dispatch_provider_error | default('') }}
+    success_msg: "{{ provider_case_family }} provider failure stayed in the verify turn."
+
+- name: Merge the inconclusive verdict the way verify_finding does
+  merge_verify_result:
+    findings: "{{ deduped_findings }}"
+    verify_index: 0
+    evidence_status: "{{ verify_result_status }}"
+    verification_evidence: "{{ verify_result_evidence }}"
+    verification_rationale: "{{ verify_result_rationale }}"
+    requires_execution: "{{ verify_result_requires_execution }}"
+    suggested_severity: Major
+    reachability: "{{ verify_result_reachability }}"
+    trust_boundary: "{{ verify_result_trust_boundary }}"
+    worst_outcome_category: "{{ verify_result_worst_outcome_category }}"
+    silent_failure: "{{ verify_result_silent_failure }}"
+    used_static_reachability_trace: "{{ verify_result_used_static_reachability_trace | default(false) }}"
+    claim_input: "{{ verify_result_claim_input }}"
+    audit_result: {}
+  register: _verify_merge_result
+
+- name: Replace deduped_findings with the merged copy
+  ansible.builtin.set_fact:
+    deduped_findings: "{{ _verify_merge_result.findings }}"
+    findings_critical: "{{ _verify_merge_result.findings | selectattr('severity', 'equalto', 'Critical') | list }}"
+    findings_major: "{{ _verify_merge_result.findings | selectattr('severity', 'equalto', 'Major') | list }}"
+    findings_minor: "{{ _verify_merge_result.findings | selectattr('severity', 'equalto', 'Minor') | list }}"
+    findings_nit: "{{ _verify_merge_result.findings | selectattr('severity', 'equalto', 'Nit') | list }}"
+
+- name: Score the merged findings
+  compute_review_scores:
+    findings: "{{ deduped_findings | rejectattr('evidence_status', 'equalto', 'refuted') | list }}"
+    severity_points:
+      Critical: 20
+      Major: 10
+      Minor: 5
+      Nit: 0
+  register: _provider_score_result
+
+- name: Store the score and verdict the report template reads
+  ansible.builtin.set_fact:
+    score_functionality: "{{ _provider_score_result.score_functionality }}"
+    score_security: "{{ _provider_score_result.score_security }}"
+    score_quality: "{{ _provider_score_result.score_quality }}"
+    score_overall: "{{ _provider_score_result.score_overall }}"
+    review_verdict: "{{ _provider_score_result.verdict }}"
+
+- name: Create a throwaway review output directory
+  ansible.builtin.tempfile:
+    state: directory
+    prefix: "verify-provider-post-"
+  register: _provider_output
+
+- name: Persist the review using the real persist.yml
+  ansible.builtin.include_role:
+    name: review
+    tasks_from: persist
+    public: true
+  vars:
+    review_output_base: "{{ _provider_output.path }}"
+    review_write_artifact: false
+    review_delegate_host: ""
+    review_short_sha: abcdef1
+    review_branch: verify-provider-failure
+    review_type: pr
+    review_platform: github
+    review_hostname: ""
+    briefing_project: "{{ review_org_repo }}"
+    briefing_branch: verify-provider-failure
+    pipeline_findings_reports: []
+    review_diff_stats: {}
+    review_diff_categories: {}
+    review_completeness_checks: { deleted_files: [], todo_fixme: [], trailing_whitespace: 0 }
+    review_neutralization_check: { triggered: false, remaining_refs: [] }
+    review_checklist: { triggered: false, results: [] }
+    guardian_scan_available: false
+    guardian_scan_skip_reason: ""
+    guardian_findings: []
+    guardian_blocking_findings: []
+    guardian_forced_needs_changes: false
+
+- name: Post the persisted findings with http_post mocked
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/capture_post_payload.py"
+      - github
+      - "{{ review_org_repo }}"
+      - "{{ review_number }}"
+      - "{{ review_findings_path }}"
+      - "{{ _provider_output.path }}/post-capture.json"
+  changed_when: true
+
+- name: Read the persisted summary and the captured post payload
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  loop:
+    - "{{ review_summary_path }}"
+    - "{{ _provider_output.path }}/post-capture.json"
+  register: _provider_posted_raw
+
+- name: Confirm {{ provider_case_family }} posted finding F115
+  vars:
+    _summary: "{{ _provider_posted_raw.results[0].content | b64decode | from_json }}"
+    _posted_payload: "{{ _provider_posted_raw.results[1].content | b64decode | from_json }}"
+  ansible.builtin.assert:
+    that:
+      - _summary.findings | selectattr('finding_id', 'equalto', 'F115') | list | length == 1
+      - "'F115' in (_summary | to_json)"
+      - "'Provider verify failure must not drop findings' in _posted_payload.body"
+      - "'SECRET_DRAFT_MUST_NOT_APPEAR' not in _posted_payload.body"
+    fail_msg: >-
+      {{ provider_case_family }} post dropped F115.
+      summary_ids={{ _summary.findings | map(attribute='finding_id') | list }}
+    success_msg: "{{ provider_case_family }} summary contains F115 and the posted body contains the finding."

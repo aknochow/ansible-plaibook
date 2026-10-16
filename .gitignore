@@ -62,6 +62,8 @@ tmp/
 tests/.cursor_agent_stub.json
 tests/.cursor_agent_stub.json.counts
 tests/.cursor_agent_stub.json.lock
+tests/.verify_provider_stub.json
+tests/.verify_provider_stub.json.tmp
 
 # Side effects of unrelated local tooling, not ansible-plaibook source.
 # .nicegui/: left behind by `ai-guardian setup` (a Red Hat Product

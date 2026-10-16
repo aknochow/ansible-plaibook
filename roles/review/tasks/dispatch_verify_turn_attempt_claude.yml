@@ -11,54 +11,100 @@
 # multi-turn tool-calling translation needed its own file rather than
 # a shared abstraction -- Claude and Gemini's tool-calling wire formats
 # are genuinely different, not just cosmetically renamed.
-- name: "Call Claude with the current conversation, verify turn {{ verify_turn_count ~ ', attempt ' ~ (verify_attempt_number | default(1)) }}"
-  aknochow.claude.message:
-    provider: "{{ claude_provider }}"
-    region: "{{ claude_vertex_region if claude_provider == 'vertex' else omit }}"
-    project_id: "{{ claude_vertex_project if claude_provider == 'vertex' else omit }}"
-    api_key: "{{ claude_api_key if claude_provider == 'anthropic' else omit }}"
-    model: "{{ review_verify_model }}"
-    max_tokens: 4096
-    messages: "{{ verify_messages }}"
-    system: "{{ verify_system_prompt }}"
-    tools: >-
-      {{ explore_tools + [trace_reachability_tool, {
-           'name': 'report_verdict',
-           'description': 'Report your verdict on the single finding you were given.',
-           'input_schema': verify_verdict_schema
-         }] }}
-    tool_choice: >-
-      {{ {'type': 'tool', 'name': 'report_verdict'} if verify_last_turn
-         else ({'type': 'tool', 'name': 'trace_reachability'} if (verify_first_turn and verify_is_reachability_claim)
-         else omit) }}
-  register: verify_turn_result
-
-# Normalized usage -- see dispatch_explore_turn_attempt.yml's identical
-# comment; same rename, same reason, still Claude-only.
-- name: Record this attempt's usage for the pipeline-wide stats summary
+#
+# aknochow.claude.message fail_json's on AnthropicError with a message.
+# It does not set status: error. Rescue only that module call. A
+# msg-only return is one failed verify attempt. Do not copy the Cursor
+# empty status=error match onto this task. A parent fabrication, a
+# nested report_verdict, and an auth failure that is not this msg-only
+# shape still fail the play. claude_message_module is an allowlist so
+# playbook tests can load verify_provider_stub.
+- name: Resolve the Claude verify module name
   ansible.builtin.set_fact:
-    pipeline_agent_calls: >-
-      {{ pipeline_agent_calls + [{
-           'target': review_org_repo + '#' + review_number, 'lens': 'verify',
-           'model': verify_turn_result.message.model,
-           'usage': {
-             'input_tokens': verify_turn_result.usage.input_tokens | default(0) | int,
-             'output_tokens': verify_turn_result.usage.output_tokens | default(0) | int,
-             'cache_write_tokens': verify_turn_result.usage.cache_creation_input_tokens | default(0) | int,
-             'cache_read_tokens': verify_turn_result.usage.cache_read_input_tokens | default(0) | int,
-             'thinking_tokens': 0,
-             'total_tokens': (verify_turn_result.usage.input_tokens | default(0) | int)
-               + (verify_turn_result.usage.output_tokens | default(0) | int)
-               + (verify_turn_result.usage.cache_creation_input_tokens | default(0) | int)
-               + (verify_turn_result.usage.cache_read_input_tokens | default(0) | int)
-           },
-           'attempt': verify_attempt_number | default(1)
-         }] }}
+    _claude_verify_module: "{{ claude_message_module | default('aknochow.claude.message') }}"
+    _claude_verify_attempt_open: "{{ not (verify_dispatch_valid | default(false) | bool) }}"
 
-- name: Check whether this attempt called report_verdict
-  ansible.builtin.set_fact:
-    _verify_attempt_report_calls: "{{ verify_turn_result.tool_calls | selectattr('name', 'equalto', 'report_verdict') | list }}"
+- name: Run this Claude verify attempt
+  when: _claude_verify_attempt_open | bool
+  block:
+    - name: Reject a Claude verify module outside the allowlist
+      ansible.builtin.assert:
+        that:
+          - _claude_verify_module in ['aknochow.claude.message', 'verify_provider_stub']
+        fail_msg: >-
+          claude_message_module '{{ _claude_verify_module }}' is not allowed.
+          Verify will only load aknochow.claude.message or the offline test stub.
 
-- name: Mark this attempt valid unless it's the forced last turn with no tool call at all
-  ansible.builtin.set_fact:
-    verify_dispatch_valid: "{{ (not verify_last_turn) or (_verify_attempt_report_calls | length > 0) }}"
+    - name: Remember that this Claude verify module call has not failed yet
+      ansible.builtin.set_fact:
+        _claude_verify_module_failed: false
+
+    - name: Claude verify module call
+      block:
+        - name: "Call Claude with the current conversation, verify turn {{ verify_turn_count ~ ', attempt ' ~ (verify_attempt_number | default(1)) }}"
+          action:
+            module: "{{ _claude_verify_module }}"
+            provider: "{{ claude_provider }}"
+            region: "{{ claude_vertex_region if claude_provider == 'vertex' else omit }}"
+            project_id: "{{ claude_vertex_project if claude_provider == 'vertex' else omit }}"
+            api_key: "{{ claude_api_key if claude_provider == 'anthropic' else omit }}"
+            model: "{{ review_verify_model }}"
+            max_tokens: 4096
+            messages: "{{ verify_messages }}"
+            system: "{{ verify_system_prompt }}"
+            tools: >-
+              {{ explore_tools + [trace_reachability_tool, {
+                   'name': 'report_verdict',
+                   'description': 'Report your verdict on the single finding you were given.',
+                   'input_schema': verify_verdict_schema
+                 }] }}
+            tool_choice: >-
+              {{ {'type': 'tool', 'name': 'report_verdict'} if verify_last_turn
+                 else ({'type': 'tool', 'name': 'trace_reachability'} if (verify_first_turn and verify_is_reachability_claim)
+                 else omit) }}
+          register: verify_turn_result
+      rescue:
+        - name: Keep the failed Claude verify return
+          ansible.builtin.set_fact:
+            _claude_verify_module_failed: true
+            _claude_verify_failed_result: "{{ ansible_failed_result }}"
+
+        - name: Classify the failed Claude verify return
+          ansible.builtin.include_tasks: classify_verify_provider_failure.yml
+          vars:
+            verify_provider_failed_result: "{{ _claude_verify_failed_result }}"
+            verify_provider_model: "{{ review_verify_model }}"
+
+    # Normalized usage -- see dispatch_explore_turn_attempt.yml's identical
+    # comment; same rename, same reason, still Claude-only.
+    - name: Record a successful Claude verify return
+      when: not (_claude_verify_module_failed | bool)
+      block:
+        - name: Record this attempt's usage for the pipeline-wide stats summary
+          ansible.builtin.set_fact:
+            pipeline_agent_calls: >-
+              {{ pipeline_agent_calls + [{
+                   'target': review_org_repo + '#' + review_number, 'lens': 'verify',
+                   'model': verify_turn_result.message.model,
+                   'usage': {
+                     'input_tokens': verify_turn_result.usage.input_tokens | default(0) | int,
+                     'output_tokens': verify_turn_result.usage.output_tokens | default(0) | int,
+                     'cache_write_tokens': verify_turn_result.usage.cache_creation_input_tokens | default(0) | int,
+                     'cache_read_tokens': verify_turn_result.usage.cache_read_input_tokens | default(0) | int,
+                     'thinking_tokens': 0,
+                     'total_tokens': (verify_turn_result.usage.input_tokens | default(0) | int)
+                       + (verify_turn_result.usage.output_tokens | default(0) | int)
+                       + (verify_turn_result.usage.cache_creation_input_tokens | default(0) | int)
+                       + (verify_turn_result.usage.cache_read_input_tokens | default(0) | int)
+                   },
+                   'attempt': verify_attempt_number | default(1)
+                 }] }}
+
+        - name: Check whether this attempt called report_verdict
+          ansible.builtin.set_fact:
+            _verify_attempt_report_calls: "{{ verify_turn_result.tool_calls | selectattr('name', 'equalto', 'report_verdict') | list }}"
+
+        - name: Mark this attempt valid unless it's the forced last turn with no tool call at all
+          ansible.builtin.set_fact:
+            verify_dispatch_provider_error: false
+            verify_dispatch_valid: "{{ (not verify_last_turn) or (_verify_attempt_report_calls | length > 0) }}"

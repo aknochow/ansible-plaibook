@@ -40,12 +40,27 @@
 # side needed here: verify_dispatch_valid's "forced last turn produced
 # no report_verdict call" check is provider-agnostic once tool_calls is
 # normalized, so it's computed identically below.
+#
+# aknochow.gemini.generate fail_json's on APIError with a message. It
+# does not set status: error. Rescue only that module call. A msg-only
+# return is one failed verify attempt. Do not copy the Cursor empty
+# status=error match onto this task. A parent fabrication, a nested
+# report_verdict, and an auth failure that is not this msg-only shape
+# still fail the play. gemini_generate_module is an allowlist so
+# playbook tests can load verify_provider_stub.
+
+- name: Resolve the Gemini verify module name
+  ansible.builtin.set_fact:
+    _gemini_verify_module: "{{ gemini_generate_module | default('aknochow.gemini.generate') }}"
+    _gemini_verify_attempt_open: "{{ not (verify_dispatch_valid | default(false) | bool) }}"
 
 - name: "Gemini: translate the current conversation into contents[]"
+  when: _gemini_verify_attempt_open | bool
   ansible.builtin.set_fact:
     _verify_gemini_contents: "{{ verify_messages | to_gemini_contents }}"
 
 - name: "Gemini: build this turn's tool_config"
+  when: _gemini_verify_attempt_open | bool
   ansible.builtin.set_fact:
     # `omit` is a sentinel for module parameters, not a settable
     # set_fact value -- a fact that resolves to it produces "No
@@ -57,34 +72,70 @@
          else ({'function_calling_config': {'mode': 'ANY', 'allowed_function_names': ['trace_reachability']}}
                if (verify_first_turn and verify_is_reachability_claim) else {}) }}
 
-- name: "Call Gemini with the current conversation, verify turn {{ verify_turn_count ~ ', attempt ' ~ (verify_attempt_number | default(1)) }}"
-  aknochow.gemini.generate:
-    backend: "{{ gemini_backend }}"
-    project_id: "{{ gemini_vertex_project if gemini_backend == 'vertex' else omit }}"
-    location: "{{ gemini_vertex_location if gemini_backend == 'vertex' else omit }}"
-    api_key: "{{ gemini_api_key if gemini_backend == 'api' else omit }}"
-    model: "{{ review_verify_gemini_model }}"
-    timeout: "{{ review_gemini_timeout }}"
-    max_output_tokens: 4096
-    thinking_level: "{{ review_gemini_thinking_level }}"
-    system_instruction: "{{ verify_system_prompt }}"
-    contents: "{{ _verify_gemini_contents }}"
-    tools: >-
-      {{ [{'function_declarations': (explore_tools + [trace_reachability_tool, {
-             'name': 'report_verdict',
-             'description': 'Report your verdict on the single finding you were given.',
-             'input_schema': verify_verdict_schema
-           }]) | to_gemini_function_declarations }] }}
-    tool_config: "{{ _verify_gemini_tool_config | default(omit, true) }}"
-  register: _verify_gemini_raw
+- name: Reject a Gemini verify module outside the allowlist
+  when: _gemini_verify_attempt_open | bool
+  ansible.builtin.assert:
+    that:
+      - _gemini_verify_module in ['aknochow.gemini.generate', 'verify_provider_stub']
+    fail_msg: >-
+      gemini_generate_module '{{ _gemini_verify_module }}' is not allowed.
+      Verify will only load aknochow.gemini.generate or the offline test stub.
+
+- name: Gemini verify module call
+  when: _gemini_verify_attempt_open | bool
+  block:
+    - name: Remember that this Gemini verify module call has not failed yet
+      ansible.builtin.set_fact:
+        _gemini_verify_module_failed: false
+
+    - name: Call Gemini for this verify attempt
+      block:
+        - name: "Call Gemini with the current conversation, verify turn {{ verify_turn_count ~ ', attempt ' ~ (verify_attempt_number | default(1)) }}"
+          action:
+            module: "{{ _gemini_verify_module }}"
+            backend: "{{ gemini_backend }}"
+            project_id: "{{ gemini_vertex_project if gemini_backend == 'vertex' else omit }}"
+            location: "{{ gemini_vertex_location if gemini_backend == 'vertex' else omit }}"
+            api_key: "{{ gemini_api_key if gemini_backend == 'api' else omit }}"
+            model: "{{ review_verify_gemini_model }}"
+            timeout: "{{ review_gemini_timeout }}"
+            max_output_tokens: 4096
+            thinking_level: "{{ review_gemini_thinking_level }}"
+            system_instruction: "{{ verify_system_prompt }}"
+            contents: "{{ _verify_gemini_contents }}"
+            tools: >-
+              {{ [{'function_declarations': (explore_tools + [trace_reachability_tool, {
+                     'name': 'report_verdict',
+                     'description': 'Report your verdict on the single finding you were given.',
+                     'input_schema': verify_verdict_schema
+                   }]) | to_gemini_function_declarations }] }}
+            tool_config: "{{ _verify_gemini_tool_config | default(omit, true) }}"
+          register: _verify_gemini_raw
+      rescue:
+        - name: Keep the failed Gemini verify return
+          ansible.builtin.set_fact:
+            _gemini_verify_module_failed: true
+            _gemini_verify_failed_result: "{{ ansible_failed_result }}"
+
+        - name: Classify the failed Gemini verify return
+          ansible.builtin.include_tasks: classify_verify_provider_failure.yml
+          vars:
+            verify_provider_failed_result: "{{ _gemini_verify_failed_result }}"
+            verify_provider_model: "{{ review_verify_gemini_model }}"
 
 - name: "Gemini: extract this turn's response candidate parts"
+  when:
+    - _gemini_verify_attempt_open | bool
+    - not (_gemini_verify_module_failed | default(false) | bool)
   ansible.builtin.set_fact:
     _verify_gemini_parts: >-
       {{ (_verify_gemini_raw.response.candidates[0].content.parts | default([]))
          if (_verify_gemini_raw.response.candidates | default([]) | length > 0) else [] }}
 
 - name: "Gemini: normalize this turn's result into the shared verify_turn_result shape"
+  when:
+    - _gemini_verify_attempt_open | bool
+    - not (_gemini_verify_module_failed | default(false) | bool)
   ansible.builtin.set_fact:
     verify_turn_result:
       message:
@@ -103,6 +154,9 @@
         cache_read_input_tokens: 0
 
 - name: Record this attempt's usage for the pipeline-wide stats summary
+  when:
+    - _gemini_verify_attempt_open | bool
+    - not (_gemini_verify_module_failed | default(false) | bool)
   ansible.builtin.set_fact:
     pipeline_agent_calls: >-
       {{ pipeline_agent_calls + [{
@@ -122,9 +176,16 @@
          }] }}
 
 - name: Check whether this attempt called report_verdict
+  when:
+    - _gemini_verify_attempt_open | bool
+    - not (_gemini_verify_module_failed | default(false) | bool)
   ansible.builtin.set_fact:
     _verify_attempt_report_calls: "{{ verify_turn_result.tool_calls | selectattr('name', 'equalto', 'report_verdict') | list }}"
 
 - name: Mark this attempt valid unless it's the forced last turn with no tool call at all
+  when:
+    - _gemini_verify_attempt_open | bool
+    - not (_gemini_verify_module_failed | default(false) | bool)
   ansible.builtin.set_fact:
+    verify_dispatch_provider_error: false
     verify_dispatch_valid: "{{ (not verify_last_turn) or (_verify_attempt_report_calls | length > 0) }}"

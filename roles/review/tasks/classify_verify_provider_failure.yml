@@ -1,0 +1,94 @@
+---
+# Shared rescue for one verify provider module call.
+#
+# Claude, Claude CLI, Gemini, and OpenAI fail_json with a message.
+# They do not set status: error. Do not match the Cursor empty
+# status=error shape here. A return that is only a message is one
+# failed verify attempt: verify_turn.yml retries it, and when every
+# attempt is that shape the finding stays inconclusive so the review
+# can still post.
+#
+# A message-only return is one failed attempt only when the text is a
+# known transient outage (overload, timeout, 429/500/502/503/529).
+# Authentication, authorization, invalid-request, missing-key, and any
+# unrecognized message are re-raised. These modules do not emit a
+# separate error class, so the allowlist is the message text.
+#
+# Anything else still fails the play. That includes a parent-only
+# report_verdict, a nested report_verdict on the failed return, and a
+# result that carries status.
+#
+# Vars: verify_provider_failed_result, verify_provider_model.
+
+- name: Read the failed verify module return
+  ansible.builtin.set_fact:
+    _verify_failed_calls: "{{ verify_provider_failed_result.structured_tool_calls | default([], true) }}"
+
+- name: Separate parent fabrication from a nested report_verdict
+  ansible.builtin.set_fact:
+    _verify_failed_nested: >-
+      {{ _verify_failed_calls
+         | selectattr('caller', 'equalto', 'nested')
+         | selectattr('name', 'equalto', 'report_verdict')
+         | list }}
+    _verify_failed_parent: >-
+      {{ _verify_failed_calls | selectattr('caller', 'equalto', 'parent') | list }}
+    _verify_provider_shape: >-
+      {{ (verify_provider_failed_result.status | default('', true) | string | trim | length == 0)
+         and ((_verify_failed_calls | default([], true)) | length == 0)
+         and (verify_provider_failed_result.msg | default('', true) | string | trim | length > 0) }}
+
+- name: Re-raise a parent-only verify fabrication
+  when:
+    - _verify_failed_parent | length > 0
+    - _verify_failed_nested | length == 0
+  ansible.builtin.fail:
+    msg: "{{ verify_provider_failed_result.msg | default('Verify parent-only report_verdict') }}"
+
+- name: Re-raise a nested report_verdict on a failed verify return
+  when: _verify_failed_nested | length > 0
+  ansible.builtin.fail:
+    msg: "{{ verify_provider_failed_result.msg | default('Verify nested report_verdict failed') }}"
+
+- name: Re-raise a verify failure that is not a provider error
+  when:
+    - _verify_failed_parent | length == 0
+    - _verify_failed_nested | length == 0
+    - not (_verify_provider_shape | bool)
+  ansible.builtin.fail:
+    msg: "{{ verify_provider_failed_result.msg | default('Verify provider module failed') }}"
+
+- name: Decide whether this provider message is a retryable outage
+  when:
+    - _verify_failed_parent | length == 0
+    - _verify_failed_nested | length == 0
+    - _verify_provider_shape | bool
+  classify_verify_provider_failure:
+    msg: "{{ verify_provider_failed_result.msg | default('') }}"
+  register: _verify_provider_retry
+
+- name: Re-raise authentication, invalid-request, and unknown provider failures
+  when:
+    - _verify_failed_parent | length == 0
+    - _verify_failed_nested | length == 0
+    - _verify_provider_shape | bool
+    - not (_verify_provider_retry.retryable | default(false) | bool)
+  ansible.builtin.fail:
+    msg: "{{ verify_provider_failed_result.msg | default('Verify provider module failed') }}"
+
+- name: Record one failed verify attempt
+  when:
+    - _verify_failed_parent | length == 0
+    - _verify_failed_nested | length == 0
+    - _verify_provider_shape | bool
+    - _verify_provider_retry.retryable | default(false) | bool
+  ansible.builtin.set_fact:
+    verify_dispatch_provider_error: true
+    verify_dispatch_valid: false
+    verify_turn_result:
+      message:
+        content: []
+        model: "{{ verify_provider_model | default('unknown', true) }}"
+      tool_calls: []
+      stop_reason: error
+      usage: {}

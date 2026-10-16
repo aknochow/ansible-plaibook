@@ -1,0 +1,291 @@
+---
+# A provider fail_json during verify must not abort the review.
+# No live model and no API key. Uses tests/library/verify_provider_stub.py.
+#
+# Claude, Claude CLI, Gemini, and OpenAI return failed=true plus a msg.
+# They do not set status: error. That shape is one failed attempt, the
+# finding stays inconclusive, and the original findings can still be
+# posted. A parent fabrication, a nested report_verdict, and a failure
+# that carries status (auth that is not the msg-only shape) still abort.
+#
+# Usage:
+#   ANSIBLE_LIBRARY=$PWD/tests/library \
+#   VERIFY_PROVIDER_STUB_FILE=$PWD/tests/.verify_provider_stub.json \
+#     ansible-playbook tests/test_verify_provider_failure.yml
+
+- name: Provider verify failures stay in the review
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_org_repo: aknochow/ansible-plaibook
+    review_number: "115"
+    review_repo_path: "{{ playbook_dir }}"
+    review_prompt_nonce: "AbCdEfGh12345678"
+    verify_system_prompt: stub verify prompt
+    verify_provider_stub_file: "{{ lookup('ansible.builtin.env', 'VERIFY_PROVIDER_STUB_FILE') | default(playbook_dir ~ '/.verify_provider_stub.json', true) }}"
+    claude_message_module: verify_provider_stub
+    claude_agent_module: verify_provider_stub
+    gemini_generate_module: verify_provider_stub
+    openai_chat_module: verify_provider_stub
+    deduped_findings:
+      - file: roles/review/tasks/dispatch_verify_turn_attempt_claude.yml
+        line: 16
+        severity: Major
+        lens: Quality
+        description: Provider verify failure must not drop findings
+        evidence: planted
+        confidence: HIGH
+        fix: Rescue the provider module call.
+        finding_id: F115
+        _verify_index: 0
+    _parent_draft:
+      evidence_status: refuted
+      rationale: SECRET_DRAFT_MUST_NOT_APPEAR
+      prompt_nonce: "AbCdEfGh12345678"
+
+  environment:
+    VERIFY_PROVIDER_STUB_FILE: "{{ verify_provider_stub_file }}"
+
+  tasks:
+    - name: Claude message failure is one attempt and findings are posted
+      ansible.builtin.include_tasks: verify_provider_failure_case.yml
+      vars:
+        provider_case_family: claude
+        provider_case_message: "Error code: 529 - overloaded_error"
+
+    - name: Claude CLI failure is one attempt and findings are posted
+      ansible.builtin.include_tasks: verify_provider_failure_case.yml
+      vars:
+        provider_case_family: claude_cli
+        provider_case_message: "aknochow.claude.agent timed out after 900 seconds waiting on the Claude Agent SDK/CLI subprocess"
+
+    - name: Gemini failure is one attempt and findings are posted
+      ansible.builtin.include_tasks: verify_provider_failure_case.yml
+      vars:
+        provider_case_family: gemini
+        provider_case_message: "Error code: 503 - The model is overloaded"
+
+    - name: OpenAI failure is one attempt and findings are posted
+      ansible.builtin.include_tasks: verify_provider_failure_case.yml
+      vars:
+        provider_case_family: openai
+        provider_case_message: "Error code: 500 - The server had an error processing your request"
+
+    - name: A status-bearing auth failure still aborts
+      block:
+        - name: Reset verify state before the auth failure
+          ansible.builtin.include_tasks: verify_provider_failure_reset.yml
+          vars:
+            provider_case_family: claude
+
+        - name: Write an auth failure that is not a msg-only provider error
+          ansible.builtin.copy:
+            dest: "{{ verify_provider_stub_file }}"
+            mode: "0600"
+            content: "{{ _auth_failure | to_json }}"
+          vars:
+            _auth_failure:
+              failed: true
+              msg: "authentication failed"
+              status: error
+              calls: 0
+
+        - name: Run a verify turn over the auth failure
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: verify_turn.yml
+
+        - name: Fail the test if the auth failure was accepted
+          ansible.builtin.fail:
+            msg: "TEST BUG: a status-bearing auth failure was accepted"
+      rescue:
+        - name: Confirm the auth failure aborted the play
+          ansible.builtin.assert:
+            that:
+              - "'authentication failed' in (ansible_failed_result.msg | default(''))"
+              - "'TEST BUG' not in (ansible_failed_result.msg | default(''))"
+              - not (review_verify_done | default(false) | bool)
+              - verify_result_status | default('') != 'inconclusive'
+            fail_msg: "Auth failure did not abort: {{ ansible_failed_result.msg | default('') }}"
+            success_msg: "A status-bearing auth failure still aborts the play."
+
+    - name: A message-only authentication failure still aborts
+      block:
+        - name: Reset verify state before the message-only auth failure
+          ansible.builtin.include_tasks: verify_provider_failure_reset.yml
+          vars:
+            provider_case_family: claude
+
+        - name: Write a 401 that has only a message
+          ansible.builtin.copy:
+            dest: "{{ verify_provider_stub_file }}"
+            mode: "0600"
+            content: "{{ _auth_message | to_json }}"
+          vars:
+            _auth_message:
+              failed: true
+              msg: "Error code: 401 - authentication_error"
+              calls: 0
+
+        - name: Run a verify turn over the message-only auth failure
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: verify_turn.yml
+
+        - name: Fail the test if the message-only auth failure was accepted
+          ansible.builtin.fail:
+            msg: "TEST BUG: a message-only authentication failure was accepted"
+      rescue:
+        - name: Confirm the message-only auth failure aborted the play
+          ansible.builtin.assert:
+            that:
+              - "'authentication_error' in (ansible_failed_result.msg | default(''))"
+              - "'TEST BUG' not in (ansible_failed_result.msg | default(''))"
+              - not (review_verify_done | default(false) | bool)
+            fail_msg: "Message-only auth failure did not abort: {{ ansible_failed_result.msg | default('') }}"
+            success_msg: "A message-only authentication failure still aborts the play."
+
+    - name: An unrecognized provider message still aborts
+      block:
+        - name: Reset verify state before the unknown message
+          ansible.builtin.include_tasks: verify_provider_failure_reset.yml
+          vars:
+            provider_case_family: openai
+
+        - name: Write an unrecognized provider message
+          ansible.builtin.copy:
+            dest: "{{ verify_provider_stub_file }}"
+            mode: "0600"
+            content: "{{ _unknown_message | to_json }}"
+          vars:
+            _unknown_message:
+              failed: true
+              msg: "widget exploded"
+              calls: 0
+
+        - name: Run a verify turn over the unknown message
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: verify_turn.yml
+
+        - name: Fail the test if the unknown message was accepted
+          ansible.builtin.fail:
+            msg: "TEST BUG: an unrecognized provider message was accepted"
+      rescue:
+        - name: Confirm the unknown message aborted the play
+          ansible.builtin.assert:
+            that:
+              - "'widget exploded' in (ansible_failed_result.msg | default(''))"
+              - "'TEST BUG' not in (ansible_failed_result.msg | default(''))"
+              - not (review_verify_done | default(false) | bool)
+            fail_msg: "Unknown provider message did not abort: {{ ansible_failed_result.msg | default('') }}"
+            success_msg: "An unrecognized provider message still aborts the play."
+
+    - name: A parent fabrication still aborts
+      block:
+        - name: Reset verify state before the parent fabrication
+          ansible.builtin.include_tasks: verify_provider_failure_reset.yml
+          vars:
+            provider_case_family: claude
+
+        - name: Write a parent-only report_verdict
+          ansible.builtin.copy:
+            dest: "{{ verify_provider_stub_file }}"
+            mode: "0600"
+            content: "{{ _parent_failure | to_json }}"
+          vars:
+            _parent_failure:
+              failed: true
+              msg: "Verify parent-only report_verdict"
+              calls: 0
+              structured_tool_calls:
+                - name: report_verdict
+                  caller: parent
+                  args: "{{ _parent_draft }}"
+
+        - name: Run a verify turn over the parent fabrication
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: verify_turn.yml
+
+        - name: Fail the test if the parent fabrication was accepted
+          ansible.builtin.fail:
+            msg: "TEST BUG: a parent fabrication was accepted"
+      rescue:
+        - name: Confirm the parent fabrication aborted the play
+          ansible.builtin.assert:
+            that:
+              - "'parent-only' in (ansible_failed_result.msg | default(''))"
+              - "'SECRET_DRAFT_MUST_NOT_APPEAR' not in (ansible_failed_result.msg | default(''))"
+              - "'TEST BUG' not in (ansible_failed_result.msg | default(''))"
+              - not (review_verify_done | default(false) | bool)
+            fail_msg: "Parent fabrication did not abort: {{ ansible_failed_result.msg | default('') }}"
+            success_msg: "A parent fabrication still aborts the play."
+
+    - name: A nested report_verdict on a failed return still aborts
+      block:
+        - name: Reset verify state before the nested report_verdict
+          ansible.builtin.include_tasks: verify_provider_failure_reset.yml
+          vars:
+            provider_case_family: gemini
+
+        - name: Write a nested report_verdict on the failed return
+          ansible.builtin.copy:
+            dest: "{{ verify_provider_stub_file }}"
+            mode: "0600"
+            content: "{{ _nested_failure | to_json }}"
+          vars:
+            _nested_failure:
+              failed: true
+              msg: "Verify nested report_verdict failed"
+              calls: 0
+              structured_tool_calls:
+                - name: report_verdict
+                  caller: nested
+                  args: "{{ _parent_draft }}"
+
+        - name: Run a verify turn over the nested report_verdict
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: verify_turn.yml
+
+        - name: Fail the test if the nested report_verdict was accepted
+          ansible.builtin.fail:
+            msg: "TEST BUG: a nested report_verdict failure was accepted"
+      rescue:
+        - name: Confirm the nested report_verdict aborted the play
+          ansible.builtin.assert:
+            that:
+              - "'nested report_verdict' in (ansible_failed_result.msg | default(''))"
+              - "'SECRET_DRAFT_MUST_NOT_APPEAR' not in (ansible_failed_result.msg | default(''))"
+              - "'TEST BUG' not in (ansible_failed_result.msg | default(''))"
+              - not (review_verify_done | default(false) | bool)
+            fail_msg: "Nested report_verdict did not abort: {{ ansible_failed_result.msg | default('') }}"
+            success_msg: "A nested report_verdict failure still aborts the play."
+
+    - name: An arbitrary verify module is rejected before dispatch
+      block:
+        - name: Dispatch Claude with a module name outside the allowlist
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: dispatch_verify_turn_attempt_claude.yml
+          vars:
+            claude_message_module: ansible.builtin.command
+            verify_dispatch_valid: false
+            verify_last_turn: false
+            verify_attempt_number: 1
+            verify_turn_count: 1
+
+        - name: Fail the test if the arbitrary module was accepted
+          ansible.builtin.fail:
+            msg: "TEST BUG: ansible.builtin.command was accepted as the verify module"
+      rescue:
+        - name: Confirm the allowlist rejected the module
+          ansible.builtin.assert:
+            that:
+              - "'not allowed' in (ansible_failed_result.msg | default(''))"
+              - "'TEST BUG' not in (ansible_failed_result.msg | default(''))"
+            fail_msg: "Allowlist did not reject the module: {{ ansible_failed_result.msg | default('') }}"
+            success_msg: "A verify module outside the allowlist is rejected."

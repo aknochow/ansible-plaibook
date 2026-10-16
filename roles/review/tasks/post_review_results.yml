@@ -1,0 +1,18 @@
+---
+# Post the rendered findings.md back to the PR/MR. resolve_target_pr.yml
+# includes this after the review engine.
+- name: Post results back to the PR/MR
+  when: post_results | bool
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['python3', role_path + '/files/pr_review/post_review_comment.py',
+         review_platform, review_org_repo, review_number, review_findings_path]
+        + (['--host', review_hostname] if review_hostname else [])
+      }}
+  changed_when: true
+  # See bug_pipeline.yml's "Push the fix branch" task for why async/poll,
+  # not a timeout: parameter (doesn't exist on ansible.builtin.command) --
+  # this is a real GitHub/GitLab API call, so the overhead is worth it.
+  async: 120
+  poll: 2
