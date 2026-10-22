@@ -258,6 +258,7 @@ def test_trivyignore_covers_the_unfixed_vendor_highs():
         "CVE-2026-78669",
         "CVE-2026-78667",
         "CVE-2026-97031",
+        "CVE-2026-111943",
     }
     for item in findings:
         assert item["statement"] == "upstream-vendored, no fix we can apply"

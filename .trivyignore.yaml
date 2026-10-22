@@ -1,7 +1,9 @@
 # Fixable highs the image cannot clear. The gate stays HIGH,CRITICAL with
 # ignore-unfixed and exit-code 1. Each entry expires 2026-11-09.
-# pip 26.2.1 still vendors msgpack 1.1.2, setuptools 70.3.0, and urllib3 2.7.0.
-# The installed distributions are newer; these purls are only the vendored copies.
+# pip 26.2.2 still vendors msgpack 1.1.2 and urllib3 2.7.0. setuptools 70.3.0
+# is the copy pip 26.2.1 used to vendor. The installed distributions are newer;
+# these purls are only the vendored copies. gh 2.102.0 and glab 1.122.0 still
+# ship Go stdlib builds that do not include 1.27.3.
 vulnerabilities:
   - id: CVE-2026-19481
     paths:
@@ -77,5 +79,19 @@ vulnerabilities:
       - usr/bin/gh
     purls:
       - pkg:golang/stdlib@v1.27.1
+    statement: upstream-vendored, no fix we can apply
+    expired_at: 2026-11-09
+  - id: CVE-2026-111943
+    paths:
+      - usr/bin/gh
+    purls:
+      - pkg:golang/stdlib@v1.27.1
+    statement: upstream-vendored, no fix we can apply
+    expired_at: 2026-11-09
+  - id: CVE-2026-111943
+    paths:
+      - usr/bin/glab
+    purls:
+      - pkg:golang/stdlib@v1.27.2
     statement: upstream-vendored, no fix we can apply
     expired_at: 2026-11-09
