@@ -9,15 +9,15 @@
 collections:
   - name: https://github.com/aknochow/ansible-openshell.git
     type: git
-    # SHA is ansible-openshell #37 on main (notify dispatch). SDK range is still openshell>=0.1.3,<0.2 from #36.
+    # SHA is ansible-openshell #38 on main (one commit-standards section). SDK range is still openshell>=0.1.3,<0.2 from #36.
     version: 09cd2f193a77b3d59b263c62224e23fe364fa6e8
   - name: https://github.com/aknochow/ansible-claude.git
     type: git
-    # SHA is ansible-claude #33 on main (notify dispatch). SDK pins are still anthropic 1.11.0 and claude-agent-sdk 0.2.163 from #30.
+    # SHA is ansible-claude #34 on main (one commit-standards section). SDK pins are still anthropic 1.11.0 and claude-agent-sdk 0.2.163 from #30.
     version: dfc061b6bf0bf0c1462435ef1c1f106d830a52b0
   - name: https://github.com/aknochow/ansible-gemini.git
     type: git
-    # SHA is ansible-gemini #26 on main (notify dispatch). google-genai 2.27.0 is still the pin from #22.
+    # SHA is ansible-gemini #28 on main (one commit-standards section). google-genai 2.27.0 is still the pin from #22.
     version: 016d7e2e5eceb2052304c740ee6a4abf44ca48ce
   - name: https://github.com/aknochow/ansible-openai.git
     type: git
@@ -26,7 +26,7 @@ collections:
     # Must be an ancestor of ansible-openai origin/main — galaxy clones
     # the default branch, then checks out this SHA. 60a9cc1 had the same
     # tree but is not on current main (history rewrite).
-    # SHA is ansible-openai #29 on main (notify dispatch). openai 3.23.0 is still the pin from #25.
+    # SHA is ansible-openai #30 on main (one commit-standards section). openai 3.23.0 is still the pin from #25.
     version: 3657a671018dfda9f18328d2b0c179038f100797
   - name: https://github.com/aknochow/ansible-cursor.git
     type: git
@@ -34,7 +34,7 @@ collections:
     # / mcp coupling, playbook-owned sidecar, structured_tool_calls with
     # parent vs nested caller, WaitLiveRun-after-drain flake fix). Moving
     # main can silently change module arguments. SHA is ansible-cursor
-    # #32 on main (notify dispatch). Serialized starts from #30 are unchanged.
+    # #33 on main (one commit-standards section). Serialized starts from #30 are unchanged.
     version: f06929b212e25e3c114c8dca81564a37c4f15f47
   # GitHub clones, not Galaxy FQCNs. version is the commit SHA of a
   # release tag (tags move). First-run install uses git + ansible-galaxy
