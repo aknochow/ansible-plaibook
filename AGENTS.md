@@ -15,7 +15,7 @@ output, check these first:
 - [docs/index.md](docs/index.md): navigation index
 - [docs/reference.md](docs/reference.md): every variable that controls a `review.yml` run, its default, and what it changes
 - [docs/sandbox-and-agent-safety.md](docs/sandbox-and-agent-safety.md): how OpenShell sandboxes combine with model calls, and the pattern deliberately not used
-- [.claude/skills/ansible-plaibook-review/SKILL.md](.claude/skills/ansible-plaibook-review/SKILL.md): how to run `plai review` / `plaibook review` (and the AAP path `ansible-playbook review.yml`) and read `last_run.<run_id>.json` correctly
+- [.agents/skills/ansible-plaibook-review/SKILL.md](.agents/skills/ansible-plaibook-review/SKILL.md): how to run `plai review` / `plaibook review` (and the AAP path `ansible-playbook review.yml`) and read `last_run.<run_id>.json` correctly
 
 ## What this repo is
 
