@@ -127,7 +127,7 @@ requires reading a file outside the diff. A `NEEDS_CHANGES` verdict
 with a real Critical/Major finding exits non-zero, on both `plai` and
 `plaibook`.
 
-`--sha BASE..TIP` reviews that contiguous range as one diff (`git diff BASE TIP`). `BASE` must be an ancestor of `TIP`. The same commit on both sides prints `NOTHING_TO_REVIEW` and the range, and exits 0. Three-dot `BASE...TIP` is rejected. A merge-base diff of a whole branch is `review_type: branch`.
+`--sha BASE..TIP` reviews that contiguous range as one diff (`git diff BASE TIP`). `BASE` must be an ancestor of `TIP`. The same commit on both sides prints `NOTHING_TO_REVIEW` and the range, and exits 0. It does not print `status: ok`. Three-dot `BASE...TIP` is rejected. A merge-base diff of a whole branch is `review_type: branch`. Pull-request and branch reviews still exit 0 when the verdict is `NEEDS_CHANGES`. Commit review is the mode that fails the process on a real Critical or Major finding.
 
 ## CLI output
 

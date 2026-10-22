@@ -18,14 +18,16 @@ duplicating the pipeline three times.
 
 `roles/review/tasks/main.yml` dispatches on `review_type` (`pr`, `branch`, or `commit`) to `resolve_target_{{ review_type }}.yml`. That file resolves the target into the variables the shared engine expects (`review_repo_path`, `review_org_repo`, `review_branch`, `review_context`, `review_short_sha`), then calls `run_review_engine.yml`. `resolve_target_*.yml` is the only target-specific logic. `briefing.yml`, `lenses.yml`, `merge.yml`, `explore.yml`, `verify.yml`, and `persist.yml` are the shared engine.
 
-`review_type: pr` detects GitHub or GitLab from the target, fetches the pull request or merge request, and resolves the head ref. Posting the result is a separate step, off unless `post_results` is true. `review_type: commit` validates a local commit with git. `review_type: branch` resolves a local, GitHub, or GitLab branch.
+`review_type: pr` detects GitHub or GitLab from the target, fetches the pull request or merge request, and resolves the head ref. Posting is a step after the engine, and it stays off unless `post_results` is true. That post step is why each `resolve_target_*.yml` calls the engine itself. `review_type: commit` validates a local commit with git. `review_type: branch` resolves a local, GitHub, or GitLab branch.
+
+Pull-request and branch reviews run briefing inside an OpenShell sandbox by default, because that stage runs commands taken from the change under review. Commit review does not. See [Sandboxes and LLM calls](sandbox-and-agent-safety.md).
 
 There is no `bug_pipeline.yml` on `main`. That playbook is parked on `wip/bug-fix-pipeline`.
 
 ## Stages
 
 1. **Briefing** (`briefing.yml`). Diff, domain detection, prior-review lookup, and checklist execution. No model call.
-2. **Lenses** (`lenses.yml`). A Security lens and a Functionality/Quality lens, started together, then awaited. This is the model step in the base pipeline.
+2. **Lenses** (`lenses.yml`). A Security lens and a Functionality/Quality lens, started together, then awaited. Explore and verify are separate passes after merge. They are not part of this step.
 3. **Merge** (`merge.yml`). Dedup findings, drop a finding the model retracted in prose but left in the list, and compute the score and verdict. A surviving Critical or Major finding forces `NEEDS_CHANGES`.
 4. **Explore** (`explore.yml`). A bounded read-only `read_file` / `search` pass for context outside the diff. Commit review sets this to zero turns.
 5. **Persist** (`persist.yml`). Writes the report and `summary.json`, plus `~/.cache/ansible-plaibook/last_run.json`.
