@@ -107,7 +107,7 @@ Sign every commit with `git commit -s`. That adds the DCO `Signed-off-by` traile
 
 Sign the commit with your own SSH or GPG key if you want GitHub to show it as Verified. The key and the committer email need to belong to your GitHub account.
 
-If a tool wrote the change, add one trailer, `Assisted-by: Tool (model)`, naming the tool and model that did the work. Do not add `Co-authored-by`. If the commit machinery appends `Co-authored-by`, remove that trailer before pushing. `Assisted-by` is the only attribution trailer.
+If a tool wrote the change, add one trailer, `Assisted-by: Tool (model)`, naming the tool and model that did the work. Do not put `Co-authored-by` in the message you pass to `git commit`. `Assisted-by` is the attribution trailer this repo asks for. Some agent environments append `Co-authored-by` from a commit hook after that message is written. Amending the commit runs the hook again, so the trailer comes back. Do not pass `--no-verify` to strip it unless the person who owns the change asked for that.
 
 ## Before submitting a PR: avoiding sensitive/internal info leaks
 
