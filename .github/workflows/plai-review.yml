@@ -77,7 +77,7 @@ jobs:
       contents: read
       pull-requests: read
       checks: read
-    uses: aknochow/ansible-plaibook/.github/workflows/plai-review-run.yml@72f6486e262601ae5cc7b3cd08c08e44b42b904d
+    uses: aknochow/ansible-plaibook/.github/workflows/plai-review-run.yml@30dc616c92a14d266230f60be5b6a5936fb383c9
     # Only these three environment names. The rest of the repository
     # and organization secrets stay on the caller. The called job's
     # plaibook-review environment supplies the values.
