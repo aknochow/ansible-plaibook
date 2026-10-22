@@ -16,6 +16,22 @@ were three separate roles (`pr_review`, `branch_review`, `code_review`);
 they were consolidated into one, dispatching on `review_type` rather than
 duplicating the pipeline three times.
 
+`roles/review/tasks/main.yml` dispatches on `review_type` (`pr`, `branch`, or `commit`) to `resolve_target_{{ review_type }}.yml`. That file resolves the target into the variables the shared engine expects (`review_repo_path`, `review_org_repo`, `review_branch`, `review_context`, `review_short_sha`), then calls `run_review_engine.yml`. `resolve_target_*.yml` is the only target-specific logic. `briefing.yml`, `lenses.yml`, `merge.yml`, `explore.yml`, `verify.yml`, and `persist.yml` are the shared engine.
+
+`review_type: pr` detects GitHub or GitLab from the target, fetches the pull request or merge request, and resolves the head ref. Posting the result is a separate step, off unless `post_results` is true. `review_type: commit` validates a local commit with git. `review_type: branch` resolves a local, GitHub, or GitLab branch.
+
+There is no `bug_pipeline.yml` on `main`. That playbook is parked on `wip/bug-fix-pipeline`.
+
+## Stages
+
+1. **Briefing** (`briefing.yml`). Diff, domain detection, prior-review lookup, and checklist execution. No model call.
+2. **Lenses** (`lenses.yml`). A Security lens and a Functionality/Quality lens, started together, then awaited. This is the model step in the base pipeline.
+3. **Merge** (`merge.yml`). Dedup findings, drop a finding the model retracted in prose but left in the list, and compute the score and verdict. A surviving Critical or Major finding forces `NEEDS_CHANGES`.
+4. **Explore** (`explore.yml`). A bounded read-only `read_file` / `search` pass for context outside the diff. Commit review sets this to zero turns.
+5. **Persist** (`persist.yml`). Writes the report and `summary.json`, plus `~/.cache/ansible-plaibook/last_run.json`.
+
+`post_results` defaults to false. Commit review, including an empty `BASE..TIP` range, is in [Getting started](getting-started.md#review-a-single-local-commit-fast-and-cheap).
+
 ## The review pass
 
 ```mermaid
@@ -92,7 +108,7 @@ lens's own reasoning.
   environment that already pins the interpreter.
 - **`~/.cache/ansible-plaibook/last_run.json` is a single global path** with no
   per-session isolation. Concurrent invocations on the same machine race
-  to overwrite it. See [Getting Started](getting-started.md#reading-the-output).
+  to overwrite it. See [Getting Started](getting-started.md#reading-the-playbook-artifacts).
 - **The self-refuted-finding filter is a reactive regex backstop, not a
   guarantee.** The lens prompt asks the model to self-verify and drop a
   finding it's talked itself out of; in practice this doesn't always
