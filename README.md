@@ -12,6 +12,9 @@ every time, invocable from a terminal, a git hook, or an AAP job
 template. Expect more playbooks here over time as other harness skills
 get the same treatment.
 
+New here? Follow the [Getting Started guide](docs/getting-started.md)
+for a fresh install, provider setup, and commands for your first review.
+
 Locally, **`pipx install plaibook`** then **`plai review`**. Upgrade that
 install with **`plai update`**. Homebrew and
 Debian system Pythons refuse `pip install` into that interpreter
