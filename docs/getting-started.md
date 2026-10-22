@@ -33,7 +33,11 @@ does not stick, including when that ref's version already matches the
 PyPI release. `--branch` checks the recorded spec after install.
 `plai update --check` compares versions and does not install. A
 non-interactive run must pass `-y` or `--yes`. Without a terminal, the
-command cancels.
+command cancels. A successful update also copies the review skill to
+`~/.agents/skills/ansible-plaibook-review/SKILL.md` when that copy is
+missing or older than the package. Cursor and Codex both read that
+directory. The next `plai review` does the same copy, so a `pipx upgrade`
+is picked up the next time `plai` runs.
 
 `plai review` is unchanged. Homebrew and Debian
 refuse `pip install` into the system Python (PEP 668); `pipx` (or

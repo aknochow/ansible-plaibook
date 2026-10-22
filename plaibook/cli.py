@@ -36,6 +36,7 @@ from plaibook.playbook import (
 from plaibook.progress import create_progress_file
 from plaibook.provider_sdk import ProviderSdkError, ensure_provider_sdk
 from plaibook.runtime import UnsupportedPythonError, require_supported_python
+from plaibook.skill import install_user_skill, user_skill_path
 from plaibook.summary import (
     SummaryError,
     dump_json,
@@ -786,6 +787,36 @@ def _unknown_install_refusal() -> int:
     return 2
 
 
+def _sync_review_skill() -> None:
+    """Copy this install's review skill into ~/.agents/skills when it is older."""
+    try:
+        action = install_user_skill()
+    except OSError as exc:
+        print(f"Could not install the plaibook review skill: {exc}", file=sys.stderr)
+        return
+    if action == "installed":
+        print(f"Installed the review skill at {user_skill_path()}", file=sys.stderr)
+    elif action == "updated":
+        print(f"Updated the review skill at {user_skill_path()}", file=sys.stderr)
+
+
+def _sync_review_skill_from_install() -> None:
+    """Load the skill from the install on disk after pipx or uv replaces it."""
+    code = (
+        "from plaibook.skill import install_user_skill, user_skill_path\n"
+        "import sys\n"
+        "action = install_user_skill()\n"
+        "if action == 'installed':\n"
+        "    print(f'Installed the review skill at {user_skill_path()}', file=sys.stderr)\n"
+        "elif action == 'updated':\n"
+        "    print(f'Updated the review skill at {user_skill_path()}', file=sys.stderr)\n"
+    )
+    try:
+        subprocess.run([sys.executable, "-c", code], check=False, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"Could not install the plaibook review skill: {exc}", file=sys.stderr)
+
+
 def cmd_update(args: argparse.Namespace) -> int:
     """Upgrade the install that is running, or install a GitHub ref into it."""
     kind = running_install_kind()
@@ -794,10 +825,14 @@ def cmd_update(args: argparse.Namespace) -> int:
     if kind == "unknown" and not args.check:
         return _unknown_install_refusal()
     if kind == "uv":
-        return _cmd_update_uv(args)
-    if kind == "venv":
-        return _cmd_update_venv(args)
-    return _cmd_update_pipx(args)
+        rc = _cmd_update_uv(args)
+    elif kind == "venv":
+        rc = _cmd_update_venv(args)
+    else:
+        rc = _cmd_update_pipx(args)
+    if rc == 0 and not args.check:
+        _sync_review_skill_from_install()
+    return rc
 
 
 def _cmd_update_pipx(args: argparse.Namespace) -> int:
@@ -1055,6 +1090,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser = build_parser()
         args = parser.parse_args(list(argv) if argv is not None else None)
         if args.command == "review":
+            _sync_review_skill()
             return cmd_review(args)
         elif args.command == "update":
             return cmd_update(args)
