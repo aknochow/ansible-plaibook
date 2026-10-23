@@ -86,7 +86,7 @@ The base digest, `user: "1000"`, `package_manager_path: /usr/bin/dnf`, and `pyth
 
 Collections come from [`collections-requirements.yml`](../collections-requirements.yml). Python dependencies come from [`execution-environment-requirements.txt`](../execution-environment-requirements.txt) and are installed with `pip install --require-hashes`. The collection `requirements.txt` ranges are listed under `dependencies.exclude.python` so the introspect step cannot install those ranges beside the lockfile. Pins are recorded in the [dependency map](dependency-map.md).
 
-`gh` 2.102.0 is the signed GitHub release RPM. The public key is [`execution-environment-gh-key.asc`](../execution-environment-gh-key.asc). `glab` 1.122.0 is GitLab's unsigned RPM. Both installs check a per-architecture SHA-256 before `rpm` runs.
+`gh` 2.103.0 is the signed GitHub release RPM, built with Go 1.27.3, which includes the fix for CVE-2026-111943. The public key is [`execution-environment-gh-key.asc`](../execution-environment-gh-key.asc). `glab` 1.122.0 is GitLab's unsigned RPM and is still Go 1.27.2. The newest GitLab release, 1.124.0, is also Go 1.27.2, so there is no rebuilt RPM to install. CVE-2026-111943 on `usr/bin/glab` stays in [`.trivyignore.yaml`](../.trivyignore.yaml) until 2026-11-09. Both installs check a per-architecture SHA-256 before `rpm` runs.
 
 ## CI
 
