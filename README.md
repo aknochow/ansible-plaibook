@@ -2,7 +2,7 @@
 
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/aknochow/ansible-plaibook/badge)](https://scorecard.dev/viewer/?uri=github.com/aknochow/ansible-plaibook)
 
-AI-powered code review, as an Ansible playbook. `plai review` runs independent lenses over a diff, scores the findings in plain code, and writes a report. The same command runs from a terminal, a git hook, or an AAP job template.
+AI-powered code review, running as a deterministic Ansible playbook rather than a chat session. `plai review` sends independent lenses over a diff, scores whatever findings survive with plain code (a lens does not get to grade itself), and writes the report. Same command from a terminal, a git hook, or an AAP job template.
 
 ## Install
 
@@ -12,24 +12,22 @@ plai review
 plai update
 ```
 
-`plai` and `plaibook` are one program. The package name is `plaibook` (`plai` is taken on PyPI). Homebrew and Debian refuse `pip install` into the system Python ([PEP 668](https://peps.python.org/pep-0668/)). Inside a virtualenv you already manage, `pip install plaibook` is the same install.
+**`pipx install plaibook`**, then **`plai review`**. **`plai update`** upgrades the install that is running. Homebrew and Debian refuse `pip install` into the system Python ([PEP 668](https://peps.python.org/pep-0668/)); inside a virtualenv you already manage, `pip install plaibook` is the same install. The name on PyPI is `plaibook`. `plai` is taken, and `ansible-plaibook` is this repo. `plai` and `plaibook` share one entry point.
 
-`plai review` with no arguments reviews `HEAD` in the current directory. `plai review org/repo/123` reviews a pull request or merge request. The first run installs collections into `~/.cache/ansible-plaibook/collections`.
-
-Install details, commit review, and how to read the output are in [Getting started](docs/getting-started.md). AAP job templates call `ansible-playbook review.yml`. Contributors use [CONTRIBUTING](CONTRIBUTING.md).
+`plai review` with no arguments reviews `HEAD` here. `plai review org/repo/123` is a pull request or merge request. The wheel vendors `review.yml`, and the first run installs collections from GitHub into `~/.cache/ansible-plaibook/collections` (never `~/.ansible`, so a leftover symlink from a sibling checkout cannot break install). The CLI notes are in [`plaibook/README.md`](plaibook/README.md). Job templates still call `ansible-playbook review.yml`. Python 3.10, the macOS `/tmp` trap, commit review, and how to read the output are in [Getting started](docs/getting-started.md). Contributors use `uv sync --extra dev` — [CONTRIBUTING](CONTRIBUTING.md).
 
 ## Documentation
 
-- [Getting started](docs/getting-started.md) covers install, the first review, and the CLI output.
-- [Architecture](docs/architecture.md) covers the review role, the five stages, and verification.
-- [Why Ansible](docs/why-ansible.md) covers job templates, scoring, and the Ansible tooling that comes with the playbook.
-- [Sandboxes and LLM calls](docs/sandbox-and-agent-safety.md) covers where model calls run and where the sandbox runs.
-- [GitHub review check](docs/github-review-check.md) covers the pull-request check that runs `plai review`.
-- [Variable reference](docs/reference.md) covers every variable that changes a run.
-- [Dependency map](docs/dependency-map.md) covers collection SHAs, SDK pins, and the OpenShell gateway.
-- [Execution environment](docs/execution-environment.md) covers `ghcr.io/aknochow/plaibook-ee` and how to run `review.yml` in it.
-- [Release](docs/release.md) covers the version bump, the GitHub Release, and the PyPI upload.
-- [Gotchas](docs/gotchas.md) covers Vertex structured output, sandbox network policy, and the gateway URL.
+- [Getting started](docs/getting-started.md) — first review, commit mode, and the CLI output
+- [Architecture](docs/architecture.md) — the review role, the five stages, and verification
+- [Why Ansible](docs/why-ansible.md) — job templates, scoring, and the Ansible tools that come along
+- [Sandboxes and LLM calls](docs/sandbox-and-agent-safety.md) — model calls stay on the controller
+- [GitHub review check](docs/github-review-check.md) — the pull-request check that runs `plai review`
+- [Variable reference](docs/reference.md) — every variable that changes a run
+- [Dependency map](docs/dependency-map.md) — collection SHAs, SDK pins, and the OpenShell gateway
+- [Execution environment](docs/execution-environment.md) — `ghcr.io/aknochow/plaibook-ee`
+- [Release](docs/release.md) — version bump, GitHub Release, PyPI upload
+- [Gotchas](docs/gotchas.md) — Vertex structured output, sandbox egress, and the gateway URL
 
 ## Dependencies
 
