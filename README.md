@@ -13,7 +13,7 @@ No arguments reviews `HEAD` in the current directory. `plai review org/repo/123`
 
 The PyPI name is `plaibook`. `plai` was already taken, so the two commands are one program. Homebrew and Debian will not let you `pip install` into the system Python ([PEP 668](https://peps.python.org/pep-0668/)). A virtualenv you already manage can `pip install plaibook`. The first run puts the provider collections in `~/.cache/ansible-plaibook/collections` and does not touch `~/.ansible`.
 
-`plai review` with no arguments is a quiet run. You get the verdict, the score, and each Critical or Major finding with `file:line` and a short why. Minor and nit stay as counts. The footer is the cost and this run's `last_run.<run_id>.json`. `-v` is the Ansible task list. `--json` is what another program should parse. Commit review, and how to read a run, are in [Getting started](docs/getting-started.md). The CLI's own notes are in [`plaibook/README.md`](plaibook/README.md).
+A quiet run prints the verdict, the score, and each Critical or Major finding with `file:line` and a short why. Minor and nit stay as counts. The footer is the cost and this run's `last_run.<run_id>.json`. `-v` is the Ansible task list. `--json` is what another program should parse. Commit review, and how to read a run, are in [Getting started](docs/getting-started.md). The CLI's own notes are in [`plaibook/README.md`](plaibook/README.md).
 
 ## Collections
 
