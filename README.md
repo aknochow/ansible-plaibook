@@ -2,251 +2,38 @@
 
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/aknochow/ansible-plaibook/badge)](https://scorecard.dev/viewer/?uri=github.com/aknochow/ansible-plaibook)
 
-AI-powered code review, running as a deterministic, unattended Ansible
-playbook, not a chat-based agent session. It ports the methodology of
-an interactive `code-review` skill into pure Ansible: dispatch
-independent LLM lenses over a diff, merge and score their findings with
-plain deterministic math (never trusted self-report), and render a
-report, the same review a human would give, produced the same way
-every time, invocable from a terminal, a git hook, or an AAP job
-template. Expect more playbooks here over time as other harness skills
-get the same treatment.
+AI-powered code review, as an Ansible playbook. `plai review` runs independent lenses over a diff, scores the findings in plain code, and writes a report. The same command runs from a terminal, a git hook, or an AAP job template.
 
-Locally, **`pipx install plaibook`** then **`plai review`**. Upgrade that
-install with **`plai update`**. Homebrew and
-Debian system Pythons refuse `pip install` into that interpreter
-([PEP 668](https://peps.python.org/pep-0668/)). Inside a virtualenv you
-already manage, `pip install plaibook` is the same install. The package
-name is `plaibook` (not `plai`, taken on PyPI, and not
-`ansible-plaibook`). `plaibook` and `plai` share one entry point. The
-wheel vendors `review.yml`; first `plai review` installs Galaxy
-collections into `~/.cache/ansible-plaibook/collections` (never
-`~/.ansible`). No checkout, no `ansible-galaxy` against your home
-tree. See [`plaibook/README.md`](plaibook/README.md). `plai review`
-with no arguments reviews `HEAD` in the current directory;
-`plai review org/repo/123` is the PR/MR form. `ansible-playbook
-review.yml` remains the AAP path. Until this version is on PyPI, the
-same wheel is `pip install .` from this checkout. Put that venv under
-`$HOME`, not `/tmp` (macOS XProtect). Contributors still
-`uv sync --extra dev` — see [CONTRIBUTING](CONTRIBUTING.md).
+## Install
+
+```bash
+pipx install plaibook
+plai review
+plai update
+```
+
+`plai` and `plaibook` are one program. The package name is `plaibook` (`plai` is taken on PyPI). Homebrew and Debian refuse `pip install` into the system Python ([PEP 668](https://peps.python.org/pep-0668/)). Inside a virtualenv you already manage, `pip install plaibook` is the same install.
+
+`plai review` with no arguments reviews `HEAD` in the current directory. `plai review org/repo/123` reviews a pull request or merge request. The first run installs collections into `~/.cache/ansible-plaibook/collections`.
+
+Install details, commit review, and how to read the output are in [Getting started](docs/getting-started.md). AAP job templates call `ansible-playbook review.yml`. Contributors use [CONTRIBUTING](CONTRIBUTING.md).
+
+## Documentation
+
+- [Getting started](docs/getting-started.md) covers install, the first review, and the CLI output.
+- [Architecture](docs/architecture.md) covers the review role, the five stages, and verification.
+- [Why Ansible](docs/why-ansible.md) covers job templates, scoring, and the Ansible tooling that comes with the playbook.
+- [Sandboxes and LLM calls](docs/sandbox-and-agent-safety.md) covers where model calls run and where the sandbox runs.
+- [GitHub review check](docs/github-review-check.md) covers the pull-request check that runs `plai review`.
+- [Variable reference](docs/reference.md) covers every variable that changes a run.
+- [Dependency map](docs/dependency-map.md) covers collection SHAs, SDK pins, and the OpenShell gateway.
+- [Execution environment](docs/execution-environment.md) covers `ghcr.io/aknochow/plaibook-ee` and how to run `review.yml` in it.
+- [Release](docs/release.md) covers the version bump, the GitHub Release, and the PyPI upload.
+- [Gotchas](docs/gotchas.md) covers Vertex structured output, sandbox network policy, and the gateway URL.
 
 ## Dependencies
 
-Plaibook pins provider collections, Python SDKs, the OpenShell
-gateway, and the review workflow in different files. Those numbers
-are not interchangeable. The map, and the order a bump has to follow,
-is [docs/dependency-map.md](docs/dependency-map.md).
-
-## Why Ansible?
-
-The question everyone asks first. A few concrete reasons this isn't
-just "a Python script that happens to be YAML":
-
-- **It ships as an AAP Job Template for free.** This isn't
-  hypothetical. `review.yml` already runs as a real job template
-  against real MRs (see the "Running it in AAP" section below).
-  Whatever RBAC, credential management, scheduling, and audit logging
-  your team already runs its infra automation through, your AI code
-  review runs through too. No bespoke service to stand up, no new
-  auth model to build.
-- **Every step is a named, inspectable, replayable task**, not opaque
-  agent-framework internals. `ansible.posix.profile_tasks` timing is
-  already wired in; every review's cost/token usage is tracked per
-  agent call. When something looks wrong, you read the task list, not
-  a stack trace from a framework you don't own.
-- **Scores are never self-reported.** `merge.yml`/`verify.yml` recompute
-  every score deterministically (0-100 scale) from the surviving
-  findings list via a shared Python action plugin. A lens can talk
-  itself out of a finding in prose, but that doesn't change the score
-  unless the finding is actually dropped from the list. That's a
-  discipline Ansible's plain, auditable task model makes natural; a more
-  "clever" agent framework makes it easy to accidentally trust a
-  model's self-assessment.
-- **Sandboxing is a first-class primitive, not bolted on.** Every
-  script-touching task takes its execution target from a
-  `review_delegate_host` var. Sandbox lifecycle lives once in the
-  top-level playbook, and the `review` role has zero knowledge OpenShell
-  even exists. That's just `delegate_to`, not custom isolation plumbing.
-- **Cost.** No persistent agent service, no idle infra. This runs
-  on-demand and you pay for exactly the LLM calls a review actually
-  makes. The pipeline reports token totals and an estimate for every run;
-  the amount depends on provider, model, prompt-cache hits, and exploration
-  depth.
-
-## More reasons for Ansible
-
-Beyond the review pipeline's own design, building this as a plain
-Ansible playbook and role means the entire mature `ansible-*` tooling
-ecosystem comes along for free. None of it is built or maintained by
-this project, and all of it is already production-hardened at
-enterprise scale elsewhere.
-
-- **`ansible-lint`** enforces real code quality automatically, not by
-  convention. This repo runs at the `production` profile, Ansible's
-  strictest ("meets requirements for inclusion as validated or
-  certified content"), wired into a pre-commit hook via
-  `.ansible-lint`.
-- **`ansible-builder`** turns `execution-environment.yml` into a
-  runnable, portable container image with the right Python and
-  collection dependencies baked in. No hand-maintained Dockerfile
-  (see "Running it in AAP" below).
-- **`ansible-galaxy`** handles collection dependency resolution and
-  distribution. The provider collections this pipeline depends on
-  install the same way any other Galaxy collection does, via
-  `collections-requirements.yml`. No custom package manager to build.
-- **`ansible-navigator`** runs and inspects playbooks against the exact
-  execution environment `ansible-builder` produces, without a separate
-  install-and-debug step. Compatible out of the box, since
-  `execution-environment.yml` already exists.
-- **AWX and Ansible Automation Platform** provide the actual production
-  job runner: RBAC, credential injection, scheduling, and audit
-  logging, all already covered above. `ansible-runner` is what AAP
-  itself uses under the hood to execute each job.
-- **`ansible-doc`** documents every module, plugin, and role variable
-  this project ships, the same discoverability any other collection
-  gets, with no separate docs generator to maintain.
-
-## How `review.yml` works
-
-One playbook, `review_type` selects the mode (`pr` | `branch` |
-`commit`), one or more targets, five stages:
-
-1. **Briefing** (`briefing.yml`), deterministic, zero-LLM: diffing,
-   domain detection, prior-review lookup, and checklist execution, all
-   real Ansible tasks and action plugins (no vendored harness scripts
-   left in this stage as of the action-plugin migration).
-2. **Lenses** (`lenses.yml`), two independent `aknochow.claude.message`
-   calls dispatched in parallel: a Security lens and a
-   Functionality+Quality lens. This is the only genuinely LLM-driven
-   step in the base pipeline.
-3. **Merge** (`merge.yml`), dedup findings across lenses, apply a
-   self-refutation filter (models sometimes talk themselves out of a
-   finding in prose without dropping it from the list, this backstops
-   that), and compute scores/verdict deterministically. Any surviving
-   Critical or Major finding forces `NEEDS_CHANGES`, full stop.
-4. **Explore** (`explore.yml`), a bounded, tool-calling pass
-   (`read_file`/`search`, read-only) that looks beyond the diff itself
-   for related context before finalizing findings.
-5. **Persist** (`persist.yml`), renders the human-readable report and
-   writes a structured `summary.json`, plus a stable
-   `~/.cache/ansible-plaibook/last_run.json` every run overwrites (so tooling
-   always knows where to look, no timestamp-guessing).
-
-```bash
-plai review org/repo/123
-plaibook review org/repo/123
-plai review https://gitlab.example.com/org/repo/-/merge_requests/45
-# AAP / EE / power-user path:
-ansible-playbook review.yml -e review_targets_raw="org/repo/123"
-```
-
-Runs in an OpenShell sandbox by default (`use_sandbox: true`) since
-briefing execution runs commands parsed out of source-branch-controlled
-input. `post_results` defaults to `false`, reviewing is safe to
-automate; posting back to a real PR/MR is a write to shared state and
-needs explicit opt-in.
-
-## `review_type: commit`: fast local checks
-
-A lightweight mode for a tight feedback loop right after a local
-commit: no sandbox by default, no exploration pass, no PR/MR API
-calls, just the Security + Functionality/Quality lenses against your
-working tree.
-
-```bash
-plai review --commit
-plaibook review --commit
-plai review --commit --sha abc1234 --repo /path/to/repo
-plai review --commit --sha abc1234..def5678
-```
-
-`--sha BASE..TIP` reviews that contiguous range as one diff
-(`git diff BASE TIP`). `BASE` must be an ancestor of `TIP`. The same
-commit on both sides reviews nothing: quiet `plai review` prints
-`NOTHING_TO_REVIEW` and the range, and exits 0. It does not print
-`status: ok`. Three-dot `BASE...TIP` is rejected; a merge-base diff
-of a whole branch is `review_type: branch`.
-
-Unlike `review_type: pr`/`branch` (which never fail the Ansible run
-based on verdict, a `NEEDS_CHANGES` review is still a "successful"
-run), `review_type: commit` **fails its exit code** when the verdict
-is `NEEDS_CHANGES` with a real Critical/Major finding, built for
-hooking into something like a Claude Code `PostToolUse` hook on `git
-commit`, so a coding agent gets live regression feedback on every
-commit it makes, not just at PR time.
-
-This used to be a separate `commit_review.yml` playbook, duplicating a
-fair amount of `review.yml`'s tail logic (cache-dir handling,
-`last_run.json` writing, stats) and target-resolution logic. Both are
-now unified: one playbook, `review_type` drives the mode-specific
-defaults (sandboxing, exploration depth, fail-on-verdict behavior) via
-plain variable defaults, not separate control flow.
-
-## Architecture
-
-One role, `review`, powers `review.yml`. It used to be two (`review` for
-target resolution handing off via `include_role` to a separate
-`code_review` engine), merged into one role once that split had proven
-itself as a valid intermediate step, per the same "don't leave a
-deliberate-but-temporary shape in place longer than it needs to be"
-discipline this repo applies elsewhere. `roles/review/tasks/main.yml`
-dispatches on `review_type` (`pr` | `branch` | `commit`) to
-`resolve_target_{{ review_type }}.yml`, which resolves the target into
-the output-variable contract the shared review engine expects
-(`review_repo_path`, `review_org_repo`, `review_branch`,
-`review_context`, `review_short_sha`, etc.), then calls the engine
-itself (`run_review_engine.yml`: briefing, lens dispatch, merge/dedup,
-explore, verify, persist). Target-resolution files and engine files
-are distinguished by naming convention now that they're not separated
-by a role boundary: `resolve_target_*.yml` contains ONLY logic
-specific to that target type; `briefing.yml`/`lenses.yml`/`merge.yml`/
-`explore.yml`/`verify.yml`/`persist.yml` are the shared engine, agnostic
-to which `resolve_target_*.yml` produced its inputs.
-
-- `review_type: pr` detects GitHub vs. GitLab from the target
-  identifier, fetches PR/MR context, and resolves the head ref; it
-  optionally posts results back via `post_review_comment.py` (gated behind
-  `post_results: false` by default), this is the one target type with
-  its own post-engine step, which is why each `resolve_target_*.yml`
-  calls the engine itself rather than the top-level dispatcher calling
-  it uniformly for all three.
-- `review_type: commit` resolves/validates a local commit directly via
-  git, no PR/MR API involved.
-- `review_type: branch` resolves a whole local-path/GitHub/GitLab branch
-  target (`plai review --branch ...`, or `-e review_type=branch
-  -e branch_review_target=...` on the playbook path).
-
-Domain-specific review steering (tech-stack-specific guidance blocks,
-ported from harness's `domain_steering.md`) live as individual Jinja
-templates under `roles/review/templates/domain_steering/`, one file
-per domain, independently editable/reviewable.
-
-Phase 2 (sandboxed) runs stand up an OpenShell sandbox for isolated
-script execution and register it as a real Ansible inventory host over
-SSH, delegating individual tasks to it as needed, while every
-Claude/Gemini/OpenAI call still runs on the controller, never inside the
-sandbox. See [`docs/sandbox-and-agent-safety.md`](docs/sandbox-and-agent-safety.md)
-for the full pattern (and the community pattern we deliberately don't
-use instead).
-
-### Bug-fix pipeline: parked, not on `main` right now
-
-A second tenant (`bug_context`/`bug_plan`/`bug_fix` roles +
-`bug_pipeline.yml`) is deliberately parked on the `wip/bug-fix-pipeline`
-branch while the review pipeline's foundation (this repo's actual star)
-gets an independent verification stage and an evals suite first. It
-comes back once that foundation is solid, review + fix together is
-the next logical milestone.
-
-### Verification auditor: in flight
-
-An independent, adversarial re-check of Critical/Major findings
-(read-only tool-calling agent, given only one finding at a time,
-instructed to try to *refute* it) is under active development on
-`feat/verification-auditor`, catches the class of false positive that
-survives self-verification (a model confidently misremembering an SDK
-signature or stdlib default) by actually reading the source it depends
-on. Not yet merged.
+Plaibook pins provider collections, Python SDKs, the OpenShell gateway, and the review workflow in different files. Those numbers are not interchangeable. The map, and the order a bump has to follow, is [docs/dependency-map.md](docs/dependency-map.md).
 
 ## Running it in AAP
 
@@ -286,41 +73,3 @@ collection only when `agent_family=cursor` starts the sidecar. Rebuild
 when `collections-requirements.yml` or `execution-environment.yml`
 changes. A Vertex-only parse failure is a playbook bug, not a missing
 collection.
-
-
-## Verified so far
-
-- ✅ Full pipeline against a real local diff, unsandboxed, and
-  identically delegated into a real OpenShell sandbox
-- ✅ Looping over multiple targets in one run
-- ✅ Real PR/MR review via `review` (`review_type: pr`) against real
-  GitHub and GitLab targets
-- ✅ Running as a real AAP Job Template against a real MR
-- ⏳ `post_results: true` (posting back to a real PR/MR)
-- 🚧 Verification auditor (`feat/verification-auditor`, not yet merged)
-- 🚧 Bug-fix pipeline, parked on `wip/bug-fix-pipeline`, comes back
-  once the review pipeline's foundation is fully solid
-
-## Known gotchas (hit during development, worth knowing before debugging blind)
-
-- **Vertex org policy**: `constraints/vertexai.allowedPartnerModelFeatures`
-  can block `output_config` (native structured output) on some GCP
-  projects while plain messages/forced-tool-use still work fine on the
-  *same* project/model. This pipeline uses `tool_choice`-forced
-  structured output specifically to sidestep that. See
-  `roles/review/tasks/lenses.yml`.
-- **Sandbox network policy is separate from provider attachment.**
-  Don't assume a sandbox can reach an internal GitLab or an arbitrary
-  API just because a provider is attached; check the gateway's network
-  policy.
-- **EE collections follow `collections-requirements.yml`.** The image
-  installs those git pins. It does not contain OpenShell `ssh_proxy.py`
-  or certs. A change to that file on `main` rebuilds
-  `ghcr.io/aknochow/plaibook-ee:main` and `:latest`.
-- **The review uses the openshell CLI's selected gateway.** The
-  gateway name defaults to `openshell`. When
-  `~/.config/openshell/gateways/openshell/metadata.json` exists, its
-  `gateway_endpoint` is the sandbox URL (on a laptop that is often
-  `https://localhost:17670`). `https://host.openshell.internal:17670`
-  remains the fallback when that file is absent. Override either with
-  `-e sandbox_gateway=...` or `-e sandbox_gateway_name=...`.

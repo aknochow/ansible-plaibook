@@ -1,5 +1,5 @@
 ---
-type: How-to
+type: Guide
 title: Execution environment
 description: How ghcr.io/aknochow/plaibook-ee is built with ansible-builder and how to run review.yml in it.
 tags: [execution-environment, ansible-builder, aap]

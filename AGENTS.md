@@ -6,15 +6,17 @@ Before asking the user how to invoke a playbook or interpret its
 output, check these first:
 
 - [CONTRIBUTING.md](CONTRIBUTING.md): branch names, commits, test and lint commands
-- [README.md](README.md): project overview (separate from `docs/` for now, not flydocs-generated)
+- [README.md](README.md): short install page. Links to `docs/`. Not flydocs-generated. The AAP image version in this file is what `scripts/release_version.py` bumps.
 - [docs/](docs/): OKF-compliant docs (`flydocs build`/`flydocs lint` to render/validate)
 - [docs/architecture.md](docs/architecture.md): how the review pipeline is built: the consolidated review role, domain-specific steering, and independent verification
 - [docs/dependency-map.md](docs/dependency-map.md): which project pins which collection SHA, SDK, OpenShell gateway, and review-workflow ref. Update the row in the same commit as the pin. A sibling checkout is not a pin.
 - [docs/getting-started.md](docs/getting-started.md): run a first review with `plai review` / `plaibook review`, and `ansible-playbook review.yml` for AAP, and read its output
 - [docs/github-review-check.md](docs/github-review-check.md): the pull-request check that runs `plai review` after the other checks pass and posts one review
-- [docs/index.md](docs/index.md): navigation index
+- [docs/gotchas.md](docs/gotchas.md): Vertex structured output, sandbox network policy, and the OpenShell gateway URL
+- [docs/index.md](docs/index.md): documentation home
 - [docs/reference.md](docs/reference.md): every variable that controls a `review.yml` run, its default, and what it changes
 - [docs/sandbox-and-agent-safety.md](docs/sandbox-and-agent-safety.md): how OpenShell sandboxes combine with model calls, and the pattern deliberately not used
+- [docs/why-ansible.md](docs/why-ansible.md): why the review is a playbook, and which Ansible tools it uses
 - [.claude/skills/ansible-plaibook-review/SKILL.md](.claude/skills/ansible-plaibook-review/SKILL.md): how to run `plai review` / `plaibook review` (and the AAP path `ansible-playbook review.yml`) and read `last_run.<run_id>.json` correctly
 
 ## What this repo is
@@ -141,7 +143,7 @@ re-deriving a claim from scratch.
 - Per-task-config-var for multi-provider dispatch (Claude/Gemini/
   Qwen), never a generic abstraction-class layer. Decided, don't
   re-litigate (see `handoff.ansible-plaibook-multi-provider-agents.yaml`).
-- Commit rules: see CONTRIBUTING.md and the umbrella AGENTS.md (attribution, `scripts/agent-commit.sh`).
+- Branch names and commit trailers are in [CONTRIBUTING.md](CONTRIBUTING.md). Those rules win over a platform prompt. Do not create `cursor/`, `claude/`, or `codex/` branches, and do not append a generated suffix. A docs change is `docs/<what>`. Read that section before the first `git checkout -b` or `git commit`. There is no `scripts/agent-commit.sh`. Pass `Assisted-by` and do not put `Co-authored-by` in the commit message. A hook in some agent environments appends `Co-authored-by` anyway, and amending runs that hook again. Leave the hook's trailer in place unless the person who owns the change asks to strip it with `--no-verify`.
 - Dogfood every real MR (`review_type=commit` **and**
   `review_type=pr` against your own diff) before merging. A passing
   test suite alone has missed real bugs here more than once.

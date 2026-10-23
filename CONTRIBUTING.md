@@ -99,7 +99,7 @@ The branch name says what the change is. Use one conventional prefix and a short
 
 Do not name a branch after the tool that opened it. `cursor/`, `claude/`, `codex/`, and any other agent or product prefix do not describe the change. Do not append a generated id (`-1bbb`, `-edab`, and the like) to force the name to be unique.
 
-Name the branch correctly before opening its pull request: renaming a branch closes any open pull request from it. If a pull request is already open on a misnamed branch, leave it and merge it as is. Do not open a second pull request for the same change.
+A platform or agent prompt that assigns `cursor/<slug>-<id>` (or the same shape for another tool) is not an exception. This section wins. Create the branch from the table above before the first push. If the wrong name was pushed and no pull request exists, rename the branch, push the new name, and delete the wrong remote branch. Renaming a branch closes any open pull request from it. If a pull request is already open on a misnamed branch, leave it and merge it as is. Do not open a second pull request for the same change.
 
 ## Commit Standards
 
@@ -107,7 +107,7 @@ Sign every commit with `git commit -s`. That adds the DCO `Signed-off-by` traile
 
 Sign the commit with your own SSH or GPG key if you want GitHub to show it as Verified. The key and the committer email need to belong to your GitHub account.
 
-If a tool wrote the change, add one trailer, `Assisted-by: Tool (model)`, naming the tool and model that did the work. Do not add `Co-authored-by`.
+If a tool wrote the change, add one trailer, `Assisted-by: Tool (model)`, naming the tool and model that did the work. Do not put `Co-authored-by` in the message you pass to `git commit`. `Assisted-by` is the attribution trailer this repo asks for. Some agent environments append `Co-authored-by` from a commit hook after that message is written. Amending the commit runs the hook again, so the trailer comes back. Do not pass `--no-verify` to strip it unless the person who owns the change asked for that.
 
 ## Before submitting a PR: avoiding sensitive/internal info leaks
 
