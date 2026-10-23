@@ -2,36 +2,18 @@
 
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/aknochow/ansible-plaibook/badge)](https://scorecard.dev/viewer/?uri=github.com/aknochow/ansible-plaibook)
 
-AI-powered code review, running as a deterministic Ansible playbook rather than a chat session. `plai review` sends independent lenses over a diff, scores whatever findings survive with plain code (a lens does not get to grade itself), and writes the report. Same command from a terminal, a git hook, or an AAP job template.
-
-## Install
+AI-powered code review, running as an unattended Ansible playbook rather than a chat. `plai review` puts independent lenses on a diff, then scores the findings that are still standing. The score comes from that list, not from the model's own grade. Same command from a terminal, a git hook, or an AAP job template.
 
 ```bash
 pipx install plaibook
 plai review
-plai update
 ```
 
-**`pipx install plaibook`**, then **`plai review`**. **`plai update`** upgrades the install that is running. Homebrew and Debian refuse `pip install` into the system Python ([PEP 668](https://peps.python.org/pep-0668/)); inside a virtualenv you already manage, `pip install plaibook` is the same install. The name on PyPI is `plaibook`. `plai` is taken, and `ansible-plaibook` is this repo. `plai` and `plaibook` share one entry point.
+No arguments reviews `HEAD` in the current directory. `plai review org/repo/123` is a pull request or merge request. `plai update` upgrades the install that just ran.
 
-`plai review` with no arguments reviews `HEAD` here. `plai review org/repo/123` is a pull request or merge request. The wheel vendors `review.yml`, and the first run installs collections from GitHub into `~/.cache/ansible-plaibook/collections` (never `~/.ansible`, so a leftover symlink from a sibling checkout cannot break install). The CLI notes are in [`plaibook/README.md`](plaibook/README.md). Job templates still call `ansible-playbook review.yml`. Python 3.10, the macOS `/tmp` trap, commit review, and how to read the output are in [Getting started](docs/getting-started.md). Contributors use `uv sync --extra dev` — [CONTRIBUTING](CONTRIBUTING.md).
+The PyPI name is `plaibook`. `plai` was already taken, so the two commands are one program. Homebrew and Debian will not let you `pip install` into the system Python ([PEP 668](https://peps.python.org/pep-0668/)). A virtualenv you already manage can `pip install plaibook`. The first run puts the provider collections in `~/.cache/ansible-plaibook/collections` and does not touch `~/.ansible`.
 
-## Documentation
-
-- [Getting started](docs/getting-started.md) — first review, commit mode, and the CLI output
-- [Architecture](docs/architecture.md) — the review role, the five stages, and verification
-- [Why Ansible](docs/why-ansible.md) — job templates, scoring, and the Ansible tools that come along
-- [Sandboxes and LLM calls](docs/sandbox-and-agent-safety.md) — model calls stay on the controller
-- [GitHub review check](docs/github-review-check.md) — the pull-request check that runs `plai review`
-- [Variable reference](docs/reference.md) — every variable that changes a run
-- [Dependency map](docs/dependency-map.md) — collection SHAs, SDK pins, and the OpenShell gateway
-- [Execution environment](docs/execution-environment.md) — `ghcr.io/aknochow/plaibook-ee`
-- [Release](docs/release.md) — version bump, GitHub Release, PyPI upload
-- [Gotchas](docs/gotchas.md) — Vertex structured output, sandbox egress, and the gateway URL
-
-## Dependencies
-
-Plaibook pins provider collections, Python SDKs, the OpenShell gateway, and the review workflow in different files. Those numbers are not interchangeable. The map, and the order a bump has to follow, is [docs/dependency-map.md](docs/dependency-map.md).
+[Getting started](docs/getting-started.md) is the first review, commit mode, and how to read the output. [Architecture](docs/architecture.md) is how the playbook is built. [Why Ansible](docs/why-ansible.md) is the job-template argument. The rest of the pages are the [docs index](docs/index.md). Collection SHAs, SDK pins, and the OpenShell gateway are not interchangeable; the map and the order a bump has to follow are in [docs/dependency-map.md](docs/dependency-map.md). Contributors start at [CONTRIBUTING](CONTRIBUTING.md). The CLI's own notes are in [`plaibook/README.md`](plaibook/README.md).
 
 ## Running it in AAP
 
