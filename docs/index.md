@@ -22,7 +22,7 @@ Documentation for the review playbook and the `plai` / `plaibook` CLI. The repos
 ## Concepts
 
 - [Architecture](architecture.md). The review role, the five stages, domain steering, and verification.
-- [Why Ansible](why-ansible.md). Job templates, scoring, and the Ansible tools the playbook uses.
+- [Ansible](ansible.md). The job template, scoring, and the Ansible tools the playbook uses.
 - [Sandboxes and LLM calls](sandbox-and-agent-safety.md). Model calls stay on the controller. The sandbox runs untrusted commands.
 
 ## Reference

@@ -24,7 +24,7 @@ tagline = "Deterministic AI code review, orchestrated in Ansible"
 [[nav]]
 "Concepts" = [
     { "Architecture" = "architecture.md" },
-    { "Why Ansible" = "why-ansible.md" },
+    { "Ansible" = "ansible.md" },
     { "Sandboxes and LLM Calls" = "sandbox-and-agent-safety.md" },
 ]
 
