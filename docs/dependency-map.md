@@ -77,13 +77,18 @@ provider collection, and a provider collection does not import OpenShell.
 Recorded in `collections-requirements.yml`. `version` is a full commit
 SHA.
 
+The five aknochow pins moved together. That is the bump. Each new SHA
+is that repo's default-branch HEAD and a descendant of the previous pin
+(GitHub compare status `ahead`). The tree diff for every pair is
+`CONTRIBUTING.md` only. No module, SDK range, or runtime code moved.
+
 | Id | Collection | SHA | Which change |
 |---|---|---|---|
-| `collection.openshell` | ansible-openshell | `213d2bd1efb0a40d7df13b3443ee90811617126a` | ansible-openshell #37. Notify dispatch on main. SDK range is still `openshell>=0.1.3,<0.2` from #36. |
-| `collection.claude` | ansible-claude | `288d2be05acbc9059752254d9829dc30d81dcfe7` | ansible-claude #33. Notify dispatch on main. SDK pins are still `anthropic` 1.11.0 and `claude-agent-sdk` 0.2.163 from #30. |
-| `collection.gemini` | ansible-gemini | `9c75960832656ab58aa91e2ba6e7f38b44e7b012` | ansible-gemini #26. Notify dispatch on main. `google-genai` 2.27.0 is still the pin from #22. |
-| `collection.openai` | ansible-openai | `d38fefbca72185c81b651affa097f1be53332070` | ansible-openai #29. Notify dispatch on main. `openai` 3.23.0 is still the pin from #25. |
-| `collection.cursor` | ansible-cursor | `407669d619c2d0d59561042286fa01249928c822` | ansible-cursor #32. Notify dispatch on main. `cursor-sdk` 1.0.35 and the serialized starts from #30 are unchanged. |
+| `collection.openshell` | ansible-openshell | `09cd2f193a77b3d59b263c62224e23fe364fa6e8` | ansible-openshell #38. Compare `213d2bd1efb0a40d7df13b3443ee90811617126a...09cd2f193a77b3d59b263c62224e23fe364fa6e8` is ahead; only `CONTRIBUTING.md`. SDK range is still `openshell>=0.1.3,<0.2` from #36. |
+| `collection.claude` | ansible-claude | `dfc061b6bf0bf0c1462435ef1c1f106d830a52b0` | ansible-claude #34. Compare `288d2be05acbc9059752254d9829dc30d81dcfe7...dfc061b6bf0bf0c1462435ef1c1f106d830a52b0` is ahead; only `CONTRIBUTING.md`. SDK pins are still `anthropic` 1.11.0 and `claude-agent-sdk` 0.2.163 from #30. |
+| `collection.gemini` | ansible-gemini | `016d7e2e5eceb2052304c740ee6a4abf44ca48ce` | ansible-gemini #28. Compare `9c75960832656ab58aa91e2ba6e7f38b44e7b012...016d7e2e5eceb2052304c740ee6a4abf44ca48ce` is ahead; only `CONTRIBUTING.md`. `google-genai` 2.27.0 is still the pin from #22. |
+| `collection.openai` | ansible-openai | `3657a671018dfda9f18328d2b0c179038f100797` | ansible-openai #30. Compare `d38fefbca72185c81b651affa097f1be53332070...3657a671018dfda9f18328d2b0c179038f100797` is ahead; only `CONTRIBUTING.md`. `openai` 3.23.0 is still the pin from #25. |
+| `collection.cursor` | ansible-cursor | `f06929b212e25e3c114c8dca81564a37c4f15f47` | ansible-cursor #33. Compare `407669d619c2d0d59561042286fa01249928c822...f06929b212e25e3c114c8dca81564a37c4f15f47` is ahead; only `CONTRIBUTING.md`. `cursor-sdk` 1.0.35 and the serialized starts from #30 are unchanged. |
 | `collection.community.general` | community.general | `049524674b13ad9782849c427266935c8ec61954` | Release 13.4.0. Do not float to the default branch. |
 | `collection.kubernetes.core` | kubernetes.core | `0f472b53e2ee73e11b5f9067ab0826d76183c157` | Release 6.5.0. Do not float to the default branch. |
 | `collection.ansible.posix` | ansible.posix | `e98d9a0756458be1ac710988498000973889075c` | Release 2.2.2. Do not float to the default branch. |

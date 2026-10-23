@@ -84,8 +84,8 @@ def test_execution_environment_builds_from_the_pin_file():
         assert pin in locked
     assert "--hash=sha256:" in locked
     assert "gh-cli.repo" not in text
-    assert "eba164e2b9be93d210690010436ff4fb7834221dd902b4fbac37a61d0124520e" in text
-    assert "51d3e63d4c323c336ddfb710dad6e1ed40a960baa950bcbe5e21b2e7475d7388" in text
+    assert "0c8f0608c5859a8ca3cc58df1e852e1e55fead1dedb662b7c635769853adafc2" in text
+    assert "cf600844e381a29642c8d2a88560bafb9fd10643c6890273cf451b77379aaf23" in text
     assert "sha256sum -c -" in text
 
 
@@ -258,6 +258,7 @@ def test_trivyignore_covers_the_unfixed_vendor_highs():
         "CVE-2026-78669",
         "CVE-2026-78667",
         "CVE-2026-97031",
+        "CVE-2026-111943",
     }
     for item in findings:
         assert item["statement"] == "upstream-vendored, no fix we can apply"
