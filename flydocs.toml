@@ -16,15 +16,21 @@ tagline = "Deterministic AI code review, orchestrated in Ansible"
 [[nav]]
 "Guides" = [
     { "Getting Started" = "getting-started.md" },
+    { "GitHub Review Check" = "github-review-check.md" },
+    { "Execution Environment" = "execution-environment.md" },
+    { "Release" = "release.md" },
 ]
 
 [[nav]]
 "Concepts" = [
     { "Architecture" = "architecture.md" },
+    { "Why Ansible" = "why-ansible.md" },
     { "Sandboxes and LLM Calls" = "sandbox-and-agent-safety.md" },
 ]
 
 [[nav]]
 "Reference" = [
     { "Variable Reference" = "reference.md" },
+    { "Dependency Map" = "dependency-map.md" },
+    { "Gotchas" = "gotchas.md" },
 ]
