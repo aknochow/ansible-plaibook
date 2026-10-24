@@ -10,7 +10,7 @@ status: stable
 
 Documentation for the review playbook and the `plai` / `plaibook` CLI. The repository [README](../README.md) is the short install page. These pages are the detail.
 
-`plai review` and `plaibook review` wrap [`review.yml`](getting-started.md). There is no `bug_pipeline.yml` on `main` and no `plai fix`.
+`plai review` and `plaibook review` wrap `review.yml` at the repository root. There is no `bug_pipeline.yml` on `main` and no `plai fix`. [Getting started](getting-started.md) is the first run.
 
 ## Guides
 
