@@ -34,8 +34,9 @@ collections:
     # / mcp coupling, playbook-owned sidecar, structured_tool_calls with
     # parent vs nested caller, WaitLiveRun-after-drain flake fix). Moving
     # main can silently change module arguments. SHA is ansible-cursor
-    # #32 on main (notify dispatch). Serialized starts from #30 are unchanged.
-    version: 407669d619c2d0d59561042286fa01249928c822
+    # #38 on main (RemoteProtocolError start retry). cursor-sdk range is
+    # still >=1.0.31,<2.0.0. Serialized starts from #30 are unchanged.
+    version: efb9071159124efbb5f36569ee83b5ffd3820459
   # GitHub clones, not Galaxy FQCNs. version is the commit SHA of a
   # release tag (tags move). First-run install uses git + ansible-galaxy
   # install --no-deps and never calls galaxy.ansible.com (Python OpenSSL
