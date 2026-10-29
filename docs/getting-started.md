@@ -38,8 +38,19 @@ command cancels. A successful update also copies the review skill to
 missing or older than the package. Agent CLIs that load user skills
 from `~/.agents/skills` read that directory, including the Grok CLI,
 Cursor, Codex, and others. The checkout copy under `.agents/skills` is the same
-file for CLIs that load project skills. The next `plai review` does the
-same copy, so a `pipx upgrade` is picked up the next time `plai` runs.
+file for CLIs that load project skills. Claude Code does not read
+`.agents/`. Claude Code v2.1.277+ reads a repo `AGENTS.md` (and
+`.claude/AGENTS.md`) when no `CLAUDE.md`, `.claude/CLAUDE.md`, or
+`CLAUDE.local.md` is in the working directory or above it (default
+`claude-md-or-agents-md`). If a `CLAUDE.md` exists, Claude reads that
+file only unless Project instructions is `claude-md-and-agents-md` or
+`CLAUDE.md` `@`-imports `AGENTS.md`. Some sessions before v2.1.281
+(Bedrock, telemetry off) could not load `AGENTS.md`. This checkout's
+`CLAUDE.md` is `@AGENTS.md`. Claude's config directory remains
+`.claude/`. See
+[Claude Code memory](https://code.claude.com/docs/en/memory). The next
+`plai review` does the same copy, so a `pipx upgrade` is picked up the
+next time `plai` runs.
 
 `plai review` is unchanged. Homebrew and Debian
 refuse `pip install` into the system Python (PEP 668); `pipx` (or

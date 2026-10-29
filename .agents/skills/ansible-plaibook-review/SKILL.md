@@ -10,7 +10,16 @@ This skill is for any agent CLI that loads `.agents/skills` from a
 checkout or `~/.agents/skills` for the user, including the Grok CLI,
 Cursor, Codex, and others. `plai update` and the next `plai review` copy this
 file to `~/.agents/skills/ansible-plaibook-review/SKILL.md` when that
-copy is missing or older.
+copy is missing or older. Claude Code does not read `.agents/`.
+Claude Code v2.1.277+ reads a repo `AGENTS.md` (and `.claude/AGENTS.md`)
+as project instructions when no `CLAUDE.md`, `.claude/CLAUDE.md`, or
+`CLAUDE.local.md` is in the working directory or above it (default
+`claude-md-or-agents-md`). If a `CLAUDE.md` exists, Claude reads that
+file only unless Project instructions is `claude-md-and-agents-md` or
+`CLAUDE.md` `@`-imports `AGENTS.md`. Some sessions before v2.1.281
+(Bedrock, telemetry off) could not load `AGENTS.md`. This checkout's
+`CLAUDE.md` is `@AGENTS.md`. Claude's own config directory remains
+`.claude/`.
 
 This repo (`ansible-plaibook`) is an Ansible-native AI code-review pipeline.
 One top-level playbook, `review.yml`, dispatching on `review_type`
