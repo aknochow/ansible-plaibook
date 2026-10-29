@@ -79,7 +79,7 @@ def test_reusable_workflow_permissions_and_pins():
     wait_checkout = next(step for step in wait["steps"] if step.get("name") == "Check out this workflow commit")
     assert checkout["with"]["repository"] == "aknochow/ansible-plaibook"
     assert wait_checkout["with"]["repository"] == "aknochow/ansible-plaibook"
-    assert checkout["with"]["ref"] == "73889d778f0bb27ae198b99c142a310dc5ae062e"
+    assert checkout["with"]["ref"] == "b9fee9a904425934522a2d9f333c11f3701892bd"
     assert checkout["with"]["ref"] == wait_checkout["with"]["ref"]
     for step in job["steps"]:
         assert "${{" not in step.get("run", ""), step.get("name")
