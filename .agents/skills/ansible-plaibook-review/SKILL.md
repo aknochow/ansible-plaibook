@@ -1,10 +1,25 @@
 ---
 name: ansible-plaibook-review
-description: "Invoke this repo's AI code-review CLI (`plai` / `plaibook`) wrapping review.yml, or ansible-playbook for AAP, and read its structured output correctly. Use whenever asked to review a PR/MR, review a local commit, or interpret a prior run's verdict/findings in this repo."
+description: "Invoke plaibook's review CLI (`plai` / `plaibook`) wrapping review.yml, or ansible-playbook for AAP, and read its structured output correctly. Use whenever asked to review a PR/MR, review a local commit, or interpret a prior run's verdict/findings."
 version: "0.1.28"
 ---
 
 # ansible-plaibook review pipeline
+
+This skill is for any agent CLI that loads `.agents/skills` from a
+checkout or `~/.agents/skills` for the user, including the Grok CLI,
+Cursor, Codex, and others. `plai update` and the next `plai review` copy this
+file to `~/.agents/skills/ansible-plaibook-review/SKILL.md` when that
+copy is missing or older. Claude Code does not read `.agents/`.
+Claude Code v2.1.277+ reads a repo `AGENTS.md` (and `.claude/AGENTS.md`)
+as project instructions when no `CLAUDE.md`, `.claude/CLAUDE.md`, or
+`CLAUDE.local.md` is in the working directory or above it (default
+`claude-md-or-agents-md`). If a `CLAUDE.md` exists, Claude reads that
+file only unless Project instructions is `claude-md-and-agents-md` or
+`CLAUDE.md` `@`-imports `AGENTS.md`. Some sessions before v2.1.281
+(Bedrock, telemetry off) could not load `AGENTS.md`. This checkout's
+`CLAUDE.md` is `@AGENTS.md`. Claude's own config directory remains
+`.claude/`.
 
 This repo (`ansible-plaibook`) is an Ansible-native AI code-review pipeline.
 One top-level playbook, `review.yml`, dispatching on `review_type`
@@ -22,7 +37,8 @@ virtualenv, `pip install plaibook` is the same install. From this checkout,
 `uv sync` / `pip install -e .` is the contributor path; `plai review
 ...` and `plaibook review ...` are equivalent. Raw
 `ansible-playbook review.yml` stays the AAP / execution-environment /
-power-user path. See [`plaibook/README.md`](../../../plaibook/README.md).
+power-user path. See the plaibook README:
+https://github.com/aknochow/ansible-plaibook/blob/main/plaibook/README.md
 If `.venv` is not on PATH, `uv run plai` is documented in CONTRIBUTING
 only.
 
@@ -167,8 +183,8 @@ ansible-playbook review.yml -e review_type=commit -e commit_sha=abc1234..def5678
   `NOTHING_TO_REVIEW` and the range, and exits 0. Three-dot
   `BASE...TIP` is rejected.
 - No sandbox by default, no exploration pass, no PR/MR API calls —
-  meant for a tight feedback loop right after a commit (e.g. a Claude
-  Code `PostToolUse` hook on `git commit`), **not** a replacement for a
+  meant for a tight feedback loop right after a commit (for example an
+  agent CLI hook on `git commit`), **not** a replacement for a
   full `review_type: pr`/`branch` review.
 - **Different exit-code behavior than `pr`/`branch`**: those never fail
   the Ansible run based on verdict (a `NEEDS_CHANGES` review is still a
@@ -224,7 +240,7 @@ remain available as debug lines:
 - `RESULT_SUMMARY: ~/.cache/ansible-plaibook/last_run.json` — a fixed,
   predictable path with the same content, **but it's a shared path any
   concurrent invocation of review.yml (any review_type) overwrites**
-  (this repo or a different one, this terminal or a different Claude Code
+  (this repo or a different one, this terminal or another agent
   session). Two agents live-dogfooding this repo in parallel have already
   hit this for real: one read back a completely different repo's review
   with no error or mismatch warning. **Never read the fixed path
@@ -232,7 +248,8 @@ remain available as debug lines:
   who knows nothing else on the machine is running a review right now,
   nothing more. If you don't have the run-scoped path (e.g. checking a
   past result in a later conversation) and must read the fixed path,
-  verify it first: `python3 scripts/check_last_run_target.py "org/repo#123"`
+  verify it first. From an ansible-plaibook checkout, run
+  `python3 scripts/check_last_run_target.py "org/repo#123"`. That command
   loudly refuses (exit 1, clear stderr message) if the file currently
   describes a different target than the one you asked about, instead of
   silently handing back whatever's there. It also supports verifying

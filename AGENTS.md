@@ -17,7 +17,7 @@ output, check these first:
 - [docs/reference.md](docs/reference.md): every variable that controls a `review.yml` run, its default, and what it changes
 - [docs/sandbox-and-agent-safety.md](docs/sandbox-and-agent-safety.md): how OpenShell sandboxes combine with model calls, and the pattern deliberately not used
 - [docs/ansible.md](docs/ansible.md): the job template, scoring, and the Ansible tools the playbook uses
-- [.claude/skills/ansible-plaibook-review/SKILL.md](.claude/skills/ansible-plaibook-review/SKILL.md): how to run `plai review` / `plaibook review` (and the AAP path `ansible-playbook review.yml`) and read `last_run.<run_id>.json` correctly
+- [.agents/skills/ansible-plaibook-review/SKILL.md](.agents/skills/ansible-plaibook-review/SKILL.md): how to run `plai review` / `plaibook review` (and the AAP path `ansible-playbook review.yml`) and read `last_run.<run_id>.json` correctly. Any agent CLI that loads `.agents/skills` or `~/.agents/skills` can use it, including the Grok CLI, Cursor, Codex, and others. Claude Code does not read `.agents/`. Claude Code v2.1.277+ can read a repo `AGENTS.md` when no `CLAUDE.md` is present; if `CLAUDE.md` exists, Claude reads that file only unless it `@`-imports `AGENTS.md` or Project instructions is `claude-md-and-agents-md`. This checkout's `CLAUDE.md` is `@AGENTS.md`. Claude's config directory remains `.claude/`.
 
 ## What this repo is
 
