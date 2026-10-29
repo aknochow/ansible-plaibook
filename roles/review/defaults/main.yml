@@ -43,7 +43,7 @@ review_agent_model: "claude-opus-4-6"
 # so existing behavior/callers are unchanged. qwen isn't implemented
 # yet (only claude/gemini dispatch files exist) -- named here so it
 # slots in later without a rename, per
-# ansible-agentbench/harness/tier1_lens_dispatch.yml's own precedent
+# ansible-benchmark/harness/tier1_lens_dispatch.yml's own precedent
 # (that harness already proves a Qwen path via aknochow.openai.chat).
 agent_family: claude   # claude | gemini | qwen
 
@@ -334,7 +334,7 @@ review_neutralization_org_patterns: []
 # AI Studio usage is $0 but MUST still be counted in tokens -- the
 # token ledger stays meaningful even when the dollar cost is zero, see
 # pipeline_stats.yml. gemini-3.5-flash's rate is sourced from
-# ansible-agentbench/scoring/provider_pricing.yaml (confirmed live
+# ansible-benchmark/scoring/provider_pricing.yaml (confirmed live
 # 2026-08-19) since this repo has no rate of its own yet.
 # gemini-3.7-flash (the model actually used for free-tier dogfooding,
 # see review_gemini_model) has NO sourced rate here -- it was not

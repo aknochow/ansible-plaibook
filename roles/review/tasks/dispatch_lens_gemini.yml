@@ -3,7 +3,7 @@
 # directly (no forced-tool-call workaround needed -- that's a
 # Claude-on-Vertex allowlist-gate workaround, not a general SDK
 # requirement, see examples/provider_interop_comparison.yml's header
-# and ansible-agentbench/harness/tier1_lens_dispatch.yml's own Gemini
+# and ansible-benchmark/harness/tier1_lens_dispatch.yml's own Gemini
 # branch, which this mirrors).
 #
 # Sets security_result/review_result in the SAME normalized shape
