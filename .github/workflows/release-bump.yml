@@ -91,7 +91,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$branch"
-          git add pyproject.toml plaibook/__init__.py .claude/skills/ansible-plaibook-review/SKILL.md README.md uv.lock
+          git add pyproject.toml plaibook/__init__.py .agents/skills/ansible-plaibook-review/SKILL.md README.md uv.lock
           git commit -s -m "chore: set version to ${RELEASE_VERSION}"
           git push origin "HEAD:${branch}"
           {

@@ -19,6 +19,7 @@ SHARE_TREES = (
     "filter_plugins",
     "callback_plugins",
 )
+SKILL_RELATIVE = Path(".agents/skills/ansible-plaibook-review/SKILL.md")
 _IGNORE = shutil.ignore_patterns(
     "__pycache__",
     "*.pyc",
@@ -61,6 +62,14 @@ def materialize_playbook_share(repo_root: Path, dest: Path | None = None) -> Pat
             missing.append(name)
             continue
         shutil.copytree(src, target / name, ignore=_IGNORE)
+
+    skill_src = source_root / SKILL_RELATIVE
+    if not skill_src.is_file():
+        missing.append(str(SKILL_RELATIVE))
+    else:
+        skill_dest = target / "skills" / "ansible-plaibook-review" / "SKILL.md"
+        skill_dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(skill_src, skill_dest)
 
     if missing:
         raise FileNotFoundError(

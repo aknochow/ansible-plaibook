@@ -126,4 +126,4 @@ execution-environment jobs keep calling `ansible-playbook review.yml`.
 
 - Repo overview: [../README.md](../README.md)
 - First review: [../docs/getting-started.md](../docs/getting-started.md)
-- Skill: [../.claude/skills/ansible-plaibook-review/SKILL.md](../.claude/skills/ansible-plaibook-review/SKILL.md)
+- Skill: [../.agents/skills/ansible-plaibook-review/SKILL.md](../.agents/skills/ansible-plaibook-review/SKILL.md)

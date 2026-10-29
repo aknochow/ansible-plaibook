@@ -10,7 +10,7 @@ status: stable
 
 The package version stays in four places: `pyproject.toml`,
 `plaibook/__init__.py`,
-`.claude/skills/ansible-plaibook-review/SKILL.md`, and the
+`.agents/skills/ansible-plaibook-review/SKILL.md`, and the
 `ghcr.io/aknochow/plaibook-ee:<version>` example in the README.
 `tests/test_version_alignment.yml` fails when those strings disagree.
 

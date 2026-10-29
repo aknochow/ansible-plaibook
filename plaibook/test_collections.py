@@ -913,9 +913,13 @@ def test_materialize_playbook_share_copies_playbook_tree(tmp_path):
         junk = repo / name / "__pycache__"
         junk.mkdir()
         (junk / "x.pyc").write_text("no\n")
+    skill = repo / ".agents" / "skills" / "ansible-plaibook-review"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text('---\nversion: "0.1.28"\n---\n', encoding="utf-8")
     dest = tmp_path / "share"
     result = materialize_playbook_share(repo, dest)
     assert result == dest.resolve()
+    assert (dest / "skills" / "ansible-plaibook-review" / "SKILL.md").is_file()
     for name in SHARE_FILES:
         assert (dest / name).read_text() == f"{name}\n"
     assert (dest / "roles" / "keep" / "ok.txt").is_file()
