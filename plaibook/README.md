@@ -126,4 +126,4 @@ execution-environment jobs keep calling `ansible-playbook review.yml`.
 
 - Repo overview: [../README.md](../README.md)
 - First review: [../docs/getting-started.md](../docs/getting-started.md)
-- Skill (any agent CLI that loads `.agents/skills`, `~/.agents/skills`, or `AGENTS.md`, including Claude, the Grok CLI, Cursor, Codex, and others): [../.agents/skills/ansible-plaibook-review/SKILL.md](../.agents/skills/ansible-plaibook-review/SKILL.md)
+- Skill (any agent CLI that loads `.agents/skills` or `~/.agents/skills`, including the Grok CLI, Cursor, Codex, and others): [../.agents/skills/ansible-plaibook-review/SKILL.md](../.agents/skills/ansible-plaibook-review/SKILL.md)
