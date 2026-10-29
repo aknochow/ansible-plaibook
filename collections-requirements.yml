@@ -36,7 +36,7 @@ collections:
     # main can silently change module arguments. SHA is ansible-cursor
     # #38 on main (retry agent start on RemoteProtocolError). cursor-sdk
     # 1.0.35 and the serialized starts from #30 are unchanged.
-    version: efb9071159124efbb5f36569ee83b5ffd3820459
+    version: b4d2672761296e7338e801cccfd7ac20b08e564d
   # GitHub clones, not Galaxy FQCNs. version is the commit SHA of a
   # release tag (tags move). First-run install uses git + ansible-galaxy
   # install --no-deps and never calls galaxy.ansible.com (Python OpenSSL
