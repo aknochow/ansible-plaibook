@@ -146,17 +146,19 @@ difference as a bump to decide, not as the same pin.
 
 | Id | What | SHA | Where |
 |---|---|---|---|
-| `review.caller` | `plai-review.yml` calls the reusable workflow | `7b29213065e84c88d64dc1dd7e62984f5667b8cd` | `.github/workflows/plai-review.yml` `uses:` |
+| `review.caller` | `plai-review.yml` calls the reusable workflow | `528b023fbecfe3737f6ab0fe46fb26731b62a36c` | `.github/workflows/plai-review.yml` `uses:` |
 | `review.checkout` | Both checkouts inside the reusable workflow | `b9fee9a904425934522a2d9f333c11f3701892bd` | `.github/workflows/plai-review-run.yml` `ref:` |
 
-Move `review.checkout` first. Merge that change. Then set
-`review.caller` to that merge commit. The caller file on the default
-branch is the one `pull_request_target` runs.
+Move `review.checkout` first. Then set `review.caller` to the commit
+that contains those checkout refs. The caller file on the default
+branch is the one `pull_request_target` runs. Do not point the caller
+at a commit whose workflow still checks out the previous tree.
 `b9fee9a904425934522a2d9f333c11f3701892bd` is `main` after #156.
 That tree includes the grok-4.7 pricing from #166.
-`review.caller` is still the #163 merge. That commit's reusable workflow
-checks out `73889d778f0bb27ae198b99c142a310dc5ae062e`, which is before
-the pricing commit.
+`review.caller` is `528b023fbecfe3737f6ab0fe46fb26731b62a36c`.
+That commit contains these checkout refs, so the called workflow
+checks out `b9fee9a`. It is not `b9fee9a` itself: that tree's
+workflow file still checks out `73889d7`.
 
 ## CI edges
 

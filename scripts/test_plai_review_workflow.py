@@ -150,7 +150,7 @@ def test_caller_does_not_pin_a_floating_secret_ref():
     assert "environment" not in job
     pinned = (
         "aknochow/ansible-plaibook/.github/workflows/plai-review-run.yml"
-        "@7b29213065e84c88d64dc1dd7e62984f5667b8cd"
+        "@528b023fbecfe3737f6ab0fe46fb26731b62a36c"
     )
     assert job["uses"] == pinned
     assert "with" not in job

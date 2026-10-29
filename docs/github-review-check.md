@@ -52,7 +52,7 @@ jobs:
       PLAI_GITHUB_APP_PRIVATE_KEY: ${{ secrets.PLAI_GITHUB_APP_PRIVATE_KEY }}
 ```
 
-Callers do not pass a repository or a ref. The reusable workflow checks out `aknochow/ansible-plaibook` at commit `b9fee9a904425934522a2d9f333c11f3701892bd`. This repository calls the workflow at commit `7b29213065e84c88d64dc1dd7e62984f5667b8cd`. The called review job is the one that sets `environment: plaibook-review`. The caller passes only the three environment secret names. The review job installs that tree with `uv sync --locked`. `GITHUB_SHA` on `pull_request_target` is the base branch and is not the tools pin. The pull request head is the commit under review. It is not checked out. The publisher that receives the GitHub App private key is the copy taken from that pinned revision before `plai review` starts.
+Callers do not pass a repository or a ref. The reusable workflow checks out `aknochow/ansible-plaibook` at commit `b9fee9a904425934522a2d9f333c11f3701892bd`. This repository calls the workflow at commit `528b023fbecfe3737f6ab0fe46fb26731b62a36c`. The called review job is the one that sets `environment: plaibook-review`. The caller passes only the three environment secret names. The review job installs that tree with `uv sync --locked`. `GITHUB_SHA` on `pull_request_target` is the base branch and is not the tools pin. The pull request head is the commit under review. It is not checked out. The publisher that receives the GitHub App private key is the copy taken from that pinned revision before `plai review` starts.
 
 Without the GitHub App secrets the publish step fails. The job token cannot post the review.
 
