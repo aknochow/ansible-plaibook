@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import os
 import re
+import sys
+import tempfile
 from pathlib import Path
 
 SKILL_NAME = "ansible-plaibook-review"
@@ -40,6 +42,42 @@ def skill_version(text: str) -> tuple[int, int, int] | None:
     return int(parsed.group(1)), int(parsed.group(2)), int(parsed.group(3))
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write ``path`` via an exclusive temp file in the same directory."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(dir=path.parent, prefix=".skill-", suffix=".tmp")
+    tmp = Path(name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(tmp, path)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def sync_user_skill_to_stderr(home: Path | None = None) -> int:
+    """Install or update the user skill; print status to stderr. Exit 0 on success."""
+    try:
+        action = install_user_skill(home)
+    except OSError as exc:
+        print(f"Could not install the plaibook review skill: {exc}", file=sys.stderr)
+        return 1
+    dest = user_skill_path(home)
+    if action == "installed":
+        print(f"Installed the review skill at {dest}", file=sys.stderr)
+    elif action == "updated":
+        print(f"Updated the review skill at {dest}", file=sys.stderr)
+    elif action == "missing-source":
+        print(
+            "Could not sync the plaibook review skill: bundled skill is missing "
+            "or has no valid version in frontmatter.",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
 def install_user_skill(home: Path | None = None) -> str:
     """Copy the bundled skill into ``~/.agents/skills`` when it is missing or older.
 
@@ -61,8 +99,5 @@ def install_user_skill(home: Path | None = None) -> str:
         action = "updated"
     else:
         action = "installed"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(".md.tmp")
-    tmp.write_text(source_text, encoding="utf-8")
-    os.replace(tmp, dest)
+    _atomic_write_text(dest, source_text)
     return action

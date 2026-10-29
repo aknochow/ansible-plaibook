@@ -5,7 +5,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from plaibook.skill import install_user_skill, skill_version, user_skill_path
+from plaibook.skill import (
+    install_user_skill,
+    skill_version,
+    sync_user_skill_to_stderr,
+    user_skill_path,
+)
 
 
 def _source(tmp_path: Path, version: str = "0.1.28") -> None:
@@ -62,3 +67,13 @@ def test_keeps_an_equal_edited_or_newer_or_unversioned_skill(tmp_path, monkeypat
     dest.write_text("hand written, no version\n", encoding="utf-8")
     assert install_user_skill(home) == "kept"
     assert dest.read_text(encoding="utf-8") == "hand written, no version\n"
+
+
+def test_missing_source_when_bundled_skill_is_absent(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("plaibook.skill.bundled_skill_path", lambda: None)
+    home = tmp_path / "home"
+    assert install_user_skill(home) == "missing-source"
+    assert sync_user_skill_to_stderr(home) == 1
+    err = capsys.readouterr().err
+    assert "missing" in err.lower()
+    assert not user_skill_path(home).exists()
