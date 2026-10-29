@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Install the review skill where Cursor and Codex both load user skills."""
+"""Install the review skill where agent CLIs load user skills."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ def bundled_skill_path() -> Path | None:
 
 
 def user_skill_path(home: Path | None = None) -> Path:
-    """User skill directory both Cursor and Codex read."""
+    """User skill path agent CLIs read from ``~/.agents/skills``."""
     root = Path.home() if home is None else home
     return root / ".agents" / "skills" / SKILL_NAME / "SKILL.md"
 

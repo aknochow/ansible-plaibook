@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""User-level review skill install for Cursor and Codex."""
+"""User-level review skill install for agent CLIs."""
 
 from __future__ import annotations
 

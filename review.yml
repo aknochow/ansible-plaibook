@@ -14,8 +14,8 @@
 #
 # review_type: commit is a fast, cheap, local, single-commit review — no
 # sandbox, no exploration pass, no PR/MR API calls. Meant for a tight
-# feedback loop right after a commit (e.g. a Claude Code PostToolUse
-# hook on `git commit`), not a replacement for a full pr/branch review.
+# feedback loop right after a commit (for example an agent CLI hook on
+# `git commit`), not a replacement for a full pr/branch review.
 # No sandbox by default for this type: none of the reasons pr/branch
 # need isolation (untrusted, source-branch-controlled content, e.g. a
 # PR's CHECKLIST.md) apply to reviewing your own local commit on your

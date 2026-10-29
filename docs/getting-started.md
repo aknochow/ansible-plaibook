@@ -35,9 +35,11 @@ PyPI release. `--branch` checks the recorded spec after install.
 non-interactive run must pass `-y` or `--yes`. Without a terminal, the
 command cancels. A successful update also copies the review skill to
 `~/.agents/skills/ansible-plaibook-review/SKILL.md` when that copy is
-missing or older than the package. Cursor and Codex both read that
-directory. The next `plai review` does the same copy, so a `pipx upgrade`
-is picked up the next time `plai` runs.
+missing or older than the package. Agent CLIs that load user skills
+from `~/.agents/skills` read that directory, including Cursor, Codex,
+and the Grok CLI. The checkout copy under `.agents/skills` is the same
+file for CLIs that load project skills. The next `plai review` does the
+same copy, so a `pipx upgrade` is picked up the next time `plai` runs.
 
 `plai review` is unchanged. Homebrew and Debian
 refuse `pip install` into the system Python (PEP 668); `pipx` (or

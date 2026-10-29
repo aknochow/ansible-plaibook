@@ -6,6 +6,12 @@ version: "0.1.28"
 
 # ansible-plaibook review pipeline
 
+This skill is for any agent CLI that loads `.agents/skills` from a
+checkout or `~/.agents/skills` for the user, including Cursor, Codex,
+and the Grok CLI. `plai update` and the next `plai review` copy this
+file to `~/.agents/skills/ansible-plaibook-review/SKILL.md` when that
+copy is missing or older.
+
 This repo (`ansible-plaibook`) is an Ansible-native AI code-review pipeline.
 One top-level playbook, `review.yml`, dispatching on `review_type`
 (`pr` | `branch` | `commit`).
@@ -168,8 +174,8 @@ ansible-playbook review.yml -e review_type=commit -e commit_sha=abc1234..def5678
   `NOTHING_TO_REVIEW` and the range, and exits 0. Three-dot
   `BASE...TIP` is rejected.
 - No sandbox by default, no exploration pass, no PR/MR API calls —
-  meant for a tight feedback loop right after a commit (e.g. a Claude
-  Code `PostToolUse` hook on `git commit`), **not** a replacement for a
+  meant for a tight feedback loop right after a commit (for example an
+  agent CLI hook on `git commit`), **not** a replacement for a
   full `review_type: pr`/`branch` review.
 - **Different exit-code behavior than `pr`/`branch`**: those never fail
   the Ansible run based on verdict (a `NEEDS_CHANGES` review is still a
