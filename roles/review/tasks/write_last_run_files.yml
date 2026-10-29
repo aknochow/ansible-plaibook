@@ -99,7 +99,7 @@
 #
 # One JSON object per line, appended, never rewritten -- corrections are
 # new lines, not edits. That keeps it safe to append from concurrent runs
-# and makes it directly consumable by ansible-agentbench's scoring, which
+# and makes it directly consumable by ansible-benchmark's scoring, which
 # already reads this shape of data.
 #
 # Deliberately records provider/model/agent_family alongside the numbers:
