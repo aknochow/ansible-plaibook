@@ -7,8 +7,9 @@ version: "0.1.28"
 # ansible-plaibook review pipeline
 
 This skill is for any agent CLI that loads `.agents/skills` from a
-checkout or `~/.agents/skills` for the user, including Cursor, Codex,
-and the Grok CLI. `plai update` and the next `plai review` copy this
+checkout or `~/.agents/skills` for the user, and that reads `AGENTS.md`.
+That includes Claude, the Grok CLI, Cursor, Codex, and others.
+`plai update` and the next `plai review` copy this
 file to `~/.agents/skills/ansible-plaibook-review/SKILL.md` when that
 copy is missing or older.
 

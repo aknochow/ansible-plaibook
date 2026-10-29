@@ -17,7 +17,7 @@ output, check these first:
 - [docs/reference.md](docs/reference.md): every variable that controls a `review.yml` run, its default, and what it changes
 - [docs/sandbox-and-agent-safety.md](docs/sandbox-and-agent-safety.md): how OpenShell sandboxes combine with model calls, and the pattern deliberately not used
 - [docs/ansible.md](docs/ansible.md): the job template, scoring, and the Ansible tools the playbook uses
-- [.agents/skills/ansible-plaibook-review/SKILL.md](.agents/skills/ansible-plaibook-review/SKILL.md): how to run `plai review` / `plaibook review` (and the AAP path `ansible-playbook review.yml`) and read `last_run.<run_id>.json` correctly. Any agent CLI that loads `.agents/skills` or `~/.agents/skills` can use it, including Cursor, Codex, and the Grok CLI.
+- [.agents/skills/ansible-plaibook-review/SKILL.md](.agents/skills/ansible-plaibook-review/SKILL.md): how to run `plai review` / `plaibook review` (and the AAP path `ansible-playbook review.yml`) and read `last_run.<run_id>.json` correctly. Any agent CLI that loads `.agents/skills`, `~/.agents/skills`, or `AGENTS.md` can use it, including Claude, the Grok CLI, Cursor, Codex, and others.
 
 ## What this repo is
 
