@@ -1,9 +1,9 @@
 ---
-# One xAI Chat Completions dispatch attempt for the current explore turn.
-# The shared loop stores conversations in Claude's content-block shape so the
-# existing read-only Ansible tool runner can remain provider-neutral. The
-# xai_conversation filters translate at this boundary and normalize the
-# response back before explore_turn.yml consumes it.
+# One xAI SDK dispatch attempt for the current explore turn.
+# aknochow.xai.chat uses xai-sdk chat.stream. The shared loop stays in
+# Claude's content-block shape. to_openai_messages, to_openai_tools,
+# openai_tool_calls_with_input, and openai_response_to_message_content
+# translate that shape at this boundary.
 
 - name: "xAI: translate the explore conversation and tool definitions"
   ansible.builtin.set_fact:
@@ -97,17 +97,16 @@
       ansible.builtin.set_fact:
         explore_dispatch_valid: false
 
-- name: Mark this xAI attempt invalid if the forced last turn had no tool call
-  when: >-
-    _explore_attempt_report_calls | length == 0
-    and explore_last_turn
-    and explore_turn_result.stop_reason != 'tool_use'
+- name: Mark this xAI attempt invalid if the forced last turn did not call report_findings
+  when:
+    - explore_last_turn | bool
+    - _explore_attempt_report_calls | length == 0
   ansible.builtin.set_fact:
     explore_dispatch_valid: false
 
-- name: Mark this xAI attempt valid for a normal non-final turn without a report call
-  when: >-
-    _explore_attempt_report_calls | length == 0
-    and not (explore_last_turn and explore_turn_result.stop_reason != 'tool_use')
+- name: Mark this xAI attempt valid for a non-final turn that did not report
+  when:
+    - not (explore_last_turn | bool)
+    - _explore_attempt_report_calls | length == 0
   ansible.builtin.set_fact:
     explore_dispatch_valid: true

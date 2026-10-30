@@ -29,7 +29,7 @@
       - role: user
         content: "Review this diff per your instructions."
     response_schema: "{{ security_findings_schema }}"
-  async: 600
+  async: 900
   poll: 0
   register: _xai_security_job
 
@@ -57,7 +57,7 @@
       - role: user
         content: "Review this diff per your instructions."
     response_schema: "{{ review_findings_schema }}"
-  async: 600
+  async: 900
   poll: 0
   register: _xai_review_job
 
@@ -69,7 +69,7 @@
     - "{{ _xai_review_job }}"
   register: _xai_lens_jobs
   until: _xai_lens_jobs.finished
-  retries: 120
+  retries: 180
   delay: 5
 
 - name: "xAI: collect both lens results"

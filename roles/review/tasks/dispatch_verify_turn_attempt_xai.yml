@@ -1,5 +1,6 @@
 ---
-# One xAI Chat Completions dispatch attempt for a verification turn.
+# One xAI SDK dispatch attempt for a verification turn.
+# aknochow.xai.chat uses xai-sdk chat.stream, not Chat Completions.
 # Conversation and tool-call normalization is kept at this boundary; the
 # shared verify loop continues to execute the read-only Ansible tools.
 #

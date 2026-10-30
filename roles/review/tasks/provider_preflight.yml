@@ -47,6 +47,12 @@
           https://github.com/aknochow/ansible-xai and the hashed xai-sdk pin.
           ansible-doc rc={{ _xai_module_doc_result.rc | default(1) }},
           xai_sdk import rc={{ _xai_sdk_import.rc | default(1) }}.
+  always:
+    - name: Remove the xAI preflight temporary directory
+      when: _xai_preflight_tmp.path is defined
+      ansible.builtin.file:
+        path: "{{ _xai_preflight_tmp.path }}"
+        state: absent
 
 - name: Validate the OpenAI provider runtime before starting the review
   when: agent_family == 'openai'
