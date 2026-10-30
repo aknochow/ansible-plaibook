@@ -1,0 +1,126 @@
+---
+# xAI lens dispatch (agent_family: xai).
+#
+# Calls aknochow.xai.chat, which uses xai-sdk chat.stream. This is not the
+# OpenAI-compatible Chat Completions path. The result is normalized here to
+# the same shape consumed by lenses.yml.
+
+- name: "xAI: show the Security agent's request configuration"
+  ansible.builtin.debug:
+    msg: "{{ [
+      'module: aknochow.xai.chat',
+      'model: ' + review_xai_model,
+      'reasoning_effort: ' + review_xai_lens_reasoning_effort,
+      'max_tokens: ' + (review_xai_max_tokens | string),
+      'response_schema: security_findings_schema',
+      '',
+      '--- system prompt ---',
+      ] + security_system_prompt.split('\n') }}"
+
+- name: "xAI: dispatch the Security agent"
+  aknochow.xai.chat:
+    model: "{{ review_xai_model }}"
+    reasoning_effort: "{{ review_xai_lens_reasoning_effort }}"
+    max_tokens: "{{ review_xai_max_tokens }}"
+    timeout: "{{ xai_timeout }}"
+    messages:
+      - role: system
+        content: "{{ security_system_prompt }}"
+      - role: user
+        content: "Review this diff per your instructions."
+    response_schema: "{{ security_findings_schema }}"
+  async: 600
+  poll: 0
+  register: _xai_security_job
+
+- name: "xAI: show the Review agent's request configuration"
+  ansible.builtin.debug:
+    msg: "{{ [
+      'module: aknochow.xai.chat',
+      'model: ' + review_xai_model,
+      'reasoning_effort: ' + review_xai_lens_reasoning_effort,
+      'max_tokens: ' + (review_xai_max_tokens | string),
+      'response_schema: review_findings_schema',
+      '',
+      '--- system prompt ---',
+      ] + review_system_prompt.split('\n') }}"
+
+- name: "xAI: dispatch the Review agent"
+  aknochow.xai.chat:
+    model: "{{ review_xai_model }}"
+    reasoning_effort: "{{ review_xai_lens_reasoning_effort }}"
+    max_tokens: "{{ review_xai_max_tokens }}"
+    timeout: "{{ xai_timeout }}"
+    messages:
+      - role: system
+        content: "{{ review_system_prompt }}"
+      - role: user
+        content: "Review this diff per your instructions."
+    response_schema: "{{ review_findings_schema }}"
+  async: 600
+  poll: 0
+  register: _xai_review_job
+
+- name: "xAI: wait for both lenses"
+  ansible.builtin.async_status:
+    jid: "{{ item.ansible_job_id }}"
+  loop:
+    - "{{ _xai_security_job }}"
+    - "{{ _xai_review_job }}"
+  register: _xai_lens_jobs
+  until: _xai_lens_jobs.finished
+  retries: 120
+  delay: 5
+
+- name: "xAI: collect both lens results"
+  ansible.builtin.set_fact:
+    _xai_security_raw: "{{ _xai_lens_jobs.results[0] }}"
+    _xai_review_raw: "{{ _xai_lens_jobs.results[1] }}"
+
+- name: "xAI: fail loudly if the Security agent produced no structured output"
+  ansible.builtin.assert:
+    that:
+      - _xai_security_raw.structured is defined
+    fail_msg: >-
+      Security lens ({{ review_xai_model }}, agent_family=xai) produced no
+      .structured output despite response_schema being set
+      (finish_reason={{ _xai_security_raw.finish_reason | default('unknown') }}).
+
+- name: "xAI: fail loudly if the Review agent produced no structured output"
+  ansible.builtin.assert:
+    that:
+      - _xai_review_raw.structured is defined
+    fail_msg: >-
+      Review lens ({{ review_xai_model }}, agent_family=xai) produced no
+      .structured output despite response_schema being set
+      (finish_reason={{ _xai_review_raw.finish_reason | default('unknown') }}).
+
+- name: "xAI: build the normalized Security result"
+  ansible.builtin.set_fact:
+    security_result:
+      structured:
+        findings: "{{ (_xai_security_raw.structured | default({})).findings | default([]) }}"
+        scores: "{{ (_xai_security_raw.structured | default({})).scores | default({}) }}"
+      resolved_model: "{{ (_xai_security_raw.response | default({})).model | default(review_xai_model, true) }}"
+      usage_normalized:
+        input_tokens: "{{ [(_xai_security_raw.usage.prompt_tokens | default(0) | int) - (_xai_security_raw.usage.cached_tokens | default(0) | int), 0] | max }}"
+        output_tokens: "{{ _xai_security_raw.usage.completion_tokens | default(0) | int }}"
+        cache_write_tokens: 0
+        cache_read_tokens: "{{ _xai_security_raw.usage.cached_tokens | default(0) | int }}"
+        thinking_tokens: "{{ _xai_security_raw.usage.reasoning_tokens | default(0) | int }}"
+        total_tokens: "{{ _xai_security_raw.usage.total_tokens | default(0) | int }}"
+
+- name: "xAI: build the normalized Review result"
+  ansible.builtin.set_fact:
+    review_result:
+      structured:
+        findings: "{{ (_xai_review_raw.structured | default({})).findings | default([]) }}"
+        scores: "{{ (_xai_review_raw.structured | default({})).scores | default({}) }}"
+      resolved_model: "{{ (_xai_review_raw.response | default({})).model | default(review_xai_model, true) }}"
+      usage_normalized:
+        input_tokens: "{{ [(_xai_review_raw.usage.prompt_tokens | default(0) | int) - (_xai_review_raw.usage.cached_tokens | default(0) | int), 0] | max }}"
+        output_tokens: "{{ _xai_review_raw.usage.completion_tokens | default(0) | int }}"
+        cache_write_tokens: 0
+        cache_read_tokens: "{{ _xai_review_raw.usage.cached_tokens | default(0) | int }}"
+        thinking_tokens: "{{ _xai_review_raw.usage.reasoning_tokens | default(0) | int }}"
+        total_tokens: "{{ _xai_review_raw.usage.total_tokens | default(0) | int }}"

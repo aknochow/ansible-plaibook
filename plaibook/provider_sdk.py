@@ -38,18 +38,21 @@ FAMILY_REQUIREMENTS: dict[str, tuple[tuple[str, str], ...]] = {
     ),
     "gemini": (("google.genai", "google-genai"),),
     "cursor": (("cursor_sdk", "cursor-sdk"),),
+    "xai": (("xai_sdk", "xai-sdk"),),
 }
 FAMILY_HASHED_FILE: dict[str, str] = {
     "openai": "openai-requirements.txt",
     "claude": "claude-requirements.txt",
     "gemini": "gemini-requirements.txt",
     "cursor": "cursor-requirements.txt",
+    "xai": "xai-requirements.txt",
 }
 _FAMILY_IN: dict[str, str] = {
     "openai": "openai.in",
     "claude": "claude.in",
     "gemini": "gemini.in",
     "cursor": "cursor.in",
+    "xai": "xai.in",
 }
 
 

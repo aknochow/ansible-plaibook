@@ -84,6 +84,7 @@ SHA.
 | `collection.gemini` | ansible-gemini | `016d7e2e5eceb2052304c740ee6a4abf44ca48ce` | ansible-gemini #28. Commit standards on main. `google-genai` 2.27.0 is still the pin from #22. |
 | `collection.openai` | ansible-openai | `3657a671018dfda9f18328d2b0c179038f100797` | ansible-openai #30. Commit standards on main. `openai` 3.23.0 is still the pin from #25. |
 | `collection.cursor` | ansible-cursor | `b4d2672761296e7338e801cccfd7ac20b08e564d` | ansible-cursor #39. Sends reasoning_effort for grok-4.7. The #38 start retry remains. `cursor-sdk` 1.0.35 and the serialized starts from #30 are unchanged. |
+| `collection.xai` | ansible-xai | not pinned | `agent_family=xai` calls `aknochow.xai.chat`. The GitHub repo is private, so it is not in `collections-requirements.yml`. Install it locally. Interface checked against `1a94bb5c610e` (`xai-sdk` 1.21.0). |
 | `collection.community.general` | community.general | `049524674b13ad9782849c427266935c8ec61954` | Release 13.4.0. Do not float to the default branch. |
 | `collection.kubernetes.core` | kubernetes.core | `0f472b53e2ee73e11b5f9067ab0826d76183c157` | Release 6.5.0. Do not float to the default branch. |
 | `collection.ansible.posix` | ansible.posix | `e98d9a0756458be1ac710988498000973889075c` | Release 2.2.2. Do not float to the default branch. |

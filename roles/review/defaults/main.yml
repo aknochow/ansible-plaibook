@@ -70,7 +70,7 @@ review_agent_model: "claude-opus-4-6"
 # 'claude' stays the fallback rather than becoming a considered choice --
 # changing it is a separate decision, not a side effect of making the
 # var overridable.
-# claude | gemini | openai | claude_cli | cursor | qwen
+# claude | gemini | openai | claude_cli | cursor | xai | qwen
 agent_family: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_AGENT_FAMILY') | default('claude', true) }}"
 
 # aknochow.claude auth: no provider or project baked in on purpose --
@@ -186,6 +186,16 @@ openai_api_key: >-
        | default(lookup('ansible.builtin.env', 'GROK_API_KEY'), true)
      ) | default(omit, true) }}
 openai_timeout: "{{ lookup('ansible.builtin.env', 'ANSIBLE_OPENAI_TIMEOUT') | default(300, true) | float }}"
+# agent_family=xai calls aknochow.xai.chat (xai-sdk chat.stream), not the
+# OpenAI-compatible endpoint. The collection reads GROK_API_KEY, XAI_API_KEY,
+# or ANSIBLE_GROK_API_KEY. Timeout default matches the collection's 900s floor.
+xai_timeout: "{{ lookup('ansible.builtin.env', 'ANSIBLE_XAI_TIMEOUT') | default(900, true) | float }}"
+review_xai_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_XAI_MODEL') | default('grok-4.7', true) }}"
+review_xai_lens_reasoning_effort: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_XAI_LENS_REASONING_EFFORT') | default('high', true) }}"
+review_xai_continuity_reasoning_effort: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_XAI_CONTINUITY_REASONING_EFFORT') | default(review_xai_lens_reasoning_effort, true) }}"
+review_xai_max_tokens: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_XAI_MAX_TOKENS') | default(16384, true) | int }}"
+review_explore_xai_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_EXPLORE_XAI_MODEL') | default(review_xai_model, true) }}"
+review_verify_xai_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_VERIFY_XAI_MODEL') | default(review_xai_model, true) }}"
 # GPT-5.6 is an intentional alias: OpenAI documents that it routes to the
 # flagship gpt-5.6-sol model. Operators can select gpt-5.6-terra or
 # gpt-5.6-luna with ANSIBLE_REVIEW_OPENAI_MODEL on api.openai.com.
