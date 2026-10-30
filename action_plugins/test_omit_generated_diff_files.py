@@ -79,3 +79,47 @@ def test_empty_diff_stays_empty():
     result = omit_generated_diff_files("")
     assert result["lens_diff"] == ""
     assert result["omitted"] == []
+
+
+def _file(header: str, body_line: str) -> list[str]:
+    return [header, "--- /dev/null", "+++ /dev/null", "@@ -0,0 +1 @@", body_line]
+
+
+def test_real_git_headers_omit_lockfiles_and_keep_source():
+    """Headers captured from git 2.50.1 with core.quotePath=true.
+
+    Spaces stay unquoted. Non-ASCII, quotes, and backslashes are C-quoted.
+    """
+    cafe = 'diff --git "a/caf\\303\\251/uv.lock" "b/caf\\303\\251/uv.lock"'
+    quoted = 'diff --git "a/quote\\"dir/uv.lock" "b/quote\\"dir/uv.lock"'
+    slashed = 'diff --git "a/slash\\\\dir/uv.lock" "b/slash\\\\dir/uv.lock"'
+    spaced = "diff --git a/my project/uv.lock b/my project/uv.lock"
+    source = 'diff --git "a/caf\\303\\251/mod.py" "b/caf\\303\\251/mod.py"'
+    diff = "\n".join(
+        _file(cafe, "+sha256:cafe")
+        + _file(quoted, "+sha256:quote")
+        + _file(slashed, "+sha256:slash")
+        + _file(spaced, "+sha256:space")
+        + _file(source, "+keep_cafe = 1")
+        + [""]
+    )
+    result = omit_generated_diff_files(diff)
+    assert "sha256:" not in result["lens_diff"]
+    assert "keep_cafe = 1" in result["lens_diff"]
+    assert [item["path"] for item in result["omitted"]] == [
+        "café/uv.lock",
+        'quote"dir/uv.lock',
+        "slash\\dir/uv.lock",
+        "my project/uv.lock",
+    ]
+    assert result["unparsed_headers"] == []
+
+
+def test_unparsed_diff_header_is_kept_and_reported():
+    header = 'diff --git "unterminated'
+    diff = "\n".join(_file(header, "+sha256:keep-visible") + [""])
+    result = omit_generated_diff_files(diff)
+    assert header in result["lens_diff"]
+    assert "sha256:keep-visible" in result["lens_diff"]
+    assert result["omitted"] == []
+    assert result["unparsed_headers"] == [header]

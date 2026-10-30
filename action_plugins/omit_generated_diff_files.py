@@ -42,11 +42,102 @@ def is_generated_lockfile(path: str) -> bool:
     )
 
 
+def _read_quoted(text: str, start: int) -> tuple[str, int]:
+    """Return the C-quoted token at start, including its quotes, and the next index."""
+    if start >= len(text) or text[start] != '"':
+        raise ValueError("expected a quoted diff token")
+    index = start + 1
+    while index < len(text):
+        if text[index] == "\\":
+            if index + 1 >= len(text):
+                raise ValueError("trailing backslash in a quoted diff token")
+            index += 2
+            continue
+        if text[index] == '"':
+            return text[start : index + 1], index + 1
+        index += 1
+    raise ValueError("unterminated quoted diff token")
+
+
+def _unquote_c_style(token: str) -> str:
+    """Decode one git C-quoted path token back to a Unicode path."""
+    if len(token) < 2 or token[0] != '"' or token[-1] != '"':
+        raise ValueError("diff token is not C-quoted")
+    simple = {
+        "a": 0x07,
+        "b": 0x08,
+        "t": 0x09,
+        "n": 0x0A,
+        "v": 0x0B,
+        "f": 0x0C,
+        "r": 0x0D,
+        "\\": 0x5C,
+        '"': 0x22,
+    }
+    raw = bytearray()
+    inner = token[1:-1]
+    index = 0
+    while index < len(inner):
+        char = inner[index]
+        if char != "\\":
+            raw.extend(char.encode("utf-8"))
+            index += 1
+            continue
+        if index + 1 >= len(inner):
+            raise ValueError("trailing backslash in a quoted diff token")
+        escaped = inner[index + 1]
+        if escaped in simple:
+            raw.append(simple[escaped])
+            index += 2
+            continue
+        if escaped not in "01234567":
+            raise ValueError("unknown git path escape")
+        octal = ""
+        cursor = index + 1
+        while cursor < len(inner) and len(octal) < 3 and inner[cursor] in "01234567":
+            octal += inner[cursor]
+            cursor += 1
+        raw.append(int(octal, 8))
+        index = cursor
+    return raw.decode("utf-8")
+
+
+def _strip_side(path: str, prefix: str) -> str:
+    if not path.startswith(prefix):
+        raise ValueError("quoted diff path is missing its a/ or b/ prefix")
+    return path[len(prefix) :]
+
+
+def _quoted_paths(rest: str) -> tuple[str, str]:
+    left_token, index = _read_quoted(rest, 0)
+    if index >= len(rest) or rest[index] != " " or index + 1 >= len(rest):
+        raise ValueError("quoted diff header is missing its second path")
+    right_token, end = _read_quoted(rest, index + 1)
+    if end != len(rest):
+        raise ValueError("quoted diff header has trailing text")
+    return (
+        _strip_side(_unquote_c_style(left_token), "a/"),
+        _strip_side(_unquote_c_style(right_token), "b/"),
+    )
+
+
 def _paths(header: str) -> tuple[str, str]:
-    prefix = "diff --git a/"
-    if not header.startswith(prefix) or " b/" not in header[len(prefix) :]:
+    """Return repo paths from a diff --git header.
+
+    Raises ValueError when the line is a diff header this parser cannot read.
+    Returns empty strings for a line that is not a diff header.
+    """
+    header = header.rstrip("\r")
+    marker = "diff --git "
+    if not header.startswith(marker):
         return "", ""
-    left, right = header[len(prefix) :].rsplit(" b/", 1)
+    rest = header[len(marker) :]
+    if rest.startswith('"'):
+        return _quoted_paths(rest)
+    prefix = "a/"
+    if not rest.startswith(prefix) or " b/" not in rest[len(prefix) :]:
+        raise ValueError("unquoted diff header has no a/ and b/ paths")
+    left, right = rest[len(prefix) :].rsplit(" b/", 1)
     return left, right
 
 
@@ -89,17 +180,28 @@ def _split_files(diff_content: str) -> list[tuple[str, str]]:
 def omit_generated_diff_files(diff_content: str) -> dict:
     """Return a lens diff with generated lockfile hunks replaced by stubs."""
     if not diff_content:
-        return {"lens_diff": "", "omitted": [], "omitted_line_count": 0}
+        return {
+            "lens_diff": "",
+            "omitted": [],
+            "omitted_line_count": 0,
+            "unparsed_headers": [],
+        }
 
     pieces: list[str] = []
     omitted: list[dict] = []
+    unparsed_headers: list[str] = []
     omitted_line_count = 0
     for header, body in _split_files(diff_content):
         section = header + ("\n" if not header.endswith("\n") else "") + body
         if not header.startswith("diff --git "):
             pieces.append(section)
             continue
-        left, right = _paths(header)
+        try:
+            left, right = _paths(header)
+        except ValueError:
+            unparsed_headers.append(header)
+            pieces.append(section)
+            continue
         if not (is_generated_lockfile(left) or is_generated_lockfile(right)):
             pieces.append(section)
             continue
@@ -121,6 +223,7 @@ def omit_generated_diff_files(diff_content: str) -> dict:
         "lens_diff": lens,
         "omitted": omitted,
         "omitted_line_count": omitted_line_count,
+        "unparsed_headers": unparsed_headers,
     }
 
 
@@ -146,4 +249,9 @@ class ActionModule(ActionBase):
         payload = omit_generated_diff_files(diff_content)
         result["changed"] = False
         result.update(payload)
+        for header in payload.get("unparsed_headers") or []:
+            self._display.warning(
+                "omit_generated_diff_files left a diff section unchanged "
+                "because its header could not be parsed: " + header
+            )
         return result
