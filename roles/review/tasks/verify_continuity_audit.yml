@@ -155,6 +155,7 @@
     max_tokens: "{{ review_xai_max_tokens }}"
     reasoning_effort: "{{ review_xai_continuity_reasoning_effort }}"
     timeout: "{{ xai_timeout }}"
+    conversation_id: "{{ (last_run_id | default('review')) ~ '-continuity' }}"
     messages:
       - role: system
         content: "{{ _continuity_audit_prompt }}"

@@ -26,26 +26,41 @@
       - "forced_tool: {{ 'report_findings' if explore_last_turn else 'none' }}"
 
 - name: "xAI: call the explore agent, turn {{ explore_turn_count ~ ', attempt ' ~ (explore_attempt_number | default(1)) }}"
-  aknochow.xai.chat:
-    model: "{{ review_explore_xai_model }}"
-    reasoning_effort: "{{ review_xai_lens_reasoning_effort }}"
-    max_tokens: "{{ review_xai_max_tokens }}"
-    timeout: "{{ xai_timeout }}"
-    messages: "{{ _xai_explore_messages }}"
-    tools: "{{ _xai_explore_tools }}"
-    tool_choice: "{{ {'type': 'function', 'function': {'name': 'report_findings'}} if explore_last_turn else omit }}"
-  register: _xai_explore_raw
+  block:
+    - name: Remember that this xAI explore module call has not failed yet
+      ansible.builtin.set_fact:
+        _xai_explore_module_failed: false
+
+    - name: Call xAI for this explore attempt
+      aknochow.xai.chat:
+        model: "{{ review_explore_xai_model }}"
+        reasoning_effort: "{{ review_xai_lens_reasoning_effort }}"
+        max_tokens: "{{ review_xai_max_tokens }}"
+        timeout: "{{ xai_timeout }}"
+        conversation_id: "{{ (last_run_id | default('review')) ~ '-explore' }}"
+        messages: "{{ _xai_explore_messages }}"
+        tools: "{{ _xai_explore_tools }}"
+        tool_choice: "{{ {'type': 'function', 'function': {'name': 'report_findings'}} if explore_last_turn else omit }}"
+      register: _xai_explore_raw
+  rescue:
+    - name: Keep this xAI explore failure as one invalid attempt
+      ansible.builtin.set_fact:
+        _xai_explore_module_failed: true
+        explore_dispatch_valid: false
 
 - name: "xAI: normalize the explore response's tool calls"
+  when: not (_xai_explore_module_failed | default(false) | bool)
   ansible.builtin.set_fact:
     _xai_explore_tool_calls: "{{ _xai_explore_raw.tool_calls | default([]) | openai_tool_calls_with_input }}"
 
 - name: "xAI: normalize the explore result into the shared shape"
+  when: not (_xai_explore_module_failed | default(false) | bool)
   ansible.builtin.set_fact:
     explore_turn_result:
       message:
         content: "{{ _xai_explore_raw.text | default('') | openai_response_to_message_content(_xai_explore_raw.tool_calls | default([])) }}"
         model: "{{ (_xai_explore_raw.response | default({})).model | default(review_explore_xai_model, true) }}"
+        encrypted_content: "{{ _xai_explore_raw.encrypted_content | default('') }}"
       tool_calls: "{{ _xai_explore_tool_calls }}"
       stop_reason: >-
         {{ 'tool_use' if (_xai_explore_tool_calls | length > 0)
@@ -58,6 +73,7 @@
         cache_read_input_tokens: "{{ _xai_explore_raw.usage.cached_tokens | default(0) | int }}"
 
 - name: Record this xAI explore attempt's usage for the pipeline-wide stats summary
+  when: not (_xai_explore_module_failed | default(false) | bool)
   ansible.builtin.set_fact:
     pipeline_agent_calls: >-
       {{ pipeline_agent_calls + [{
@@ -77,11 +93,14 @@
          }] }}
 
 - name: Check whether this xAI attempt called report_findings
+  when: not (_xai_explore_module_failed | default(false) | bool)
   ansible.builtin.set_fact:
     _explore_attempt_report_calls: "{{ explore_turn_result.tool_calls | selectattr('name', 'equalto', 'report_findings') | list }}"
 
 - name: Validate this xAI attempt's report_findings call, if it made one
-  when: _explore_attempt_report_calls | length > 0
+  when:
+    - not (_xai_explore_module_failed | default(false) | bool)
+    - _explore_attempt_report_calls | length > 0
   block:
     - name: Coerce this xAI attempt's findings, tolerating a JSON-encoded string
       coerce_findings_encoding:
@@ -99,6 +118,7 @@
 
 - name: Mark this xAI attempt invalid if the forced last turn did not call report_findings
   when:
+    - not (_xai_explore_module_failed | default(false) | bool)
     - explore_last_turn | bool
     - _explore_attempt_report_calls | length == 0
   ansible.builtin.set_fact:
@@ -106,6 +126,7 @@
 
 - name: Mark this xAI attempt valid for a non-final turn that did not report
   when:
+    - not (_xai_explore_module_failed | default(false) | bool)
     - not (explore_last_turn | bool)
     - _explore_attempt_report_calls | length == 0
   ansible.builtin.set_fact:

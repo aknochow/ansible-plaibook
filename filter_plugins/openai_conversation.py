@@ -24,7 +24,11 @@ def to_openai_messages(messages: list) -> list:
         content = message.get("content")
 
         if isinstance(content, str):
-            result.append({"role": role, "content": content})
+            item = {"role": role, "content": content}
+            encrypted = message.get("encrypted_content")
+            if isinstance(encrypted, str) and encrypted:
+                item["encrypted_content"] = encrypted
+            result.append(item)
             continue
 
         blocks = content or []
@@ -103,8 +107,31 @@ def openai_response_to_message_content(text: str, tool_calls: list) -> list:
 
 
 def openai_tool_calls_with_input(tool_calls: list) -> list:
-    """Add the shared loop's ``input`` alias to the collection's ``args`` calls."""
-    return [dict(call, input=call.get("args") or {}) for call in (tool_calls or [])]
+    """Add the shared loop's ``input`` alias to the collection's ``args`` calls.
+
+    ``args`` is model-controlled text. Copying it into a new dict drops
+    Ansible's unsafe wrapper, and the next ``{{ input.findings }}`` then
+    templates ``{{ }}`` inside that text on the controller. ``wrap_var``
+    keeps the copy unsafe so a findings string cannot run a lookup.
+    """
+    from ansible._internal._datatag._tags import TrustedAsTemplate
+
+    def _unsafe(value):
+        # Ansible 2.19 templates a string again when it is tagged
+        # TrustedAsTemplate. Model text must not carry that tag.
+        if isinstance(value, str):
+            return TrustedAsTemplate.untag(value)
+        if isinstance(value, dict):
+            return {key: _unsafe(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [_unsafe(item) for item in value]
+        return value
+
+    wrapped = []
+    for call in tool_calls or []:
+        args = call.get("args") or {}
+        wrapped.append(dict(call, input=_unsafe(args)))
+    return wrapped
 
 
 def openai_lens_reasoning_effort(model: str, configured: str = "") -> str:

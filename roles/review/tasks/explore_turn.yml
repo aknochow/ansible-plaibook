@@ -67,7 +67,13 @@
 
     - name: Append the assistant's turn to the conversation
       ansible.builtin.set_fact:
-        explore_messages: "{{ explore_messages + [{'role': 'assistant', 'content': _explore_turn_sanitized_content.content}] }}"
+        explore_messages: >-
+          {{ explore_messages + [
+               {'role': 'assistant', 'content': _explore_turn_sanitized_content.content}
+               | combine({}
+                 if (explore_turn_result.message.encrypted_content | default('') | length) == 0
+                 else {'encrypted_content': explore_turn_result.message.encrypted_content})
+             ] }}
 
     - name: Check whether the agent called report_findings this turn
       ansible.builtin.set_fact:

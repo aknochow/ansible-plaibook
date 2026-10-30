@@ -23,13 +23,14 @@
     reasoning_effort: "{{ review_xai_lens_reasoning_effort }}"
     max_tokens: "{{ review_xai_max_tokens }}"
     timeout: "{{ xai_timeout }}"
+    conversation_id: "{{ last_run_id | default(omit) }}"
     messages:
       - role: system
         content: "{{ security_system_prompt }}"
       - role: user
         content: "Review this diff per your instructions."
     response_schema: "{{ security_findings_schema }}"
-  async: 900
+  async: "{{ xai_timeout | int }}"
   poll: 0
   register: _xai_security_job
 
@@ -51,13 +52,14 @@
     reasoning_effort: "{{ review_xai_lens_reasoning_effort }}"
     max_tokens: "{{ review_xai_max_tokens }}"
     timeout: "{{ xai_timeout }}"
+    conversation_id: "{{ last_run_id | default(omit) }}"
     messages:
       - role: system
         content: "{{ review_system_prompt }}"
       - role: user
         content: "Review this diff per your instructions."
     response_schema: "{{ review_findings_schema }}"
-  async: 900
+  async: "{{ xai_timeout | int }}"
   poll: 0
   register: _xai_review_job
 
@@ -69,7 +71,7 @@
     - "{{ _xai_review_job }}"
   register: _xai_lens_jobs
   until: _xai_lens_jobs.finished
-  retries: 180
+  retries: "{{ (xai_timeout | float / 5) | round(0, 'ceil') | int }}"
   delay: 5
 
 - name: "xAI: collect both lens results"

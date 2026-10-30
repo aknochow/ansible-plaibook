@@ -80,7 +80,13 @@
 
     - name: Append the assistant's turn to the conversation
       ansible.builtin.set_fact:
-        verify_messages: "{{ verify_messages + [{'role': 'assistant', 'content': _verify_turn_sanitized_content.content}] }}"
+        verify_messages: >-
+          {{ verify_messages + [
+               {'role': 'assistant', 'content': _verify_turn_sanitized_content.content}
+               | combine({}
+                 if (verify_turn_result.message.encrypted_content | default('') | length) == 0
+                 else {'encrypted_content': verify_turn_result.message.encrypted_content})
+             ] }}
 
     - name: Check whether the agent called report_verdict this turn
       ansible.builtin.set_fact:

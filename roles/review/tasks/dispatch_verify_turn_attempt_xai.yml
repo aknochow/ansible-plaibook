@@ -72,6 +72,7 @@
             reasoning_effort: "{{ review_xai_lens_reasoning_effort }}"
             max_tokens: "{{ review_xai_max_tokens }}"
             timeout: "{{ xai_timeout }}"
+            conversation_id: "{{ (last_run_id | default('review')) ~ '-verify-' ~ (verify_finding_index | default(0) | string) }}"
             messages: "{{ _xai_verify_messages }}"
             tools: "{{ _xai_verify_tools }}"
             tool_choice: "{{ _xai_verify_tool_choice if _xai_verify_tool_choice else omit }}"
@@ -104,6 +105,7 @@
       message:
         content: "{{ _xai_verify_raw.text | default('') | openai_response_to_message_content(_xai_verify_raw.tool_calls | default([])) }}"
         model: "{{ (_xai_verify_raw.response | default({})).model | default(review_verify_xai_model, true) }}"
+        encrypted_content: "{{ _xai_verify_raw.encrypted_content | default('') }}"
       tool_calls: "{{ _xai_verify_tool_calls }}"
       stop_reason: >-
         {{ 'tool_use' if (_xai_verify_tool_calls | length > 0)

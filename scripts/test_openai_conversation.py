@@ -14,6 +14,23 @@ from openai_conversation import (
 )
 
 
+def test_keeps_encrypted_reasoning_on_a_string_assistant_message():
+    messages = [
+        {
+            "role": "assistant",
+            "content": "done",
+            "encrypted_content": "opaque-reasoning",
+        }
+    ]
+    assert to_openai_messages(messages) == [
+        {
+            "role": "assistant",
+            "content": "done",
+            "encrypted_content": "opaque-reasoning",
+        }
+    ]
+
+
 def test_translates_assistant_tool_use_and_tool_result():
     messages = [
         {"role": "user", "content": "inspect the file"},
@@ -75,9 +92,20 @@ def test_translates_response_tool_calls_to_shared_shape():
         {"type": "text", "text": "done"},
         {"type": "tool_use", "id": "call_1", "name": "report_findings", "input": {"findings": []}},
     ]
-    assert openai_tool_calls_with_input(calls) == [
+    normalized = openai_tool_calls_with_input(calls)
+    assert normalized == [
         {"id": "call_1", "name": "report_findings", "args": {"findings": []}, "input": {"findings": []}}
     ]
+
+
+def test_tool_call_findings_text_is_not_trusted_as_a_template():
+    from ansible._internal._datatag._tags import TrustedAsTemplate
+
+    payload = TrustedAsTemplate().tag("{{ lookup('env', 'GROK_API_KEY') }}")
+    calls = [{"id": "call_1", "name": "report_findings", "args": {"findings": payload}}]
+    findings = openai_tool_calls_with_input(calls)[0]["input"]["findings"]
+    assert findings == "{{ lookup('env', 'GROK_API_KEY') }}"
+    assert not TrustedAsTemplate.is_tagged_on(findings)
 
 
 def test_extracts_reasoning_tokens_from_raw_openai_usage():
