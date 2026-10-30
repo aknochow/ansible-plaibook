@@ -41,9 +41,13 @@
           }] }}
 
 # After guardian (which must see the original, comments included) and
-# before lenses. Default off. See screen_diff_comments.yml.
+# before lenses. Comment screening is default off. Generated lockfiles
+# are then stubbed out of the lens copy. review_full_diff is unchanged.
 - name: Prepare the lens-phase diff (comment screening, default off)
   ansible.builtin.include_tasks: screen_diff_comments.yml
+
+- name: Omit generated lockfiles from the lens diff
+  ansible.builtin.include_tasks: omit_generated_diff_files.yml
 
 - name: Time the Security and Review lens stage
   block:
