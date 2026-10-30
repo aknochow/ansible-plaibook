@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parents[1] / "filter_plugins"))
 
 from openai_conversation import (
@@ -12,6 +14,28 @@ from openai_conversation import (
     to_openai_messages,
     to_openai_tools,
 )
+
+
+def test_keeps_encrypted_reasoning_on_a_block_assistant_message():
+    messages = [
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "I will inspect it."},
+                {
+                    "type": "tool_use",
+                    "id": "call_1",
+                    "name": "read_file",
+                    "input": {"path": "a.py"},
+                },
+            ],
+            "encrypted_content": "opaque-reasoning",
+        }
+    ]
+    translated = to_openai_messages(messages)[0]
+    assert translated["encrypted_content"] == "opaque-reasoning"
+    assert translated["content"] == "I will inspect it."
+    assert translated["tool_calls"][0]["id"] == "call_1"
 
 
 def test_keeps_encrypted_reasoning_on_a_string_assistant_message():
@@ -99,13 +123,36 @@ def test_translates_response_tool_calls_to_shared_shape():
 
 
 def test_tool_call_findings_text_is_not_trusted_as_a_template():
-    from ansible._internal._datatag._tags import TrustedAsTemplate
+    TrustedAsTemplate = pytest.importorskip("ansible._internal._datatag._tags").TrustedAsTemplate
 
     payload = TrustedAsTemplate().tag("{{ lookup('env', 'GROK_API_KEY') }}")
     calls = [{"id": "call_1", "name": "report_findings", "args": {"findings": payload}}]
     findings = openai_tool_calls_with_input(calls)[0]["input"]["findings"]
     assert findings == "{{ lookup('env', 'GROK_API_KEY') }}"
     assert not TrustedAsTemplate.is_tagged_on(findings)
+
+
+def test_tool_call_args_are_rewrapped_when_template_tags_are_absent(monkeypatch):
+    import openai_conversation as conversation
+
+    seen = []
+
+    def wrap(value):
+        seen.append(value)
+        return "wrapped:" + value
+
+    monkeypatch.setattr(conversation, "_trusted_as_template_type", lambda: None)
+    monkeypatch.setattr(conversation, "_wrap_var_func", lambda: wrap)
+    calls = [
+        {
+            "id": "call_1",
+            "name": "report_findings",
+            "args": {"findings": "{{ lookup('pipe', 'id') }}"},
+        }
+    ]
+    findings = conversation.openai_tool_calls_with_input(calls)[0]["input"]["findings"]
+    assert findings == "wrapped:{{ lookup('pipe', 'id') }}"
+    assert seen == ["{{ lookup('pipe', 'id') }}"]
 
 
 def test_extracts_reasoning_tokens_from_raw_openai_usage():

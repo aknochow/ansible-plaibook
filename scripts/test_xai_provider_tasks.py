@@ -17,6 +17,9 @@ def test_xai_lens_uses_the_xai_sdk_module():
     assert "response_schema:" in lens
     assert "max_tokens:" in lens
     assert "review_xai_lens_reasoning_effort" in lens
+    assert "(last_run_id | default('review')) ~ '-security'" in lens
+    assert "(last_run_id | default('review')) ~ '-review'" in lens
+    assert 'conversation_id: "{{ last_run_id | default(omit) }}"' not in lens
 
 
 def test_xai_explore_and_verify_keep_openai_shape_filters():

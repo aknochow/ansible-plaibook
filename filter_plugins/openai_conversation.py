@@ -16,6 +16,14 @@ _GPT56 = re.compile(r"^gpt-5\.6(?:$|-)")
 _GPT6_LUNA = re.compile(r"^gpt-6-luna(?:$|-)")
 
 
+def _copy_encrypted(item: dict, message: dict) -> dict:
+    """Keep a prior turn's encrypted reasoning on the translated message."""
+    encrypted = message.get("encrypted_content")
+    if isinstance(encrypted, str) and encrypted:
+        item["encrypted_content"] = encrypted
+    return item
+
+
 def to_openai_messages(messages: list) -> list:
     """Translate the role's Claude-shaped conversation to Chat Completions messages."""
     result = []
@@ -24,11 +32,7 @@ def to_openai_messages(messages: list) -> list:
         content = message.get("content")
 
         if isinstance(content, str):
-            item = {"role": role, "content": content}
-            encrypted = message.get("encrypted_content")
-            if isinstance(encrypted, str) and encrypted:
-                item["encrypted_content"] = encrypted
-            result.append(item)
+            result.append(_copy_encrypted({"role": role, "content": content}, message))
             continue
 
         blocks = content or []
@@ -65,7 +69,7 @@ def to_openai_messages(messages: list) -> list:
             assistant = {"role": "assistant", "content": "\n".join(text_parts) or None}
             if tool_calls:
                 assistant["tool_calls"] = tool_calls
-            result.append(assistant)
+            result.append(_copy_encrypted(assistant, message))
         elif tool_results:
             result.extend(tool_results)
         else:
@@ -106,31 +110,57 @@ def openai_response_to_message_content(text: str, tool_calls: list) -> list:
     return blocks
 
 
+def _trusted_as_template_type():
+    """Return Ansible 2.19's template tag, or None on ansible-core 2.16."""
+    try:
+        from ansible._internal._datatag._tags import TrustedAsTemplate
+    except ImportError:
+        return None
+    return TrustedAsTemplate
+
+
+def _wrap_var_func():
+    """Return ansible-core 2.16's unsafe wrapper, when that module exists."""
+    try:
+        from ansible.utils.unsafe_proxy import wrap_var
+    except ImportError:
+        return None
+    return wrap_var
+
+
+def _copy_model_value(value, untag_type, wrap):
+    """Copy model text without leaving it templatable on the controller.
+
+    Ansible 2.19 re-templates a string tagged ``TrustedAsTemplate``, so those
+    strings are untagged. Ansible 2.16 has no such tag; ``wrap_var`` keeps the
+    copy unsafe after ``dict()`` drops the original wrapper.
+    """
+    if isinstance(value, str):
+        if untag_type is not None:
+            return untag_type.untag(value)
+        if wrap is not None:
+            return wrap(value)
+        return value
+    if isinstance(value, dict):
+        return {key: _copy_model_value(item, untag_type, wrap) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_copy_model_value(item, untag_type, wrap) for item in value]
+    return value
+
+
 def openai_tool_calls_with_input(tool_calls: list) -> list:
     """Add the shared loop's ``input`` alias to the collection's ``args`` calls.
 
     ``args`` is model-controlled text. Copying it into a new dict drops
     Ansible's unsafe wrapper, and the next ``{{ input.findings }}`` then
-    templates ``{{ }}`` inside that text on the controller. ``wrap_var``
-    keeps the copy unsafe so a findings string cannot run a lookup.
+    templates ``{{ }}`` inside that text on the controller.
     """
-    from ansible._internal._datatag._tags import TrustedAsTemplate
-
-    def _unsafe(value):
-        # Ansible 2.19 templates a string again when it is tagged
-        # TrustedAsTemplate. Model text must not carry that tag.
-        if isinstance(value, str):
-            return TrustedAsTemplate.untag(value)
-        if isinstance(value, dict):
-            return {key: _unsafe(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [_unsafe(item) for item in value]
-        return value
-
+    untag_type = _trusted_as_template_type()
+    wrap = None if untag_type is not None else _wrap_var_func()
     wrapped = []
     for call in tool_calls or []:
         args = call.get("args") or {}
-        wrapped.append(dict(call, input=_unsafe(args)))
+        wrapped.append(dict(call, input=_copy_model_value(args, untag_type, wrap)))
     return wrapped
 
 
