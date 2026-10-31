@@ -29,6 +29,7 @@
     claude_agent_module: verify_provider_stub
     gemini_generate_module: verify_provider_stub
     openai_chat_module: verify_provider_stub
+    xai_chat_module: verify_provider_stub
     deduped_findings:
       - file: roles/review/tasks/dispatch_verify_turn_attempt_claude.yml
         line: 16
@@ -72,6 +73,26 @@
       vars:
         provider_case_family: openai
         provider_case_message: "Error code: 500 - The server had an error processing your request"
+
+    # The text is the shape of str() on a grpc error from xai-sdk chat.stream.
+    - name: An xAI dropped stream is one attempt and findings are posted
+      ansible.builtin.include_tasks: verify_provider_failure_case.yml
+      vars:
+        provider_case_family: xai
+        provider_case_message: >-
+          <_MultiThreadedRendezvous of RPC that terminated with:
+          status = StatusCode.INTERNAL
+          details = "Received RST_STREAM with error code 2"
+          debug_error_string = "UNKNOWN:Error received from peer {grpc_status:13}">
+
+    - name: An xAI unavailable stream is one attempt and findings are posted
+      ansible.builtin.include_tasks: verify_provider_failure_case.yml
+      vars:
+        provider_case_family: xai
+        provider_case_message: >-
+          <_InactiveRpcError of RPC that terminated with:
+          status = StatusCode.UNAVAILABLE
+          details = "Socket closed">
 
     - name: A status-bearing auth failure still aborts
       block:

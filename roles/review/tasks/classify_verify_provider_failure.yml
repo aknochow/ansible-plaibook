@@ -9,7 +9,8 @@
 # can still post.
 #
 # A message-only return is one failed attempt only when the text is a
-# known transient outage (overload, timeout, 429/500/502/503/529).
+# known transient outage (overload, timeout, 429/500/502/503/529, or the
+# gRPC forms StatusCode.INTERNAL, StatusCode.UNAVAILABLE, and RST_STREAM).
 # Authentication, authorization, invalid-request, missing-key, and any
 # unrecognized message are re-raised. These modules do not emit a
 # separate error class, so the allowlist is the message text.

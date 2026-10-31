@@ -40,6 +40,18 @@
         loop_var: explore_attempt_number
       when: not explore_dispatch_valid
 
+    # A provider that never answered produced no output to call invalid.
+    - name: Report a provider error when every attempt died on one
+      when:
+        - not explore_dispatch_valid
+        - (_xai_explore_provider_error | default('')) | length > 0
+      ansible.builtin.fail:
+        msg: >-
+          Explore agent ({{ review_explore_xai_model }}, agent_family=xai) provider
+          error on turn {{ explore_turn_count }} after
+          {{ review_structured_output_max_attempts }} attempt(s):
+          {{ _xai_explore_provider_error }}
+
     - name: Fail loudly if this turn's structured output was never valid after all attempts
       ansible.builtin.assert:
         that:

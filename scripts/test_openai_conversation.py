@@ -156,16 +156,74 @@ def test_tool_call_args_are_rewrapped_when_template_tags_are_absent(monkeypatch)
 
 
 def test_xai_stop_reason_accepts_the_sdk_names():
-    from openai_conversation import xai_lens_needs_transport_retry, xai_stop_reason
+    from openai_conversation import xai_stop_reason
 
     assert xai_stop_reason("REASON_STOP") == "end_turn"
     assert xai_stop_reason("FINISH_REASON_STOP") == "end_turn"
     assert xai_stop_reason("stop") == "end_turn"
     assert xai_stop_reason("REASON_STOP", True) == "tool_use"
     assert xai_stop_reason("length") == "length"
-    assert xai_lens_needs_transport_retry({"failed": True, "msg": "RST_STREAM"})
-    assert not xai_lens_needs_transport_retry({"failed": True, "msg": "Timeout exceeded"})
-    assert not xai_lens_needs_transport_retry({"failed": False, "msg": "RST_STREAM"})
+
+
+_RST_STREAM = (
+    "<_MultiThreadedRendezvous of RPC that terminated with:\n"
+    "\tstatus = StatusCode.INTERNAL\n"
+    '\tdetails = "Received RST_STREAM with error code 2"\n'
+    '\tdebug_error_string = "UNKNOWN:Error received from peer ipv4:192.0.2.1:443 {grpc_status:13}"\n>'
+)
+
+
+def test_lens_retry_reads_the_finished_job_not_failed():
+    from openai_conversation import xai_lens_needs_transport_retry as needs_retry
+
+    # failed_when: false on the wait leaves failed False on a real job.
+    assert needs_retry({"finished": 1, "failed": False, "msg": _RST_STREAM})
+    assert needs_retry({"finished": 1, "failed": False, "msg": 'status = StatusCode.UNAVAILABLE details = "x"'})
+    assert needs_retry({"finished": 1, "attempts": [{"usage": None, "error": _RST_STREAM}]})
+    assert not needs_retry({"finished": 0, "msg": _RST_STREAM})
+    assert not needs_retry({"finished": 1, "structured": {"findings": []}, "msg": _RST_STREAM})
+    assert not needs_retry(None)
+
+
+def test_lens_retry_refuses_auth_invalid_quota_and_timeout():
+    from openai_conversation import xai_lens_needs_transport_retry as needs_retry
+
+    for msg in (
+        'status = StatusCode.UNAUTHENTICATED details = "bad key"',
+        'status = StatusCode.PERMISSION_DENIED details = "no access"',
+        'status = StatusCode.INVALID_ARGUMENT details = "bad schema"',
+        'status = StatusCode.RESOURCE_EXHAUSTED details = "out of credits"',
+        "Error code: 429 - rate_limit_error",
+        "The xAI stream exceeded the client timeout of 1800 seconds before the response finished.",
+        "Timeout exceeded",
+        "widget exploded",
+        "",
+    ):
+        assert not needs_retry({"finished": 1, "failed": False, "msg": msg}), msg
+
+
+def test_provider_error_message_drops_keys_prompt_and_debug():
+    from openai_conversation import xai_provider_error_message as clean
+
+    message = clean(_RST_STREAM)
+    assert "RST_STREAM" in message
+    assert "192.0.2.1" not in message
+    assert "debug_error_string" not in message
+    assert "abcdef123456" not in clean("rejected key xai-abcdef123456")
+    assert "abcdef123456" not in clean("api_key=abcdef123456 was rejected")
+    assert "abcdef123456" not in clean("Authorization: Bearer abcdef123456")
+    prompt = "short\nThis exact prompt line must stay private\n"
+    message = clean("bad input: This exact prompt line must stay private", [prompt])
+    assert "must stay private" not in message
+    assert message.startswith("bad input:")
+    assert len(clean("x" * 5000)) < 600
+
+
+def test_provider_error_message_hides_the_environment_key(monkeypatch):
+    from openai_conversation import xai_provider_error_message as clean
+
+    monkeypatch.setenv("XAI_API_KEY", "not-a-real-env-key")
+    assert "not-a-real-env-key" not in clean("sent not-a-real-env-key upstream")
 
 
 def test_extracts_reasoning_tokens_from_raw_openai_usage():

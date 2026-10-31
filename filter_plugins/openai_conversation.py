@@ -9,8 +9,11 @@ loop.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
+import os
 import re
+from pathlib import Path
 
 _GPT56 = re.compile(r"^gpt-5\.6(?:$|-)")
 _GPT6_LUNA = re.compile(r"^gpt-6-luna(?:$|-)")
@@ -207,12 +210,80 @@ def xai_stop_reason(finish_reason: str, has_tool_calls: bool = False) -> str:
     return reason or "unknown"
 
 
+_failure_classifier = None
+
+
+def _provider_failure_class(msg: str) -> str:
+    """Use the verify classifier, so xAI lens, explore, and verify share one list."""
+    global _failure_classifier
+    if _failure_classifier is None:
+        path = Path(__file__).resolve().parents[1] / "action_plugins" / "classify_verify_provider_failure.py"
+        spec = importlib.util.spec_from_file_location("_plaibook_provider_failure", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _failure_classifier = module.provider_failure_class
+    return _failure_classifier(msg)
+
+
+def _xai_error_text(result: dict) -> str:
+    """The module's own error: msg, else the error on its last attempt."""
+    msg = result.get("msg")
+    if msg:
+        return str(msg)
+    attempts = result.get("attempts")
+    if isinstance(attempts, list) and attempts and isinstance(attempts[-1], dict):
+        return str(attempts[-1].get("error") or "")
+    return ""
+
+
 def xai_lens_needs_transport_retry(result: dict) -> bool:
-    """True when one lens died on a dropped stream and should be sent once more."""
-    if not isinstance(result, dict) or not result.get("failed"):
+    """True when one lens died on a dropped stream and should be sent once more.
+
+    The wait task's failed_when: false rewrites ``failed``, so this reads what
+    the job left: it finished, it has no structured output, and its message is
+    a transient failure. Auth, invalid-request, quota, and timeout are not.
+    """
+    if not isinstance(result, dict) or not result.get("finished"):
         return False
-    msg = str(result.get("msg") or result.get("stderr") or "")
-    return any(token in msg for token in ("RST_STREAM", "StatusCode.INTERNAL", "UNAVAILABLE"))
+    if isinstance(result.get("structured"), dict):
+        return False
+    return _provider_failure_class(_xai_error_text(result)) == "transient"
+
+
+_XAI_KEY_PATTERNS = (
+    re.compile(r"\bxai-[A-Za-z0-9_-]{8,}"),
+    re.compile(r"\bBearer\s+\S+", re.IGNORECASE),
+)
+_XAI_KEY_ASSIGNMENT = re.compile(r"\b(api[_-]?key|auth[_-]?token)(\s*[=:]\s*)[^\s,;]+", re.IGNORECASE)
+_GRPC_DEBUG_TEXT = re.compile(r"\s*debug_error_string\s*=.*", re.DOTALL)
+_XAI_ERROR_LIMIT = 500
+
+
+def xai_provider_error_message(msg: str, redact=None) -> str:
+    """Make provider error text safe to show in a failure message.
+
+    Removes API keys, gRPC's peer debug string, and any line of the prompts in
+    ``redact``. The text is from the provider, so it stays untemplatable.
+    """
+    text = _GRPC_DEBUG_TEXT.sub("", str(msg or ""))
+    for name in ("XAI_API_KEY", "GROK_API_KEY"):
+        secret = os.environ.get(name)
+        if secret:
+            text = text.replace(secret, "<api_key>")
+    for pattern in _XAI_KEY_PATTERNS:
+        text = pattern.sub("<api_key>", text)
+    text = _XAI_KEY_ASSIGNMENT.sub(r"\1\2<api_key>", text)
+    for prompt in redact or []:
+        for line in str(prompt).splitlines():
+            line = line.strip()
+            # Short lines are headings and common words, not prompt content.
+            if len(line) >= 20 and line in text:
+                text = text.replace(line, "<prompt text>")
+    text = " ".join(text.split())
+    if len(text) > _XAI_ERROR_LIMIT:
+        text = text[:_XAI_ERROR_LIMIT] + "..."
+    untag_type = _trusted_as_template_type()
+    return _copy_model_value(text, untag_type, None if untag_type is not None else _wrap_var_func())
 
 
 def openai_reasoning_tokens(response: dict) -> int:
@@ -241,4 +312,5 @@ class FilterModule:
             "openai_reasoning_tokens": openai_reasoning_tokens,
             "xai_stop_reason": xai_stop_reason,
             "xai_lens_needs_transport_retry": xai_lens_needs_transport_retry,
+            "xai_provider_error_message": xai_provider_error_message,
         }
