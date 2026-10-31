@@ -289,3 +289,72 @@
               - "'TEST BUG' not in (ansible_failed_result.msg | default(''))"
             fail_msg: "Allowlist did not reject the module: {{ ansible_failed_result.msg | default('') }}"
             success_msg: "A verify module outside the allowlist is rejected."
+
+- name: Stubbed verdicts through the real verify_finding
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_org_repo: aknochow/ansible-plaibook
+    review_number: "115"
+    review_repo_path: "{{ playbook_dir }}"
+    review_prompt_nonce: "AbCdEfGh12345678"
+    verify_provider_stub_file: "{{ lookup('ansible.builtin.env', 'VERIFY_PROVIDER_STUB_FILE') | default(playbook_dir ~ '/.verify_provider_stub.json', true) }}"
+    claude_message_module: verify_provider_stub
+    _verdict_major_finding:
+      file: roles/review/tasks/verify_turn.yml
+      line: 124
+      severity: Major
+      lens: Quality
+      description: A verdict field is read without validation
+      evidence: planted
+      confidence: HIGH
+      fix: Validate the verdict fields.
+      finding_id: f00000000115
+    # Worst case on every axis: computes Critical from a Major finding, so
+    # a case that keeps Major proves the computed severity was not used.
+    _verdict_critical_axes:
+      reachability: realistic
+      trust_boundary: crosses-trust-boundary
+      worst_outcome_category: data-corruption
+      silent_failure: false
+
+  environment:
+    VERIFY_PROVIDER_STUB_FILE: "{{ verify_provider_stub_file }}"
+
+  tasks:
+    - name: A placeholder verified verdict stays inconclusive at the original severity
+      ansible.builtin.include_tasks: verify_verdict_case.yml
+      vars:
+        verdict_case_label: placeholder verified verdict
+        verdict_case_finding: "{{ _verdict_major_finding }}"
+        verdict_case_input: >-
+          {{ _verdict_critical_axes | combine({'evidence_status': 'verified',
+             'evidence': 'placeholder', 'rationale': 'placeholder'}) }}
+        verdict_case_expected_status: inconclusive
+        verdict_case_expected_severity: Major
+
+    - name: A placeholder refuted verdict does not exclude the finding
+      ansible.builtin.include_tasks: verify_verdict_case.yml
+      vars:
+        verdict_case_label: placeholder refuted verdict
+        verdict_case_finding: "{{ _verdict_major_finding }}"
+        verdict_case_input: >-
+          {{ _verdict_critical_axes | combine({'evidence_status': 'refuted',
+             'evidence': 'n/a', 'rationale': 'A real sentence that has no quoted evidence.'}) }}
+        verdict_case_expected_status: inconclusive
+        verdict_case_expected_severity: Major
+
+    - name: A real rationale that mentions the word placeholder keeps its verdict
+      ansible.builtin.include_tasks: verify_verdict_case.yml
+      vars:
+        verdict_case_label: real rationale mentioning placeholder
+        verdict_case_finding: "{{ _verdict_major_finding }}"
+        verdict_case_input: >-
+          {{ _verdict_critical_axes | combine({'evidence_status': 'verified',
+             'evidence': 'verify_result_evidence: placeholder',
+             'rationale': 'The placeholder value reaches the merge task unchanged.'}) }}
+        verdict_case_expected_status: verified
+        verdict_case_expected_severity: Critical
+        verdict_case_expected_severity_status: disputed
