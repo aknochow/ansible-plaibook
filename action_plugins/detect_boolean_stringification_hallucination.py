@@ -45,10 +45,10 @@ prompt-level instructions already exist in the lens prompts and
 clearly aren't sufficient alone, given 9 real occurrences including one
 that got past the LLM re-check meant to catch exactly this.
 
-Scoped narrowly to the actual recurring claim shape via three
-independently-required signals (all three must match, on the finding's
-combined evidence+description+fix text) -- NOT a general hallucination
-detector:
+Scoped narrowly to the actual recurring claim shape via four
+independently-required signals (all four must match, on the finding's
+combined evidence+description+fix text), plus one exclusion -- NOT a
+general hallucination detector:
   1. A stringification claim: the text asserts a boolean becomes a
      string (mentions "string" near "true"/"false", or says the value
      gets converted/rendered/stored/serialized/cast "as"/"to"/"into" a
@@ -63,8 +63,16 @@ detector:
      makes something always-true/always-correct/always-selected
      regardless of the real value, or invokes Python's own
      non-empty-string-is-truthy rule.
+  4. A boolean subject: the text names a boolean, or quotes a true/false
+     value. The first three signals also fit a claim about any other
+     stringified value.
 
-A finding matching all three is deterministically short-circuited to
+Exclusion: a claim that an integer gets stringified, unless the integer
+is only a contrast ("unlike dot-accessed integers"). That's the real
+gotcha above, so it needs a real check. A false negative here only costs
+one verify call; a false positive refutes a finding with no check at all.
+
+A finding matching all four is deterministically short-circuited to
 evidence_status: refuted in verify_finding.yml, bypassing the LLM
 verify turn entirely for that finding -- cheaper AND more reliable than
 asking a fresh model to re-derive the same correct conclusion every
@@ -112,6 +120,34 @@ _TRUTHINESS_CONSEQUENCE_PATTERN = re.compile(
     r"|selectattr"
 )
 
+# Signal 4: the claim is about a boolean. "true"/"false" count only quoted
+# or as a literal value, because "always true" is signal 3's wording and
+# appears in claims about any type.
+_BOOLEAN_SUBJECT_PATTERN = re.compile(
+    r"(?i)\bbool(?:ean)?s?\b"
+    r"|['\"`](?:true|false)['\"`]"
+    r"|default\(\s*(?:true|false)\s*\)"
+    r"|:\s*(?:true|false)\b"
+)
+
+# Exclusion: an integer as the thing being stringified, in either word
+# order, within one sentence.
+_INTEGER_STRINGIFICATION_PATTERN = re.compile(
+    r"(?i)\b(?:integers?|numeric\s+values?|numbers?)\b[^.\n]{0,60}?\b(?:stringif\w*|strings?)\b"
+    r"|\bstringif\w*[^.\n]{0,60}?\b(?:integers?|numeric\s+values?|numbers?)\b"
+)
+
+# Words just before the integer that make it a contrast, not the subject.
+_INTEGER_CONTRAST_PATTERN = re.compile(r"(?i)\b(?:unlike|not\s+only|not\s+just|other\s+than)\b[^.\n]{0,30}$")
+
+
+def _claims_integer_stringification(text: str) -> bool:
+    """Return True if `text` says an integer gets stringified, other than as a contrast."""
+    return any(
+        not _INTEGER_CONTRAST_PATTERN.search(text[: match.start()])
+        for match in _INTEGER_STRINGIFICATION_PATTERN.finditer(text)
+    )
+
 
 def is_boolean_stringification_hallucination(finding: dict) -> bool:
     """Return True if `finding` matches the recurring, empirically-false
@@ -130,6 +166,8 @@ def is_boolean_stringification_hallucination(finding: dict) -> bool:
         _STRINGIFICATION_PATTERN.search(combined)
         and _JINJA_ORIGIN_PATTERN.search(combined)
         and _TRUTHINESS_CONSEQUENCE_PATTERN.search(combined)
+        and _BOOLEAN_SUBJECT_PATTERN.search(combined)
+        and not _claims_integer_stringification(combined)
     )
 
 
