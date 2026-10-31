@@ -406,6 +406,7 @@ def test_action_module_reports_a_summary_of_each_drop():
     summary = result["dropped"][0]
     assert (summary["file"], summary["line"], summary["severity"]) == ("a.py", 3, "Major")
     assert len(summary["description"]) == DROPPED_SUMMARY_MAX_CHARS
+    assert summary["fix"] == "N/A"
 
 
 def test_action_module_requires_findings_arg():

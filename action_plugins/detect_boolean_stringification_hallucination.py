@@ -123,12 +123,11 @@ _TRUTHINESS_CONSEQUENCE_PATTERN = re.compile(
 # Signal 4: the claim is about a boolean. "true"/"false" count only quoted
 # or as a literal value, because "always true" is signal 3's wording and
 # appears in claims about any type.
-_BOOLEAN_SUBJECT_PATTERN = re.compile(
-    r"(?i)\bbool(?:ean)?s?\b"
-    r"|['\"`](?:true|false)['\"`]"
-    r"|default\(\s*(?:true|false)\s*\)"
-    r"|:\s*(?:true|false)\b"
-)
+_BOOLEAN_SUBJECT_PATTERN = re.compile(r"(?i)\bbool(?:ean)?s?\b|['\"`](?:true|false)['\"`]")
+
+# Literal values count only in description and fix. In evidence they are
+# usually an unrelated line of the quoted task, such as `become: true`.
+_BOOLEAN_LITERAL_PATTERN = re.compile(r"(?i)default\(\s*(?:true|false)\s*\)|:\s*(?:true|false)\b")
 
 # Exclusion: an integer as the thing being stringified, in either word
 # order, within one sentence.
@@ -166,7 +165,7 @@ def is_boolean_stringification_hallucination(finding: dict) -> bool:
         _STRINGIFICATION_PATTERN.search(combined)
         and _JINJA_ORIGIN_PATTERN.search(combined)
         and _TRUTHINESS_CONSEQUENCE_PATTERN.search(combined)
-        and _BOOLEAN_SUBJECT_PATTERN.search(combined)
+        and (_BOOLEAN_SUBJECT_PATTERN.search(combined) or _BOOLEAN_LITERAL_PATTERN.search(f"{description}\n{fix}"))
         and not _claims_integer_stringification(combined)
     )
 

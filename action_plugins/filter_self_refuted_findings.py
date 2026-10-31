@@ -81,6 +81,7 @@ def summarize_dropped_finding(finding):
         "line": finding.get("line"),
         "severity": finding.get("severity"),
         "description": str(finding.get("description") or "")[:DROPPED_SUMMARY_MAX_CHARS],
+        "fix": str(finding.get("fix") or "")[:DROPPED_SUMMARY_MAX_CHARS],
     }
 
 

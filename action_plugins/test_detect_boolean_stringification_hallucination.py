@@ -283,6 +283,21 @@ def test_non_boolean_claim_is_not_flagged(finding):
     assert is_boolean_stringification_hallucination(finding) is False
 
 
+@pytest.mark.parametrize("finding", NON_BOOLEAN_CLAIMS)
+def test_boolean_literals_in_evidence_do_not_make_a_claim_boolean(finding):
+    quoted_task = f"{finding.get('evidence', '')}\nbecome: true\nenabled: {{{{ x | default(false) }}}}"
+    assert is_boolean_stringification_hallucination({**finding, "evidence": quoted_task}) is False
+
+
+def test_boolean_literal_in_description_still_marks_a_boolean_claim():
+    finding = {
+        "evidence": "enabled: {{ x }}",
+        "description": "Jinja stringifies `enabled: false`, so the non-empty string is truthy.",
+        "fix": "Use a native type.",
+    }
+    assert is_boolean_stringification_hallucination(finding) is True
+
+
 @pytest.mark.parametrize("finding", BOOLEAN_CLAIMS_MENTIONING_INTEGERS)
 def test_boolean_claim_mentioning_integers_is_still_flagged(finding):
     assert is_boolean_stringification_hallucination(finding) is True
