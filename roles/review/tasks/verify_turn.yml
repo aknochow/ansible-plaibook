@@ -56,10 +56,11 @@
           - verify_dispatch_valid
         fail_msg: >-
           Verify agent ({{ review_verify_model if agent_family == 'claude'
-          else ((review_verify_claude_cli_model if review_verify_claude_cli_model is string else '(CLI default)')
-          if agent_family == 'claude_cli' else
-          (review_verify_openai_model if agent_family == 'openai' else
-          (review_verify_cursor_model if agent_family == 'cursor' else review_verify_gemini_model))) }}) never produced a
+          else (review_verify_claude_cli_model if review_verify_claude_cli_model is string else '(CLI default)') if agent_family == 'claude_cli'
+          else review_verify_xai_model if agent_family == 'xai'
+          else review_verify_openai_model if agent_family == 'openai'
+          else review_verify_cursor_model if agent_family == 'cursor'
+          else review_verify_gemini_model }}) never produced a
           report_verdict tool call on the forced final turn after
           {{ review_structured_output_max_attempts }} attempt(s), despite
           forced tool_choice. This is a confirmed, probabilistic model-
@@ -79,7 +80,13 @@
 
     - name: Append the assistant's turn to the conversation
       ansible.builtin.set_fact:
-        verify_messages: "{{ verify_messages + [{'role': 'assistant', 'content': _verify_turn_sanitized_content.content}] }}"
+        verify_messages: >-
+          {{ verify_messages + [
+               {'role': 'assistant', 'content': _verify_turn_sanitized_content.content}
+               | combine({}
+                 if (verify_turn_result.message.encrypted_content | default('') | length) == 0
+                 else {'encrypted_content': verify_turn_result.message.encrypted_content})
+             ] }}
 
     - name: Check whether the agent called report_verdict this turn
       ansible.builtin.set_fact:
