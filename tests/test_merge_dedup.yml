@@ -93,3 +93,54 @@
           dedupe_findings.py's survivor set doesn't match the verified
           pre-port baseline. Got: {{ deduped_findings | map(attribute='description') | list }}
         success_msg: "dedupe_findings.py's survivor set matches the verified pre-port baseline."
+
+- name: A refuted finding cannot replace a real one and flip the verdict
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    severity_points:
+      Critical: 20
+      Major: 10
+      Minor: 5
+      Nit: 0
+    review_prior_review_md: "Prior round quoted: stale_call(arg) at this location."
+    review_full_diff: "+    real_call(value)"
+    security_result:
+      structured:
+        findings:
+          - file: "app.py"
+            line: 7
+            severity: "Major"
+            lens: "Security"
+            evidence: "stale_call(arg) at this location"
+            fix: "Remove the stale call"
+            description: "echoed from the prior round"
+    review_result:
+      structured:
+        findings:
+          - file: "app.py"
+            line: 7
+            severity: "Major"
+            lens: "Functionality"
+            evidence: "real_call(value)"
+            fix: "Check the return value"
+            description: "real finding at the same line"
+
+  tasks:
+    - name: Run merge.yml through the review role context
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: merge
+
+    - name: Assert the real finding survived and still blocks
+      ansible.builtin.assert:
+        that:
+          - deduped_findings | length == 1
+          - deduped_findings[0].description == 'real finding at the same line'
+          - deduped_findings[0].evidence_status is none
+          - review_verdict == 'NEEDS_CHANGES'
+        fail_msg: >-
+          Survivor: {{ deduped_findings | map(attribute='description') | list }}
+          verdict={{ review_verdict }}.

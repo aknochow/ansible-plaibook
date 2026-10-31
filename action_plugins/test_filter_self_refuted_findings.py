@@ -43,6 +43,7 @@ except ImportError:
         return data
 
 from filter_self_refuted_findings import (
+    DROPPED_SUMMARY_MAX_CHARS,
     FIX_REFUTED_PATTERN,
     ActionModule,
     filter_self_refuted_findings,
@@ -189,6 +190,110 @@ LEGITIMATE_FIXTURES = [
 ]
 
 
+# Real findings the earlier, broader patterns dropped. Kept out of
+# LEGITIMATE_FIXTURES on purpose: the frozen legacy expression dropped
+# these, so they can't go through its equivalence tests.
+PREVIOUSLY_FALSE_DROPPED_FIXTURES = [
+    pytest.param(
+        {"evidence": "e", "fix": "Stop dropping the auth header on redirect.", "description": "d"},
+        id="fix-stop-dropping-a-header",
+    ),
+    pytest.param(
+        {"evidence": "e", "fix": "Stop dropping the finding when the lens retries.", "description": "d"},
+        id="fix-stop-dropping-the-finding",
+    ),
+    pytest.param(
+        {"evidence": "e", "fix": "Join against the repo root so the path is correct.", "description": "d"},
+        id="fix-outcome-so-the-path-is-correct",
+    ),
+    pytest.param(
+        {"evidence": "e", "fix": "The code is correct only for ASCII, so normalize first.", "description": "d"},
+        id="fix-leading-is-correct-with-a-qualifier",
+    ),
+    pytest.param(
+        {"evidence": "e", "fix": "Validate in the helper. No change needed in the callers.", "description": "d"},
+        id="fix-no-change-needed-for-a-scoped-part",
+    ),
+    pytest.param(
+        {"evidence": "e", "fix": "No change needed in callers; validate inside the helper.", "description": "d"},
+        id="fix-leading-no-change-needed-scoped",
+    ),
+    pytest.param(
+        {"evidence": "e", "fix": "Rename refute() so it matches the verdict enum.", "description": "d"},
+        id="fix-names-a-refute-function",
+    ),
+    pytest.param(
+        {"evidence": "e", "fix": "Update the self-refuted filter to read the new field.", "description": "d"},
+        id="fix-names-the-self-refuted-filter",
+    ),
+    pytest.param(
+        {"evidence": "e", "fix": "NA values should be filled before the join.", "description": "d"},
+        id="fix-starts-with-na-values",
+    ),
+    pytest.param(
+        {"evidence": "e", "fix": "Return a not actionable status from the triage helper.", "description": "d"},
+        id="fix-names-a-not-actionable-status",
+    ),
+    pytest.param(
+        {"evidence": "def refute(claim):\n    return False", "fix": "Return the claim status.", "description": "d"},
+        id="evidence-quotes-a-refute-function",
+    ),
+    pytest.param(
+        {"evidence": "status = 'refuted'", "fix": "Keep the status through the merge.", "description": "d"},
+        id="evidence-quotes-a-refuted-status",
+    ),
+    pytest.param(
+        {"evidence": "e", "fix": "Check the response.", "description": "The test passes with no actual issue number set."},
+        id="description-no-actual-issue-number",
+    ),
+    pytest.param(
+        {"evidence": "e", "fix": "Check the response.", "description": "The helper reports no actual bug."},
+        id="description-reports-no-actual-bug-mid-sentence",
+    ),
+]
+
+# Explicit retractions beyond the documented fixtures, so narrowing the
+# patterns doesn't reduce them to matching those exact strings.
+EXPLICIT_RETRACTION_FIXTURES = [
+    pytest.param({"evidence": "e", "fix": "N/A", "description": "d"}, id="bare-na"),
+    pytest.param({"evidence": "e", "fix": "Not applicable.", "description": "d"}, id="bare-not-applicable"),
+    pytest.param({"evidence": "e", "fix": "No change required.", "description": "d"}, id="no-change-required"),
+    pytest.param(
+        {"evidence": "e", "fix": "After re-examination, no fix is needed.", "description": "d"},
+        id="hedged-no-fix-needed",
+    ),
+    pytest.param({"evidence": "e", "fix": "Refuted on re-read.", "description": "d"}, id="leading-refuted"),
+    pytest.param(
+        {"evidence": "e", "fix": "This finding is refuted.", "description": "d"},
+        id="this-finding-is-refuted",
+    ),
+    pytest.param(
+        {"evidence": "e", "fix": "Claim does not hold. Dropping this finding.", "description": "d"},
+        id="trailing-dropping-this-finding",
+    ),
+    pytest.param({"evidence": "e", "fix": "The existing code is already correct.", "description": "d"}, id="code-already-correct"),
+    pytest.param(
+        {"evidence": "e", "fix": "Check the response.", "description": "There is no actual bug here."},
+        id="description-there-is-no-actual-bug",
+    ),
+]
+
+
+@pytest.mark.parametrize("finding", PREVIOUSLY_FALSE_DROPPED_FIXTURES)
+def test_previously_false_dropped_finding_survives(finding):
+    assert is_self_refuted(finding) is False
+
+
+@pytest.mark.parametrize("finding", EXPLICIT_RETRACTION_FIXTURES)
+def test_explicit_retraction_is_detected(finding):
+    assert is_self_refuted(finding) is True
+
+
+@pytest.mark.parametrize("finding", PREVIOUSLY_FALSE_DROPPED_FIXTURES)
+def test_previously_false_dropped_finding_survives_live_jinja_search(finding):
+    assert _render_live_pattern_search("fix", FIX_REFUTED_PATTERN, [finding]) is False
+
+
 @pytest.mark.parametrize("finding", SELF_REFUTED_FIXTURES + POST_PORT_SELF_REFUTED_FIXTURES)
 def test_self_refuted_wording_is_detected(finding):
     assert is_self_refuted(finding) is True
@@ -285,6 +390,23 @@ def test_action_module_run_matches_pure_function():
     assert "failed" not in result
     assert result["findings"] == filter_self_refuted_findings(findings)
     assert result["dropped_count"] == len(self_refuted)
+
+
+def test_action_module_reports_a_summary_of_each_drop():
+    long_description = "d" * 500
+    result = _run_action_module(
+        [
+            {"file": "a.py", "line": 3, "severity": "Major", "fix": "N/A", "description": long_description},
+            {"file": "b.py", "line": 4, "severity": "Minor", "fix": "Check the response.", "description": "real"},
+        ]
+    )
+    assert result["dropped_count"] == 1
+    assert [finding["file"] for finding in result["findings"]] == ["b.py"]
+    assert len(result["dropped"]) == 1
+    summary = result["dropped"][0]
+    assert (summary["file"], summary["line"], summary["severity"]) == ("a.py", 3, "Major")
+    assert len(summary["description"]) == DROPPED_SUMMARY_MAX_CHARS
+    assert summary["fix"] == "N/A"
 
 
 def test_action_module_requires_findings_arg():

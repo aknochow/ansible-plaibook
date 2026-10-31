@@ -118,22 +118,28 @@
           ansible.builtin.set_fact:
             verify_messages: "{{ verify_messages + [{'role': 'user', 'content': explore_tool_results}] }}"
 
-    # Default all verdict fields since schema "required" isn't guaranteed.
+    # Schema "required" isn't guaranteed, and a forced final turn can fill
+    # required fields with filler. See normalize_verify_verdict.py.
+    - name: Normalize the report_verdict input
+      when: verify_report_calls | length > 0
+      normalize_verify_verdict:
+        verdict: "{{ verify_report_calls[0].input }}"
+      register: _verify_normalized_verdict
+
     # verify_result_severity_assessed flags whether real axis-1 assessment occurred.
-    # Placeholder values are inert and least-alarming for fallback paths.
     - name: Capture the verdict once report_verdict has been called
       when: verify_report_calls | length > 0
       ansible.builtin.set_fact:
         review_verify_done: true
-        verify_result_status: "{{ verify_report_calls[0].input.evidence_status | default('inconclusive') }}"
-        verify_result_evidence: "{{ verify_report_calls[0].input.evidence | default('') }}"
-        verify_result_rationale: "{{ verify_report_calls[0].input.rationale | default('Verification agent did not populate a rationale.') }}"
-        verify_result_requires_execution: "{{ verify_report_calls[0].input.requires_execution | default(false) }}"
-        verify_result_severity_assessed: true
-        verify_result_reachability: "{{ verify_report_calls[0].input.reachability | default('theoretical-only') }}"
-        verify_result_trust_boundary: "{{ verify_report_calls[0].input.trust_boundary | default('unclear') }}"
-        verify_result_worst_outcome_category: "{{ verify_report_calls[0].input.worst_outcome_category | default('cosmetic-style') }}"
-        verify_result_silent_failure: "{{ verify_report_calls[0].input.silent_failure | default(false) | bool }}"
+        verify_result_status: "{{ _verify_normalized_verdict.status }}"
+        verify_result_evidence: "{{ _verify_normalized_verdict.evidence }}"
+        verify_result_rationale: "{{ _verify_normalized_verdict.rationale }}"
+        verify_result_requires_execution: "{{ _verify_normalized_verdict.requires_execution }}"
+        verify_result_severity_assessed: "{{ _verify_normalized_verdict.severity_assessed | bool }}"
+        verify_result_reachability: "{{ _verify_normalized_verdict.reachability }}"
+        verify_result_trust_boundary: "{{ _verify_normalized_verdict.trust_boundary }}"
+        verify_result_worst_outcome_category: "{{ _verify_normalized_verdict.worst_outcome_category }}"
+        verify_result_silent_failure: "{{ _verify_normalized_verdict.silent_failure | bool }}"
         # Sourced from deterministic tracking fact, not model self-report.
         verify_result_used_static_reachability_trace: "{{ verify_reachability_tool_used | default(false) }}"
         verify_result_continues_finding_id_rationale: >-

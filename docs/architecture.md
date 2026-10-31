@@ -114,9 +114,12 @@ lens's own reasoning.
 - **The self-refuted-finding filter is a reactive regex backstop, not a
   guarantee.** The lens prompt asks the model to self-verify and drop a
   finding it's talked itself out of; in practice this doesn't always
-  happen, and `merge.yml` catches several known wordings of a
-  semantically-retracted-but-still-shipped finding. Treat a surviving
-  low-confidence finding with real skepticism, not blind trust.
+  happen, and `merge.yml` catches several known wordings of an explicit
+  retraction in the `fix` or `description` field. Evidence is never
+  matched, because it quotes the reviewed code. Drops are listed in the
+  job output and counted in `self_refuted_dropped_count` in `summary.json`.
+  Treat a surviving low-confidence finding with real skepticism, not
+  blind trust.
 
 ## Multi-model dispatch
 
