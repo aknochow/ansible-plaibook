@@ -289,3 +289,224 @@
               - "'TEST BUG' not in (ansible_failed_result.msg | default(''))"
             fail_msg: "Allowlist did not reject the module: {{ ansible_failed_result.msg | default('') }}"
             success_msg: "A verify module outside the allowlist is rejected."
+
+- name: Stubbed verdicts through the real verify_finding
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_org_repo: aknochow/ansible-plaibook
+    review_number: "115"
+    review_repo_path: "{{ playbook_dir }}"
+    review_prompt_nonce: "AbCdEfGh12345678"
+    verify_provider_stub_file: "{{ lookup('ansible.builtin.env', 'VERIFY_PROVIDER_STUB_FILE') | default(playbook_dir ~ '/.verify_provider_stub.json', true) }}"
+    claude_message_module: verify_provider_stub
+    _verdict_major_finding:
+      file: roles/review/tasks/verify_turn.yml
+      line: 124
+      severity: Major
+      lens: Quality
+      description: A verdict field is read without validation
+      evidence: planted
+      confidence: HIGH
+      fix: Validate the verdict fields.
+      finding_id: f00000000115
+    # Worst case on every axis: computes Critical from a Major finding, so
+    # a case that keeps Major proves the computed severity was not used.
+    _verdict_critical_axes:
+      reachability: realistic
+      trust_boundary: crosses-trust-boundary
+      worst_outcome_category: data-corruption
+      silent_failure: false
+
+  environment:
+    VERIFY_PROVIDER_STUB_FILE: "{{ verify_provider_stub_file }}"
+
+  tasks:
+    - name: A placeholder verified verdict stays inconclusive at the original severity
+      ansible.builtin.include_tasks: verify_verdict_case.yml
+      vars:
+        verdict_case_label: placeholder verified verdict
+        verdict_case_finding: "{{ _verdict_major_finding }}"
+        verdict_case_input: >-
+          {{ _verdict_critical_axes | combine({'evidence_status': 'verified',
+             'evidence': 'placeholder', 'rationale': 'placeholder'}) }}
+        verdict_case_expected_status: inconclusive
+        verdict_case_expected_severity: Major
+
+    - name: A placeholder refuted verdict does not exclude the finding
+      ansible.builtin.include_tasks: verify_verdict_case.yml
+      vars:
+        verdict_case_label: placeholder refuted verdict
+        verdict_case_finding: "{{ _verdict_major_finding }}"
+        verdict_case_input: >-
+          {{ _verdict_critical_axes | combine({'evidence_status': 'refuted',
+             'evidence': 'n/a', 'rationale': 'A real sentence that has no quoted evidence.'}) }}
+        verdict_case_expected_status: inconclusive
+        verdict_case_expected_severity: Major
+
+    - name: A real rationale that mentions the word placeholder keeps its verdict
+      ansible.builtin.include_tasks: verify_verdict_case.yml
+      vars:
+        verdict_case_label: real rationale mentioning placeholder
+        verdict_case_finding: "{{ _verdict_major_finding }}"
+        verdict_case_input: >-
+          {{ _verdict_critical_axes | combine({'evidence_status': 'verified',
+             'evidence': 'verify_result_evidence: placeholder',
+             'rationale': 'The placeholder value reaches the merge task unchanged.'}) }}
+        verdict_case_expected_status: verified
+        verdict_case_expected_severity: Critical
+        verdict_case_expected_severity_status: disputed
+
+    - name: Reset verify state before the already refuted finding
+      ansible.builtin.include_tasks: verify_provider_failure_reset.yml
+      vars:
+        provider_case_family: claude
+
+    - name: Seed a finding the provenance check already refuted
+      ansible.builtin.set_fact:
+        deduped_findings:
+          - "{{ _verdict_major_finding | combine({'evidence_status': 'refuted', 'verification_rationale': 'Flagged by the provenance check.'}) }}"
+
+    - name: Offer a verified verdict that must never be requested
+      ansible.builtin.copy:
+        dest: "{{ verify_provider_stub_file }}"
+        mode: "0600"
+        content: "{{ _overturning_response | to_json }}"
+      vars:
+        _overturning_response:
+          calls: 0
+          stop_reason: tool_use
+          usage: {}
+          message:
+            model: stub
+            content: []
+          tool_calls:
+            - id: stub-verdict
+              name: report_verdict
+              input: >-
+                {{ _verdict_critical_axes | combine({'evidence_status': 'verified',
+                   'evidence': 'a real quote', 'rationale': 'A real rationale.'}) }}
+
+    - name: Run the real verify.yml over the refuted finding
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: verify.yml
+      vars:
+        review_verify_enabled: true
+        review_verify_severities: ["Critical", "Major"]
+        severity_points:
+          Critical: 20
+          Major: 10
+          Minor: 5
+          Nit: 0
+
+    - name: Read the stub after the refuted finding
+      ansible.builtin.slurp:
+        src: "{{ verify_provider_stub_file }}"
+      register: _refuted_stub_raw
+
+    - name: Confirm the refutation was not overturned
+      vars:
+        _stub_state: "{{ _refuted_stub_raw.content | b64decode | from_json }}"
+      ansible.builtin.assert:
+        that:
+          - _stub_state.calls | int == 0
+          - verify_scoped_findings | length == 0
+          - deduped_findings[0].evidence_status == 'refuted'
+          - deduped_findings[0].verification_rationale == 'Flagged by the provenance check.'
+          - review_verdict == 'READY_FOR_HUMAN_REVIEW'
+        fail_msg: >-
+          calls={{ _stub_state.calls }} status={{ deduped_findings[0].evidence_status }}
+          verdict={{ review_verdict }}
+
+    - name: Missing axis fields keep a verified Critical at Critical
+      ansible.builtin.include_tasks: verify_verdict_case.yml
+      vars:
+        verdict_case_label: verified Critical with no axis fields
+        verdict_case_finding: "{{ _verdict_major_finding | combine({'severity': 'Critical'}) }}"
+        verdict_case_input:
+          evidence_status: verified
+          evidence: a real quote
+          rationale: A real rationale.
+        verdict_case_expected_status: verified
+        verdict_case_expected_severity: Critical
+
+    - name: A missing silent_failure does not downgrade a verified Critical
+      ansible.builtin.include_tasks: verify_verdict_case.yml
+      vars:
+        verdict_case_label: verified Critical with no silent_failure
+        verdict_case_finding: "{{ _verdict_major_finding | combine({'severity': 'Critical'}) }}"
+        verdict_case_input:
+          evidence_status: verified
+          evidence: a real quote
+          rationale: A real rationale.
+          reachability: realistic
+          trust_boundary: crosses-trust-boundary
+          worst_outcome_category: crash-dos
+        verdict_case_expected_status: verified
+        verdict_case_expected_severity: Critical
+
+    - name: A complete axis answer still moves severity
+      ansible.builtin.include_tasks: verify_verdict_case.yml
+      vars:
+        verdict_case_label: verified Critical with a complete axis answer
+        verdict_case_finding: "{{ _verdict_major_finding | combine({'severity': 'Critical'}) }}"
+        verdict_case_input:
+          evidence_status: verified
+          evidence: a real quote
+          rationale: A real rationale.
+          reachability: realistic
+          trust_boundary: crosses-trust-boundary
+          worst_outcome_category: crash-dos
+          silent_failure: false
+        verdict_case_expected_status: verified
+        verdict_case_expected_severity: Major
+        verdict_case_expected_severity_status: disputed
+
+    - name: A dot-accessed integer claim reaches the verifier
+      ansible.builtin.include_tasks: verify_verdict_case.yml
+      vars:
+        verdict_case_label: dot-accessed integer claim
+        verdict_case_finding:
+          file: roles/review/tasks/verify_finding.yml
+          line: 159
+          severity: Major
+          lens: Functionality
+          confidence: HIGH
+          finding_id: f00000000116
+          description: !unsafe >-
+            A dot-accessed integer is stringified, so the comparison is
+            always true regardless of the value.
+          evidence: !unsafe 'verify_index: "{{ verify_target_finding._verify_index }}"'
+          fix: Cast with | int at the comparison.
+        verdict_case_input: >-
+          {{ _verdict_critical_axes | combine({'evidence_status': 'verified',
+             'evidence': 'a real quote', 'rationale': 'A real rationale.',
+             'worst_outcome_category': 'crash-dos'}) }}
+        verdict_case_expected_status: verified
+        verdict_case_expected_severity: Major
+
+    - name: A boolean stringification claim is still refuted with no model call
+      ansible.builtin.include_tasks: verify_verdict_case.yml
+      vars:
+        verdict_case_label: boolean stringification claim
+        verdict_case_finding:
+          file: roles/review/tasks/verify_finding.yml
+          line: 159
+          severity: Major
+          lens: Functionality
+          confidence: HIGH
+          finding_id: f00000000117
+          description: !unsafe >-
+            This boolean is stringified by Jinja to 'False', which is
+            truthy, so the check is always true regardless of the value.
+          evidence: !unsafe 'flag: "{{ result.flag }}"'
+          fix: Coerce with | bool.
+        verdict_case_input: >-
+          {{ _verdict_critical_axes | combine({'evidence_status': 'verified',
+             'evidence': 'a real quote', 'rationale': 'A real rationale.'}) }}
+        verdict_case_expected_status: refuted
+        verdict_case_expected_severity: Major
+        verdict_case_expected_calls: 0

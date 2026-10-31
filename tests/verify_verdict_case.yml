@@ -1,0 +1,57 @@
+---
+# One stubbed report_verdict through the real verify_finding.yml.
+- name: Reset verify state for the verdict case
+  ansible.builtin.include_tasks: verify_provider_failure_reset.yml
+  vars:
+    provider_case_family: claude
+
+- name: "Seed the finding for: {{ verdict_case_label }}"
+  ansible.builtin.set_fact:
+    deduped_findings: "{{ [verdict_case_finding | combine({'_verify_index': 0})] }}"
+
+- name: "Write the stubbed verdict for: {{ verdict_case_label }}"
+  ansible.builtin.copy:
+    dest: "{{ verify_provider_stub_file }}"
+    mode: "0600"
+    content: "{{ _verdict_response | to_json }}"
+  vars:
+    _verdict_response:
+      calls: 0
+      stop_reason: tool_use
+      usage: {}
+      message:
+        model: stub
+        content: []
+      tool_calls:
+        - id: stub-verdict
+          name: report_verdict
+          input: "{{ verdict_case_input }}"
+
+- name: "Run the real verify_finding for: {{ verdict_case_label }}"
+  ansible.builtin.include_role:
+    name: review
+    tasks_from: verify_finding.yml
+  vars:
+    verify_target_finding: "{{ deduped_findings[0] }}"
+    prior_round_findings: []
+
+- name: "Read the stub after: {{ verdict_case_label }}"
+  ansible.builtin.slurp:
+    src: "{{ verify_provider_stub_file }}"
+  register: _verdict_stub_raw
+
+- name: "Confirm the merged finding for: {{ verdict_case_label }}"
+  vars:
+    _stub_state: "{{ _verdict_stub_raw.content | b64decode | from_json }}"
+  ansible.builtin.assert:
+    that:
+      - deduped_findings[0].evidence_status == verdict_case_expected_status
+      - deduped_findings[0].severity == verdict_case_expected_severity
+      - deduped_findings[0].severity_status == verdict_case_expected_severity_status | default('confirmed')
+      - _stub_state.calls | int == verdict_case_expected_calls | default(1) | int
+    fail_msg: >-
+      {{ verdict_case_label }}: status={{ deduped_findings[0].evidence_status }}
+      severity={{ deduped_findings[0].severity }}
+      severity_status={{ deduped_findings[0].severity_status }}
+      calls={{ _stub_state.calls | default('missing') }}
+    success_msg: "{{ verdict_case_label }}: merged as expected."
