@@ -190,6 +190,31 @@ def openai_tool_reasoning_effort(model: str) -> str:
     return ""
 
 
+_XAI_END_REASONS = {"stop", "REASON_STOP", "FINISH_REASON_STOP"}
+
+
+def xai_stop_reason(finish_reason: str, has_tool_calls: bool = False) -> str:
+    """Map an xAI finish reason onto the shared explore/verify stop_reason.
+
+    The SDK has returned ``stop``, ``REASON_STOP``, and ``FINISH_REASON_STOP``
+    for a normal end. A tool call is ``tool_use`` regardless of that string.
+    """
+    if has_tool_calls:
+        return "tool_use"
+    reason = finish_reason or ""
+    if reason in _XAI_END_REASONS:
+        return "end_turn"
+    return reason or "unknown"
+
+
+def xai_lens_needs_transport_retry(result: dict) -> bool:
+    """True when one lens died on a dropped stream and should be sent once more."""
+    if not isinstance(result, dict) or not result.get("failed"):
+        return False
+    msg = str(result.get("msg") or result.get("stderr") or "")
+    return any(token in msg for token in ("RST_STREAM", "StatusCode.INTERNAL", "UNAVAILABLE"))
+
+
 def openai_reasoning_tokens(response: dict) -> int:
     """Return provider-reported hidden reasoning tokens from a raw response."""
     if not isinstance(response, dict):
@@ -214,4 +239,6 @@ class FilterModule:
             "openai_lens_reasoning_effort": openai_lens_reasoning_effort,
             "openai_tool_reasoning_effort": openai_tool_reasoning_effort,
             "openai_reasoning_tokens": openai_reasoning_tokens,
+            "xai_stop_reason": xai_stop_reason,
+            "xai_lens_needs_transport_retry": xai_lens_needs_transport_retry,
         }

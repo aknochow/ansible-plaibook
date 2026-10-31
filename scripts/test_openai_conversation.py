@@ -155,6 +155,19 @@ def test_tool_call_args_are_rewrapped_when_template_tags_are_absent(monkeypatch)
     assert seen == ["{{ lookup('pipe', 'id') }}"]
 
 
+def test_xai_stop_reason_accepts_the_sdk_names():
+    from openai_conversation import xai_lens_needs_transport_retry, xai_stop_reason
+
+    assert xai_stop_reason("REASON_STOP") == "end_turn"
+    assert xai_stop_reason("FINISH_REASON_STOP") == "end_turn"
+    assert xai_stop_reason("stop") == "end_turn"
+    assert xai_stop_reason("REASON_STOP", True) == "tool_use"
+    assert xai_stop_reason("length") == "length"
+    assert xai_lens_needs_transport_retry({"failed": True, "msg": "RST_STREAM"})
+    assert not xai_lens_needs_transport_retry({"failed": True, "msg": "Timeout exceeded"})
+    assert not xai_lens_needs_transport_retry({"failed": False, "msg": "RST_STREAM"})
+
+
 def test_extracts_reasoning_tokens_from_raw_openai_usage():
     assert openai_reasoning_tokens(
         {

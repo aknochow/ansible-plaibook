@@ -20,6 +20,15 @@ def test_xai_lens_uses_the_xai_sdk_module():
     assert "(last_run_id | default('review')) ~ '-security'" in lens
     assert "(last_run_id | default('review')) ~ '-review'" in lens
     assert 'conversation_id: "{{ last_run_id | default(omit) }}"' not in lens
+    assert "(xai_timeout | float + 60)" in lens
+    assert "failed_when: false" in lens
+    assert "xai_lens_needs_transport_retry" in lens
+    preflight = _text("provider_preflight.yml")
+    assert "doc.options.conversation_id" in preflight
+    defaults = (ROOT / "roles" / "review" / "defaults" / "main.yml").read_text(encoding="utf-8")
+    assert "default(1800, true)" in defaults
+    explore = _text("dispatch_explore_turn_attempt_xai.yml")
+    assert "xai_stop_reason" in explore
 
 
 def test_xai_explore_and_verify_keep_openai_shape_filters():

@@ -130,10 +130,25 @@ def compute_pipeline_cost(pipeline_agent_calls: list[dict], pipeline_pricing_tab
     total_thinking_tokens = sum(_usage_value_lenient(call, "thinking_tokens") for call in pipeline_agent_calls)
 
     seen_models = list(dict.fromkeys(call["model"] for call in pipeline_agent_calls))
-    unpriced_models = [model for model in seen_models if _model_base(model) not in pipeline_pricing_table]
+    unpriced_models = []
+    for model in seen_models:
+        if _model_base(model) in pipeline_pricing_table:
+            continue
+        model_calls = [call for call in pipeline_agent_calls if call["model"] == model]
+        if model_calls and all(_usage_value_lenient(call, "cost_in_usd_ticks") for call in model_calls):
+            continue
+        unpriced_models.append(model)
 
+    # xAI reports cost_in_usd_ticks on SamplingUsage. 1 tick is 1e-10 USD.
+    # When the provider sent a tick count, that is the call cost. The rate
+    # table does not price reasoning tokens, so it undercounts grok-4.7.
+    usd_per_tick = 1e-10
     call_costs = []
     for call in pipeline_agent_calls:
+        ticks = _usage_value_lenient(call, "cost_in_usd_ticks")
+        if ticks:
+            call_costs.append(ticks * usd_per_tick)
+            continue
         rates = pipeline_pricing_table.get(_model_base(call["model"]), {})
         cost = sum(
             _usage_value_lenient(call, usage_key) * float(rates.get(rate_key) or 0)

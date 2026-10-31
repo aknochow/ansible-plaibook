@@ -109,8 +109,7 @@
       tool_calls: "{{ _xai_verify_tool_calls }}"
       stop_reason: >-
         {{ 'tool_use' if (_xai_verify_tool_calls | length > 0)
-           else ('end_turn' if _xai_verify_raw.finish_reason | default('') == 'stop'
-           else _xai_verify_raw.finish_reason | default('unknown')) }}
+           else (_xai_verify_raw.finish_reason | default('') | xai_stop_reason(false)) }}
       usage:
         input_tokens: "{{ [(_xai_verify_raw.usage.prompt_tokens | default(0) | int) - (_xai_verify_raw.usage.cached_tokens | default(0) | int), 0] | max }}"
         output_tokens: "{{ _xai_verify_raw.usage.completion_tokens | default(0) | int }}"
@@ -132,6 +131,7 @@
              'cache_write_tokens': 0,
              'cache_read_tokens': verify_turn_result.usage.cache_read_input_tokens | default(0) | int,
              'thinking_tokens': (_xai_verify_raw.usage.reasoning_tokens | default(0) | int),
+             'cost_in_usd_ticks': (_xai_verify_raw.usage.cost_in_usd_ticks | default(0) | int),
              'total_tokens': (verify_turn_result.usage.input_tokens | default(0) | int)
                + (verify_turn_result.usage.output_tokens | default(0) | int)
                + (verify_turn_result.usage.cache_read_input_tokens | default(0) | int)

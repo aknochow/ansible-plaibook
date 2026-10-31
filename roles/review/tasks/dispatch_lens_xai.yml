@@ -31,7 +31,7 @@
       - role: user
         content: "Review this diff per your instructions."
     response_schema: "{{ security_findings_schema }}"
-  async: "{{ xai_timeout | int }}"
+  async: "{{ (xai_timeout | float + 60) | int }}"
   poll: 0
   register: _xai_security_job
 
@@ -61,7 +61,7 @@
       - role: user
         content: "Review this diff per your instructions."
     response_schema: "{{ review_findings_schema }}"
-  async: "{{ xai_timeout | int }}"
+  async: "{{ (xai_timeout | float + 60) | int }}"
   poll: 0
   register: _xai_review_job
 
@@ -73,13 +73,76 @@
     - "{{ _xai_review_job }}"
   register: _xai_lens_jobs
   until: _xai_lens_jobs.finished
-  retries: "{{ (xai_timeout | float / 5) | round(0, 'ceil') | int }}"
+  retries: "{{ ((xai_timeout | float + 60) / 5) | round(0, 'ceil') | int }}"
   delay: 5
+  failed_when: false
+
+- name: "xAI: note a lens that died on a dropped stream"
+  ansible.builtin.set_fact:
+    _xai_security_transport_retry: "{{ _xai_lens_jobs.results[0] | xai_lens_needs_transport_retry }}"
+    _xai_review_transport_retry: "{{ _xai_lens_jobs.results[1] | xai_lens_needs_transport_retry }}"
+
+- name: "xAI: dispatch the Security agent again after a dropped stream"
+  when: _xai_security_transport_retry | bool
+  aknochow.xai.chat:
+    model: "{{ review_xai_model }}"
+    reasoning_effort: "{{ review_xai_lens_reasoning_effort }}"
+    max_tokens: "{{ review_xai_max_tokens }}"
+    timeout: "{{ xai_timeout }}"
+    conversation_id: "{{ (last_run_id | default('review')) ~ '-security-retry' }}"
+    messages:
+      - role: system
+        content: "{{ security_system_prompt }}"
+      - role: user
+        content: "Review this diff per your instructions."
+    response_schema: "{{ security_findings_schema }}"
+  async: "{{ (xai_timeout | float + 60) | int }}"
+  poll: 0
+  register: _xai_security_retry_job
+
+- name: "xAI: dispatch the Review agent again after a dropped stream"
+  when: _xai_review_transport_retry | bool
+  aknochow.xai.chat:
+    model: "{{ review_xai_model }}"
+    reasoning_effort: "{{ review_xai_lens_reasoning_effort }}"
+    max_tokens: "{{ review_xai_max_tokens }}"
+    timeout: "{{ xai_timeout }}"
+    conversation_id: "{{ (last_run_id | default('review')) ~ '-review-retry' }}"
+    messages:
+      - role: system
+        content: "{{ review_system_prompt }}"
+      - role: user
+        content: "Review this diff per your instructions."
+    response_schema: "{{ review_findings_schema }}"
+  async: "{{ (xai_timeout | float + 60) | int }}"
+  poll: 0
+  register: _xai_review_retry_job
+
+- name: "xAI: wait for a retried lens"
+  when: item.ansible_job_id is defined
+  ansible.builtin.async_status:
+    jid: "{{ item.ansible_job_id }}"
+  loop:
+    - "{{ _xai_security_retry_job | default({}) }}"
+    - "{{ _xai_review_retry_job | default({}) }}"
+  register: _xai_lens_retry_jobs
+  until: _xai_lens_retry_jobs.finished
+  retries: "{{ ((xai_timeout | float + 60) / 5) | round(0, 'ceil') | int }}"
+  delay: 5
+  failed_when: false
 
 - name: "xAI: collect both lens results"
   ansible.builtin.set_fact:
-    _xai_security_raw: "{{ _xai_lens_jobs.results[0] }}"
-    _xai_review_raw: "{{ _xai_lens_jobs.results[1] }}"
+    _xai_security_raw: >-
+      {{ (_xai_lens_retry_jobs.results | default([]))[0]
+         if ((_xai_lens_retry_jobs.results | default([])) | length) > 0
+            and ((_xai_lens_retry_jobs.results | default([]))[0].structured | default(none)) is not none
+         else _xai_lens_jobs.results[0] }}
+    _xai_review_raw: >-
+      {{ (_xai_lens_retry_jobs.results | default([]))[1]
+         if ((_xai_lens_retry_jobs.results | default([])) | length) > 1
+            and ((_xai_lens_retry_jobs.results | default([]))[1].structured | default(none)) is not none
+         else _xai_lens_jobs.results[1] }}
 
 - name: "xAI: fail loudly if the Security agent produced no structured output"
   ansible.builtin.assert:
@@ -113,6 +176,7 @@
         cache_read_tokens: "{{ _xai_security_raw.usage.cached_tokens | default(0) | int }}"
         thinking_tokens: "{{ _xai_security_raw.usage.reasoning_tokens | default(0) | int }}"
         total_tokens: "{{ _xai_security_raw.usage.total_tokens | default(0) | int }}"
+        cost_in_usd_ticks: "{{ _xai_security_raw.usage.cost_in_usd_ticks | default(0) | int }}"
 
 - name: "xAI: build the normalized Review result"
   ansible.builtin.set_fact:
@@ -128,3 +192,4 @@
         cache_read_tokens: "{{ _xai_review_raw.usage.cached_tokens | default(0) | int }}"
         thinking_tokens: "{{ _xai_review_raw.usage.reasoning_tokens | default(0) | int }}"
         total_tokens: "{{ _xai_review_raw.usage.total_tokens | default(0) | int }}"
+        cost_in_usd_ticks: "{{ _xai_review_raw.usage.cost_in_usd_ticks | default(0) | int }}"

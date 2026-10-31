@@ -188,8 +188,9 @@ openai_api_key: >-
 openai_timeout: "{{ lookup('ansible.builtin.env', 'ANSIBLE_OPENAI_TIMEOUT') | default(300, true) | float }}"
 # agent_family=xai calls aknochow.xai.chat (xai-sdk chat.stream), not the
 # OpenAI-compatible endpoint. The collection reads GROK_API_KEY, XAI_API_KEY,
-# or ANSIBLE_GROK_API_KEY. Timeout default matches the collection's 900s floor.
-xai_timeout: "{{ lookup('ansible.builtin.env', 'ANSIBLE_XAI_TIMEOUT') | default(900, true) | float }}"
+# or ANSIBLE_GROK_API_KEY. 1800s is the long-eval floor. A high-effort lens
+# on a provider-sized diff has already outlived 900s and 1200s.
+xai_timeout: "{{ lookup('ansible.builtin.env', 'ANSIBLE_XAI_TIMEOUT') | default(1800, true) | float }}"
 review_xai_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_XAI_MODEL') | default('grok-4.7', true) }}"
 review_xai_lens_reasoning_effort: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_XAI_LENS_REASONING_EFFORT') | default('high', true) }}"
 review_xai_continuity_reasoning_effort: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_XAI_CONTINUITY_REASONING_EFFORT') | default(review_xai_lens_reasoning_effort, true) }}"

@@ -170,6 +170,18 @@ def test_thinking_tokens_totals_leniently_and_is_never_priced():
     assert result["call_costs"][0] == 0.0
 
 
+def test_xai_tick_cost_replaces_the_rate_table():
+    calls = [
+        {
+            "model": "grok-4.7",
+            "usage": {**_EMPTY_USAGE, "cost_in_usd_ticks": 3_850_000_000},
+        }
+    ]
+    result = compute_pipeline_cost(calls, PRICING_TABLE)
+    assert result["call_costs"] == [0.385]
+    assert result["unpriced_models"] == []
+
+
 # --- ActionModule wiring smoke test (see filter_self_refuted_findings's
 # test file for why these are hand-rolled, narrow test doubles) --------
 
