@@ -46,7 +46,7 @@
     msg: >-
       Exploration pass: {{ review_explore_findings | length }}
       additional finding(s) ({{ explore_turn_count }} turn(s)){{
-        '; one or more searches did not complete cleanly' if (review_exploration_incomplete | default(false) | bool) else ''
+        '; one or more searches did not complete cleanly or limit was reached' if (review_exploration_incomplete | default(false) | bool) else ''
       }}.
 
 # Exploration findings affect verdict but don't retroactively adjust lens scores.

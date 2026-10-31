@@ -38,6 +38,7 @@ PLAYBOOKS=(
   "tests/test_cursor_verify_status_error.yml"
   "tests/test_cursor_lens_attempt_usage.yml"
   "tests/test_cursor_prompt_nonce.yml"
+  "tests/test_explore_tool_limit.yml"
   "tests/test_guardian_cache.yml"
   "tests/test_guardian_not_installed.yml"
   "tests/test_guardian_scan.yml"
@@ -72,7 +73,7 @@ run_playbook() {
   local out rc=0
   out="$(mktemp)"
   set +e
-  if [[ "${pb}" == "tests/test_cursor_named_lens_retry.yml" || "${pb}" == "tests/test_cursor_lens_async_wait.yml" || "${pb}" == "tests/test_cursor_verify_status_error.yml" || "${pb}" == "tests/test_verify_provider_failure.yml" ]]; then
+  if [[ "${pb}" == "tests/test_cursor_named_lens_retry.yml" || "${pb}" == "tests/test_cursor_lens_async_wait.yml" || "${pb}" == "tests/test_cursor_verify_status_error.yml" || "${pb}" == "tests/test_verify_provider_failure.yml" || "${pb}" == "tests/test_explore_tool_limit.yml" ]]; then
     ANSIBLE_LIBRARY="${STUB_LIBRARY}${ANSIBLE_LIBRARY:+:${ANSIBLE_LIBRARY}}" \
       CURSOR_AGENT_STUB_FILE="${STUB_PAYLOAD}" \
       VERIFY_PROVIDER_STUB_FILE="${REPO_ROOT}/tests/.verify_provider_stub.json" \

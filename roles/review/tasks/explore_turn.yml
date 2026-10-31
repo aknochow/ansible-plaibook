@@ -107,36 +107,53 @@
     - name: Dispatch other tool calls and continue the loop
       when: explore_report_calls | length == 0 and explore_turn_result.stop_reason == 'tool_use'
       block:
-        - name: Enforce the exploration tool-call budget
-          ansible.builtin.assert:
-            that:
-              - >-
-                (explore_tool_calls_used | default(0) | int)
-                + (explore_turn_result.tool_calls | length)
-                <= (review_explore_max_tool_calls | int)
-            fail_msg: >-
-              Exploration stopped before dispatch: the configured limit of
-              {{ review_explore_max_tool_calls }} tool call(s) was reached.
-              Raise review_explore_max_tool_calls deliberately if this target
-              needs a broader audit.
-
-        - name: Account for this turn's exploration tool calls
+        - name: Determine whether this turn exceeds the exploration tool-call budget
           ansible.builtin.set_fact:
-            explore_tool_calls_used: >-
-              {{ (explore_tool_calls_used | default(0) | int)
-                 + (explore_turn_result.tool_calls | length) }}
+            _explore_tool_budget_exceeded: >-
+              {{ ((explore_tool_calls_used | default(0) | int)
+                  + (explore_turn_result.tool_calls | length))
+                 > (review_explore_max_tool_calls | int) }}
 
-        - name: Reset the tool-result accumulator for this turn
-          ansible.builtin.set_fact:
-            explore_tool_results: []
+        # Hitting review_explore_max_tool_calls must stop exploring but
+        # keep all findings surfaced so far (especially lens findings
+        # from merge.yml). Failing the play discarded real findings
+        # from completed lenses that were already paid for.
+        - name: Stop exploration when the tool-call budget is reached
+          when: _explore_tool_budget_exceeded | bool
+          block:
+            - name: Note that exploration stopped before dispatch
+              ansible.builtin.debug:
+                msg: >-
+                  Exploration stopped before dispatch: the configured limit of
+                  {{ review_explore_max_tool_calls }} tool call(s) was reached.
+                  Raise review_explore_max_tool_calls deliberately if this target
+                  needs a broader audit.
 
-        - name: Execute each requested tool call
-          ansible.builtin.include_tasks: dispatch_explore_tool.yml
-          loop: "{{ explore_turn_result.tool_calls }}"
-          loop_control:
-            loop_var: tool_call
-            label: "{{ tool_call.name }}({{ tool_call.input.path | default('') }})"
+            - name: Mark exploration finished and flag as incomplete
+              ansible.builtin.set_fact:
+                review_explore_done: true
+                review_exploration_incomplete: true
 
-        - name: Append the tool results as the next user turn
-          ansible.builtin.set_fact:
-            explore_messages: "{{ explore_messages + [{'role': 'user', 'content': explore_tool_results}] }}"
+        - name: Dispatch tool calls within budget
+          when: not (_explore_tool_budget_exceeded | bool)
+          block:
+            - name: Account for this turn's exploration tool calls
+              ansible.builtin.set_fact:
+                explore_tool_calls_used: >-
+                  {{ (explore_tool_calls_used | default(0) | int)
+                     + (explore_turn_result.tool_calls | length) }}
+
+            - name: Reset the tool-result accumulator for this turn
+              ansible.builtin.set_fact:
+                explore_tool_results: []
+
+            - name: Execute each requested tool call
+              ansible.builtin.include_tasks: dispatch_explore_tool.yml
+              loop: "{{ explore_turn_result.tool_calls }}"
+              loop_control:
+                loop_var: tool_call
+                label: "{{ tool_call.name }}({{ tool_call.input.path | default('') }})"
+
+            - name: Append the tool results as the next user turn
+              ansible.builtin.set_fact:
+                explore_messages: "{{ explore_messages + [{'role': 'user', 'content': explore_tool_results}] }}"
