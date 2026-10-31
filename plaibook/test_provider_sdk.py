@@ -161,7 +161,7 @@ def test_missing_pip_installs_with_uv(monkeypatch):
     monkeypatch.setattr("plaibook.provider_sdk._requirement_satisfied", fake_satisfied)
     monkeypatch.setattr("plaibook.provider_sdk.subprocess.run", fake_run)
     ensure_provider_sdk("openai", "/opt/plaibook/bin/python", stderr=None)
-    assert recorded[0][:5] == ["/usr/bin/uv", "pip", "install", "--python", "/opt/plaibook/bin/python"]
+    assert recorded[0][:6] == ["/usr/bin/uv", "pip", "install", "--no-config", "--python", "/opt/plaibook/bin/python"]
     assert "--require-hashes" in recorded[0]
     assert recorded[0][-2:] == ["-r", str(hashed_requirements("openai-requirements.txt"))]
 
