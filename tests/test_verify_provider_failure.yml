@@ -358,3 +358,65 @@
         verdict_case_expected_status: verified
         verdict_case_expected_severity: Critical
         verdict_case_expected_severity_status: disputed
+
+    - name: Reset verify state before the already refuted finding
+      ansible.builtin.include_tasks: verify_provider_failure_reset.yml
+      vars:
+        provider_case_family: claude
+
+    - name: Seed a finding the provenance check already refuted
+      ansible.builtin.set_fact:
+        deduped_findings:
+          - "{{ _verdict_major_finding | combine({'evidence_status': 'refuted', 'verification_rationale': 'Flagged by the provenance check.'}) }}"
+
+    - name: Offer a verified verdict that must never be requested
+      ansible.builtin.copy:
+        dest: "{{ verify_provider_stub_file }}"
+        mode: "0600"
+        content: "{{ _overturning_response | to_json }}"
+      vars:
+        _overturning_response:
+          calls: 0
+          stop_reason: tool_use
+          usage: {}
+          message:
+            model: stub
+            content: []
+          tool_calls:
+            - id: stub-verdict
+              name: report_verdict
+              input: >-
+                {{ _verdict_critical_axes | combine({'evidence_status': 'verified',
+                   'evidence': 'a real quote', 'rationale': 'A real rationale.'}) }}
+
+    - name: Run the real verify.yml over the refuted finding
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: verify.yml
+      vars:
+        review_verify_enabled: true
+        review_verify_severities: ["Critical", "Major"]
+        severity_points:
+          Critical: 20
+          Major: 10
+          Minor: 5
+          Nit: 0
+
+    - name: Read the stub after the refuted finding
+      ansible.builtin.slurp:
+        src: "{{ verify_provider_stub_file }}"
+      register: _refuted_stub_raw
+
+    - name: Confirm the refutation was not overturned
+      vars:
+        _stub_state: "{{ _refuted_stub_raw.content | b64decode | from_json }}"
+      ansible.builtin.assert:
+        that:
+          - _stub_state.calls | int == 0
+          - verify_scoped_findings | length == 0
+          - deduped_findings[0].evidence_status == 'refuted'
+          - deduped_findings[0].verification_rationale == 'Flagged by the provenance check.'
+          - review_verdict == 'READY_FOR_HUMAN_REVIEW'
+        fail_msg: >-
+          calls={{ _stub_state.calls }} status={{ deduped_findings[0].evidence_status }}
+          verdict={{ review_verdict }}
