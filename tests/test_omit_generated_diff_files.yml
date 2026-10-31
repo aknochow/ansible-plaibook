@@ -1,0 +1,84 @@
+---
+# Offline regression: generated lockfile hunks leave the lens diff and
+# the prepared diff stays intact. No LLM calls.
+#
+# Usage:
+#   ansible-playbook tests/test_omit_generated_diff_files.yml
+
+- name: Test generated lockfiles are omitted from the lens diff only
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_omit_generated_diff_files: true
+    _prepared_diff: |
+      diff --git a/mod.py b/mod.py
+      --- a/mod.py
+      +++ b/mod.py
+      @@ -1 +1,2 @@
+      +keep = 1
+      diff --git a/uv.lock b/uv.lock
+      --- a/uv.lock
+      +++ b/uv.lock
+      @@ -1 +1,2 @@
+      +sha256:secret-hash
+
+  tasks:
+    - name: Snapshot the original prepared diff
+      ansible.builtin.set_fact:
+        review_full_diff: "{{ _prepared_diff }}"
+        review_lens_diff: "{{ _prepared_diff }}"
+        _original_diff: "{{ _prepared_diff }}"
+
+    - name: Run the omission task file
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: omit_generated_diff_files
+        public: true
+
+    - name: Assert the prepared diff was not mutated
+      ansible.builtin.assert:
+        that:
+          - review_full_diff == _original_diff
+        fail_msg: "omit_generated_diff_files.yml mutated review_full_diff"
+
+    - name: Assert the lens diff keeps source and drops hash lines
+      ansible.builtin.assert:
+        that:
+          - "'keep = 1' in review_lens_diff"
+          - "'sha256:secret-hash' not in review_lens_diff"
+          - "'# omitted generated file: uv.lock' in review_lens_diff"
+          - review_lens_diff_omitted_files | length == 1
+          - review_lens_diff_omitted_files[0].path == 'uv.lock'
+
+- name: Test turning omission off leaves the lens diff unchanged
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_omit_generated_diff_files: false
+    _prepared_diff: |
+      diff --git a/uv.lock b/uv.lock
+      +sha256:keep-when-disabled
+
+  tasks:
+    - name: Snapshot the lens diff
+      ansible.builtin.set_fact:
+        review_full_diff: "{{ _prepared_diff }}"
+        review_lens_diff: "{{ _prepared_diff }}"
+        _before: "{{ _prepared_diff }}"
+
+    - name: Run the omission task file with the switch off
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: omit_generated_diff_files
+        public: true
+
+    - name: Assert the lens diff was left as given
+      ansible.builtin.assert:
+        that:
+          - review_lens_diff == _before
+          - "'sha256:keep-when-disabled' in review_lens_diff"
+          - review_lens_diff_omitted_files | length == 0
