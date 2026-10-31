@@ -95,11 +95,22 @@ def _collapse_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _dedupe_by_key(findings: list[dict], key_fn, severity_points: dict[str, float]) -> list[dict]:
-    """Keep the highest-severity survivor per key_fn(finding), case-insensitively.
+def _survivor_rank(finding: dict, severity_points: dict[str, float]) -> tuple[bool, float]:
+    """Rank a finding within its dedup group: non-refuted first, then severity.
 
+    A refuted finding is excluded from the verdict. If one replaced a real
+    finding in its group, the review would lose that finding and could turn
+    from NEEDS_CHANGES to READY.
+    """
+    return finding.get("evidence_status") != "refuted", severity_points[finding["severity"]]
+
+
+def _dedupe_by_key(findings: list[dict], key_fn, severity_points: dict[str, float]) -> list[dict]:
+    """Keep the best-ranked survivor per key_fn(finding), case-insensitively.
+
+    See _survivor_rank for the ordering. A tie keeps the earlier finding.
     First-occurrence order preserved for the surviving key's position
-    (see module docstring point 2) -- a later-occurring, higher-severity
+    (see module docstring point 2) -- a later-occurring, better-ranked
     finding for the same key still replaces the earlier one's CONTENT,
     but occupies the earlier one's POSITION in the output.
     """
@@ -110,7 +121,7 @@ def _dedupe_by_key(findings: list[dict], key_fn, severity_points: dict[str, floa
         if key not in best_by_key:
             order.append(key)
             best_by_key[key] = finding
-        elif severity_points[finding["severity"]] > severity_points[best_by_key[key]["severity"]]:
+        elif _survivor_rank(finding, severity_points) > _survivor_rank(best_by_key[key], severity_points):
             best_by_key[key] = finding
     return [best_by_key[key] for key in order]
 
