@@ -148,6 +148,79 @@
     _continuity_audit_verdict: "{{ (_continuity_audit_openai_result.structured | default({})).verdict | default('') }}"
     _continuity_audit_rationale: "{{ (_continuity_audit_openai_result.structured | default({})).rationale | default('') }}"
 
+# The module name is a template because the collection is not in
+# collections-requirements.yml. A literal name fails when this file loads,
+# for every agent_family, on an install without the collection.
+- name: "xAI: resolve the continuity-audit module name"
+  when: agent_family == 'xai'
+  ansible.builtin.set_fact:
+    _xai_continuity_module: "{{ xai_chat_module | default('aknochow.xai.chat') }}"
+
+- name: "xAI: reject a continuity-audit module outside the allowlist"
+  when: agent_family == 'xai'
+  ansible.builtin.assert:
+    that:
+      - _xai_continuity_module in ['aknochow.xai.chat', 'xai_chat_stub']
+    fail_msg: >-
+      xai_chat_module '{{ _xai_continuity_module }}' is not allowed.
+      The continuity audit will only load aknochow.xai.chat or the offline test stub.
+
+- name: "xAI: audit the continuity claim"
+  when: agent_family == 'xai'
+  block:
+    - name: "xAI: call xAI to independently audit the continuity claim"
+      action:
+        module: "{{ _xai_continuity_module }}"
+        model: "{{ review_verify_xai_model }}"
+        max_tokens: "{{ review_xai_max_tokens }}"
+        reasoning_effort: "{{ review_xai_continuity_reasoning_effort }}"
+        timeout: "{{ xai_timeout }}"
+        conversation_id: "{{ (last_run_id | default('review')) ~ '-continuity' }}"
+        messages:
+          - role: system
+            content: "{{ _continuity_audit_prompt }}"
+          - role: user
+            content: "Audit the continuity claim per your instructions."
+        response_schema: "{{ continuity_audit_schema }}"
+      register: _continuity_audit_xai_result
+  rescue:
+    - name: "xAI: record the failed continuity audit's usage"
+      ansible.builtin.set_fact:
+        pipeline_agent_calls: >-
+          {{ pipeline_agent_calls + ([ansible_failed_result]
+             | xai_lens_usage_calls(review_org_repo ~ '#' ~ review_number, 'verify-continuity-audit', review_verify_xai_model)) }}
+
+    - name: "xAI: fail with the sanitized continuity-audit error"
+      ansible.builtin.fail:
+        msg: >-
+          Continuity audit ({{ review_verify_xai_model }}, agent_family=xai) provider error:
+          {{ ansible_failed_result.msg | default('xAI continuity audit failed')
+             | xai_provider_error_message([_continuity_audit_prompt]) }}
+
+# The shared task below records the final attempt. Record any earlier ones here.
+- name: "xAI: record the continuity audit's earlier attempts"
+  when: agent_family == 'xai'
+  ansible.builtin.set_fact:
+    pipeline_agent_calls: >-
+      {{ pipeline_agent_calls + (([_continuity_audit_xai_result]
+         | xai_lens_usage_calls(review_org_repo ~ '#' ~ review_number, 'verify-continuity-audit', review_verify_xai_model))[:-1]) }}
+
+- name: "xAI: normalize the continuity-audit result"
+  when: agent_family == 'xai'
+  ansible.builtin.set_fact:
+    _continuity_audit_resolved_model: "{{ (_continuity_audit_xai_result.response | default({})).model | default(review_verify_xai_model, true) }}"
+    _continuity_audit_usage_normalized:
+      input_tokens: "{{ [(_continuity_audit_xai_result.usage.prompt_tokens | default(0) | int) - (_continuity_audit_xai_result.usage.cached_tokens | default(0) | int), 0] | max }}"
+      output_tokens: "{{ _continuity_audit_xai_result.usage.completion_tokens | default(0) | int }}"
+      cache_write_tokens: 0
+      cache_read_tokens: "{{ _continuity_audit_xai_result.usage.cached_tokens | default(0) | int }}"
+      thinking_tokens: "{{ _continuity_audit_xai_result.usage.reasoning_tokens | default(0) | int }}"
+      cost_in_usd_ticks: "{{ _continuity_audit_xai_result.usage.cost_in_usd_ticks | default(0) | int }}"
+      total_tokens: "{{ _continuity_audit_xai_result.usage.total_tokens | default(0) | int }}"
+    _continuity_audit_answered: "{{ (_continuity_audit_xai_result.structured | default(none)) is mapping }}"
+    _continuity_audit_verdict: "{{ (_continuity_audit_xai_result.structured | default({}, true)).verdict | default('') }}"
+    _continuity_audit_rationale: "{{ (_continuity_audit_xai_result.structured | default({}, true)).rationale | default('') }}"
+
 - name: "Claude CLI: run the optional continuity-audit branch"
   when: agent_family == 'claude_cli'
   ansible.builtin.include_tasks: verify_continuity_audit_claude_cli.yml

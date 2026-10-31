@@ -29,6 +29,7 @@
     claude_agent_module: verify_provider_stub
     gemini_generate_module: verify_provider_stub
     openai_chat_module: verify_provider_stub
+    xai_chat_module: verify_provider_stub
     deduped_findings:
       - file: roles/review/tasks/dispatch_verify_turn_attempt_claude.yml
         line: 16
@@ -72,6 +73,66 @@
       vars:
         provider_case_family: openai
         provider_case_message: "Error code: 500 - The server had an error processing your request"
+
+    # The text is the shape of str() on a grpc error from xai-sdk chat.stream.
+    - name: An xAI dropped stream is one attempt and findings are posted
+      ansible.builtin.include_tasks: verify_provider_failure_case.yml
+      vars:
+        provider_case_family: xai
+        provider_case_message: >-
+          <_MultiThreadedRendezvous of RPC that terminated with:
+          status = StatusCode.INTERNAL
+          details = "Received RST_STREAM with error code 2"
+          debug_error_string = "UNKNOWN:Error received from peer {grpc_status:13}">
+
+    - name: An xAI unavailable stream is one attempt and findings are posted
+      ansible.builtin.include_tasks: verify_provider_failure_case.yml
+      vars:
+        provider_case_family: xai
+        provider_case_message: >-
+          <_InactiveRpcError of RPC that terminated with:
+          status = StatusCode.UNAVAILABLE
+          details = "Socket closed">
+
+    - name: Reset verify state before counting xAI usage
+      ansible.builtin.include_tasks: verify_provider_failure_reset.yml
+      vars:
+        provider_case_family: xai
+
+    - name: Write a billed xAI drop, then a success with an earlier attempt
+      ansible.builtin.copy:
+        dest: "{{ verify_provider_stub_file }}"
+        mode: "0600"
+        content: "{{ _xai_usage_responses | to_json }}"
+      vars:
+        _xai_dropped: { prompt_tokens: 7, completion_tokens: 1, total_tokens: 8, cost_in_usd_ticks: 3000000000 }
+        _xai_ok: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110, cost_in_usd_ticks: 1000000000 }
+        _xai_usage_responses:
+          calls: 0
+          responses:
+            - failed: true
+              msg: 'status = StatusCode.UNAVAILABLE details = "Socket closed"'
+              attempts: [{ usage: "{{ _xai_dropped }}", error: "Socket closed" }]
+            - text: "still checking"
+              finish_reason: REASON_STOP
+              usage: "{{ _xai_ok }}"
+              attempts: [{ usage: "{{ _xai_dropped }}", error: "Socket closed" }, { usage: "{{ _xai_ok }}", error: null }]
+
+    - name: Run the failed xAI attempt, then the successful one
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: dispatch_verify_turn_attempt_xai
+      loop: [1, 2]
+      loop_control:
+        loop_var: verify_attempt_number
+
+    - name: Confirm verify counted every billed xAI attempt once
+      ansible.builtin.assert:
+        that:
+          - >-
+            pipeline_agent_calls | selectattr('lens', 'equalto', 'verify')
+            | map(attribute='usage.input_tokens') | map('int') | list == [7, 7, 100]
+        fail_msg: "usage={{ pipeline_agent_calls }}"
 
     - name: A status-bearing auth failure still aborts
       block:

@@ -16,6 +16,7 @@ compile_310 openai
 compile_310 claude
 compile_310 gemini
 compile_310 cursor
+compile_310 xai
 
 uv pip compile --generate-hashes --python-version 3.11 --no-annotate \
   plaibook/hashed/openshell.in -o plaibook/hashed/openshell-requirements.txt

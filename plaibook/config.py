@@ -12,7 +12,7 @@ import yaml
 
 CONFIG_DIRNAME = "ansible-plaibook"
 VARS_NAME = "vars.yml"
-FAMILIES = ("cursor", "claude", "gemini", "openai", "claude_cli")
+FAMILIES = ("cursor", "claude", "gemini", "openai", "claude_cli", "xai")
 
 
 class ConfigError(Exception):
@@ -28,6 +28,7 @@ _CREDENTIAL_ENV = {
     "gemini": "GEMINI_API_KEY",
     "openai": "OPENAI_API_KEY",
     "claude_cli": "CLAUDE_CODE_OAUTH_TOKEN",
+    "xai": "GROK_API_KEY",
 }
 
 
@@ -118,6 +119,8 @@ def credential_present(family: str, env: Mapping[str, str] | None = None) -> boo
         return bool((environ.get("GEMINI_API_KEY") or environ.get("GOOGLE_API_KEY") or "").strip())
     if family == "openai":
         return openai_key_present(environ) or xai_key_present(environ)
+    if family == "xai":
+        return xai_key_present(environ)
     if not key:
         return False
     return bool((environ.get(key) or "").strip())

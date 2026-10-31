@@ -1,0 +1,42 @@
+---
+# One real explore turn over a stub response list. Leaves the calls in
+# _case_calls and any play failure message in _case_failure.
+- name: Reset explore state for this case
+  ansible.builtin.set_fact:
+    _case_failure: ""
+    pipeline_agent_calls: []
+    review_explore_done: false
+    explore_turn_count: 0
+    explore_messages: [{ role: user, content: start }]
+    explore_tool_calls_used: 0
+
+- name: Remove the previous case's call log
+  ansible.builtin.file:
+    path: "{{ xai_stub_file }}.calls"
+    state: absent
+
+- name: Write this case's stub responses
+  ansible.builtin.copy:
+    dest: "{{ xai_stub_file }}"
+    mode: "0600"
+    content: "{{ {'explore': xai_case_responses} | to_json }}"
+
+- name: Run the real explore turn
+  block:
+    - name: Run one explore turn
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: explore_turn
+  rescue:
+    - name: Keep the failure message
+      ansible.builtin.set_fact:
+        _case_failure: "{{ ansible_failed_result.msg | default('') }}"
+
+- name: Read the calls this case made
+  ansible.builtin.slurp:
+    src: "{{ xai_stub_file }}.calls"
+  register: _case_calls_raw
+
+- name: Keep the calls as a list
+  ansible.builtin.set_fact:
+    _case_calls: "{{ (_case_calls_raw.content | b64decode).split() }}"
