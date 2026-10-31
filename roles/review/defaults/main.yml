@@ -738,13 +738,10 @@ review_neutralization_org_patterns: []
 # pipeline_stats.yml. gemini-3.5-flash's rate was confirmed live
 # 2026-08-19 from an external pricing table, since this repo has no
 # rate of its own yet.
-# gemini-3.7-flash (the model actually used for free-tier dogfooding,
-# see review_gemini_model) has NO sourced rate here -- it was not
-# reliably found on a pricing page during this pass, so it's
-# deliberately absent rather than guessed; a model missing from this
-# table is excluded from the cost total and flagged in the final
-# summary (compute_pipeline_cost.py's unpriced_models), not silently
-# costed as $0. Add a real rate here once sourced.
+# A model missing from this table is excluded from the cost total and
+# flagged in the final summary (compute_pipeline_cost.py's
+# unpriced_models), not silently costed as $0. thinking_per_million is
+# for a provider that reports thinking apart from output.
 #
 # claude_pricing is kept as an alias to this same table so anything
 # still reading the old name (grepped repo-wide; nothing in this repo
@@ -780,6 +777,29 @@ agent_pricing: &agent_pricing
     input_per_million: 0.20
     output_per_million: 1.20
     cache_read_per_million: 0.02
+  # https://developers.openai.com/api/docs/pricing, read 2026-10-31.
+  # Standard tier under 272K input tokens. A single call above that is
+  # billed at about double and is not modeled here.
+  gpt-6-luna:
+    input_per_million: 0.10
+    output_per_million: 0.50
+    cache_read_per_million: 0.01
+  gpt-6-sol:
+    input_per_million: 2.00
+    output_per_million: 10.00
+    cache_read_per_million: 0.20
+  gpt-6.1-sol:
+    input_per_million: 2.00
+    output_per_million: 10.00
+    cache_read_per_million: 0.10
+  gpt-6.1-terra:
+    input_per_million: 1.00
+    output_per_million: 5.00
+    cache_read_per_million: 0.05
+  gpt-6-astra:
+    input_per_million: 10.00
+    output_per_million: 50.00
+    cache_read_per_million: 1.00
   # xAI API pricing for grok-4.7, the Cursor default and the
   # OpenAI-compatible default. Same shape as the GPT rows: one tier,
   # cached input on cache_read, no guessed cache-write rate. Short
@@ -801,6 +821,7 @@ agent_pricing: &agent_pricing
   gemini-3.5-flash:
     input_per_million: 1.50
     output_per_million: 9.00
+    thinking_per_million: 9.00
   # gemini-3.6-flash and 3.7-flash are on PROMOTIONAL pricing through
   # 2026-12-31 ($0.75/$3.75); both double to $1.50/$7.50 on 2027-01-01.
   # Recorded at the promotional rate because agent_pricing drives what a
@@ -818,9 +839,18 @@ agent_pricing: &agent_pricing
   gemini-3.6-flash:
     input_per_million: 0.75
     output_per_million: 3.75
+    thinking_per_million: 3.75
   gemini-3.7-flash:
     input_per_million: 0.75
     output_per_million: 3.75
+    thinking_per_million: 3.75
+  # https://ai.google.dev/gemini-api/docs/pricing, read 2026-10-31. Same
+  # promotional rule: $1.50/$7.50/$0.15 from 2027-01-01.
+  gemini-3.8-flash:
+    input_per_million: 0.75
+    output_per_million: 3.75
+    thinking_per_million: 3.75
+    cache_read_per_million: 0.075
 
 claude_pricing: *agent_pricing
 
