@@ -1,0 +1,30 @@
+---
+# One real continuity audit over a stub response. Leaves any play failure
+# message in _case_failure and the audit in verify_result_audit_result.
+- name: Reset continuity state for this case
+  ansible.builtin.set_fact:
+    _case_failure: ""
+    pipeline_agent_calls: []
+    verify_result_audit_result: {}
+    _continuity_audit_answered: false
+
+- name: Write this case's stub response
+  ansible.builtin.copy:
+    dest: "{{ xai_stub_file }}"
+    mode: "0600"
+    content: "{{ {'continuity': xai_case_response} | to_json }}"
+
+- name: Run the real continuity audit
+  block:
+    - name: Run one continuity audit
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: verify_continuity_audit
+      vars:
+        verify_target_finding: { file: a.py, line: 1, description: new, evidence: e }
+        _continuity_claim_result: { claimed_prior_finding: { file: a.py, line: 1, description: old, evidence: e } }
+        verify_result_continues_finding_id_rationale: same line
+  rescue:
+    - name: Keep the failure message
+      ansible.builtin.set_fact:
+        _case_failure: "{{ ansible_failed_result.msg | default('') }}"

@@ -4,6 +4,67 @@
 # aknochow.openai collection otherwise accepts the playbook until the first
 # lens task, where Ansible reports an opaque "unsupported parameter" error.
 
+- name: Validate the xAI provider runtime before starting the review
+  when: agent_family == 'xai'
+  block:
+    - name: Resolve the effective local module interpreter for xAI
+      ansible.builtin.set_fact:
+        _xai_runtime_python: "{{ ansible_python_interpreter | default(ansible_playbook_python) }}"
+
+    - name: Create a private temporary directory for xAI ansible-doc
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: "plaibook-xai-preflight-"
+      register: _xai_preflight_tmp
+
+    - name: Inspect the installed xAI module interface
+      ansible.builtin.command:
+        argv: [ansible-doc, -j, aknochow.xai.chat]
+      environment:
+        ANSIBLE_LOCAL_TEMP: "{{ _xai_preflight_tmp.path }}"
+      register: _xai_module_doc_result
+      changed_when: false
+      failed_when: false
+
+    - name: Check the Python interpreter that will run aknochow.xai.chat
+      ansible.builtin.command:
+        argv:
+          - "{{ _xai_runtime_python }}"
+          - -c
+          - "import importlib.util; raise SystemExit(0 if importlib.util.find_spec('xai_sdk') else 1)"
+      register: _xai_sdk_import
+      changed_when: false
+      failed_when: false
+
+    - name: Fail before checkout when aknochow.xai.chat or xai-sdk is missing
+      ansible.builtin.assert:
+        that:
+          - _xai_module_doc_result.rc | default(1) | int == 0
+          - _xai_sdk_import.rc | default(1) | int == 0
+        fail_msg: >-
+          agent_family=xai needs aknochow.xai.chat and the xai-sdk package
+          on {{ _xai_runtime_python }}. Install the collection from
+          https://github.com/aknochow/ansible-xai and the hashed xai-sdk pin.
+          ansible-doc rc={{ _xai_module_doc_result.rc | default(1) }},
+          xai_sdk import rc={{ _xai_sdk_import.rc | default(1) }}.
+
+    - name: Fail before checkout when the installed xAI module has no conversation_id
+      ansible.builtin.assert:
+        that:
+          - >-
+            ((_xai_module_doc_result.stdout | from_json)['aknochow.xai.chat']
+            .doc.options.conversation_id) is defined
+        fail_msg: >-
+          The installed aknochow.xai.chat has no conversation_id option.
+          Install ansible-xai revision dfbb12e or later. Every xAI review
+          call sends x-grok-conv-id, and an older module rejects that argument.
+  always:
+    - name: Remove the xAI preflight temporary directory
+      when: _xai_preflight_tmp.path is defined
+      ansible.builtin.file:
+        path: "{{ _xai_preflight_tmp.path }}"
+        state: absent
+
 - name: Validate the OpenAI provider runtime before starting the review
   when: agent_family == 'openai'
   block:
