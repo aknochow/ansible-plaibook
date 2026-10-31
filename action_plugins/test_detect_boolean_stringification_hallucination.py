@@ -289,6 +289,25 @@ def test_boolean_literals_in_evidence_do_not_make_a_claim_boolean(finding):
     assert is_boolean_stringification_hallucination({**finding, "evidence": quoted_task}) is False
 
 
+@pytest.mark.parametrize("finding", NON_BOOLEAN_CLAIMS)
+@pytest.mark.parametrize("line", ["when: item == 'true'", "{{ enabled | bool }}"])
+def test_boolean_words_in_evidence_do_not_make_a_claim_boolean(finding, line):
+    quoted_task = f"{finding.get('evidence', '')}\n{line}"
+    assert is_boolean_stringification_hallucination({**finding, "evidence": quoted_task}) is False
+
+
+def test_contrast_with_another_type_keeps_the_integer_as_the_subject():
+    finding = {
+        "evidence": "count: {{ result.count }}",
+        "description": (
+            "Unlike booleans, a dot-accessed integer is stringified by Jinja, "
+            "so the comparison is always true regardless of the value."
+        ),
+        "fix": "Cast with | int.",
+    }
+    assert is_boolean_stringification_hallucination(finding) is False
+
+
 def test_boolean_literal_in_description_still_marks_a_boolean_claim():
     finding = {
         "evidence": "enabled: {{ x }}",

@@ -46,9 +46,10 @@ clearly aren't sufficient alone, given 9 real occurrences including one
 that got past the LLM re-check meant to catch exactly this.
 
 Scoped narrowly to the actual recurring claim shape via four
-independently-required signals (all four must match, on the finding's
-combined evidence+description+fix text), plus one exclusion -- NOT a
-general hallucination detector:
+independently-required signals (all four must match, the first three on
+the finding's combined evidence+description+fix text and the fourth on
+description+fix only), plus one exclusion -- NOT a general hallucination
+detector:
   1. A stringification claim: the text asserts a boolean becomes a
      string (mentions "string" near "true"/"false", or says the value
      gets converted/rendered/stored/serialized/cast "as"/"to"/"into" a
@@ -123,11 +124,14 @@ _TRUTHINESS_CONSEQUENCE_PATTERN = re.compile(
 # Signal 4: the claim is about a boolean. "true"/"false" count only quoted
 # or as a literal value, because "always true" is signal 3's wording and
 # appears in claims about any type.
-_BOOLEAN_SUBJECT_PATTERN = re.compile(r"(?i)\bbool(?:ean)?s?\b|['\"`](?:true|false)['\"`]")
-
-# Literal values count only in description and fix. In evidence they are
-# usually an unrelated line of the quoted task, such as `become: true`.
-_BOOLEAN_LITERAL_PATTERN = re.compile(r"(?i)default\(\s*(?:true|false)\s*\)|:\s*(?:true|false)\b")
+# Only description and fix count. Evidence is usually an unrelated line of
+# the quoted task, such as `become: true` or `{{ enabled | bool }}`.
+_BOOLEAN_SUBJECT_PATTERN = re.compile(
+    r"(?i)\bbool(?:ean)?s?\b"
+    r"|['\"`](?:true|false)['\"`]"
+    r"|default\(\s*(?:true|false)\s*\)"
+    r"|:\s*(?:true|false)\b"
+)
 
 # Exclusion: an integer as the thing being stringified, in either word
 # order, within one sentence.
@@ -137,7 +141,9 @@ _INTEGER_STRINGIFICATION_PATTERN = re.compile(
 )
 
 # Words just before the integer that make it a contrast, not the subject.
-_INTEGER_CONTRAST_PATTERN = re.compile(r"(?i)\b(?:unlike|not\s+only|not\s+just|other\s+than)\b[^.\n]{0,30}$")
+# Punctuation ends the contrast: "Unlike booleans, an integer is..." is about
+# the integer.
+_INTEGER_CONTRAST_PATTERN = re.compile(r"(?i)\b(?:unlike|not\s+only|not\s+just|other\s+than)\b[^.,;:\n]{0,30}$")
 
 
 def _claims_integer_stringification(text: str) -> bool:
@@ -165,7 +171,7 @@ def is_boolean_stringification_hallucination(finding: dict) -> bool:
         _STRINGIFICATION_PATTERN.search(combined)
         and _JINJA_ORIGIN_PATTERN.search(combined)
         and _TRUTHINESS_CONSEQUENCE_PATTERN.search(combined)
-        and (_BOOLEAN_SUBJECT_PATTERN.search(combined) or _BOOLEAN_LITERAL_PATTERN.search(f"{description}\n{fix}"))
+        and _BOOLEAN_SUBJECT_PATTERN.search(f"{description}\n{fix}")
         and not _claims_integer_stringification(combined)
     )
 
