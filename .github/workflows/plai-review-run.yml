@@ -17,7 +17,12 @@ name: plai
 # pinned v0.1.2 installer, which starts a local gateway. The community
 # sandbox image is pinned by digest. It embeds a policy this gateway
 # cannot activate, so the job sets a global filesystem policy with no
-# network rules, then runs plai review with that image.
+# network rules, then runs plai review with that image. A boolean
+# workflow_call input, use_sandbox (default true), lets an owner-started
+# CI review test the pipeline without OpenShell to measure duration.
+# When false on workflow_dispatch, the job skips OpenShell and passes
+# --no-sandbox to plai review. Trigger events other than workflow_dispatch
+# always retain the sandbox.
 # CURSOR_API_KEY stays in that step because the
 # Cursor SDK call runs on the controller. The job token is read-only and
 # is used to fetch the pull request. Tool execution runs in the sandbox.
@@ -36,6 +41,12 @@ name: plai
 
 on:
   workflow_call:
+    inputs:
+      use_sandbox:
+        description: Run review tool calls inside an OpenShell sandbox
+        type: boolean
+        default: true
+        required: false
     secrets:
       CURSOR_API_KEY:
         required: true
@@ -209,7 +220,9 @@ jobs:
           )
 
       - name: Install OpenShell
-        if: steps.provider.outputs.ready == 'true'
+        if: >-
+          steps.provider.outputs.ready == 'true' &&
+          (inputs.use_sandbox || github.event_name != 'workflow_dispatch')
         run: |
           set -euo pipefail
           installer="$RUNNER_TEMP/openshell-install.sh"
@@ -223,7 +236,9 @@ jobs:
           openshell status
 
       - name: Replace the image policy and pull the review sandbox
-        if: steps.provider.outputs.ready == 'true'
+        if: >-
+          steps.provider.outputs.ready == 'true' &&
+          (inputs.use_sandbox || github.event_name != 'workflow_dispatch')
         env:
           OPENSHELL_WORKSPACE: default
           OPENSHELL_PROVISION_TIMEOUT: "180"
@@ -280,6 +295,8 @@ jobs:
           PYTHONUNBUFFERED: "1"
           REVIEW_REPO: ${{ needs.wait.outputs.repo }}
           REVIEW_PR: ${{ needs.wait.outputs.pr }}
+          USE_SANDBOX: ${{ inputs.use_sandbox }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           case "$REVIEW_REPO" in
@@ -289,6 +306,13 @@ jobs:
           case "$REVIEW_PR" in
             *[!0-9]*|"") echo "pull request number must be digits" >&2; exit 1 ;;
           esac
+          sandbox_args=(
+            -e sandbox_wait_timeout=600
+            -e sandbox_image="$SANDBOX_IMAGE"
+          )
+          if [ "${USE_SANDBOX:-true}" = "false" ] && [ "${EVENT_NAME:-}" = "workflow_dispatch" ]; then
+            sandbox_args=(--no-sandbox)
+          fi
           set +e
           "$RUNNER_TEMP/plai-venv/bin/plai" review \
             "$REVIEW_REPO/$REVIEW_PR" \
@@ -296,8 +320,7 @@ jobs:
             --force \
             -v \
             -e review_require_ci_passing=false \
-            -e sandbox_wait_timeout=600 \
-            -e sandbox_image="$SANDBOX_IMAGE" \
+            "${sandbox_args[@]}" \
             > "${RUNNER_TEMP}/plai-review.json"
           rc=$?
           set -e

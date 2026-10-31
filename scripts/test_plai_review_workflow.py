@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -58,8 +59,12 @@ def test_reusable_workflow_permissions_and_pins():
     assert len(plai_steps) == 1
     assert plai_steps[0]["env"]["CURSOR_API_KEY"] == "${{ secrets.CURSOR_API_KEY }}"
     assert "PLAI_GITHUB_APP_PRIVATE_KEY" not in plai_steps[0].get("env", {})
-    assert "--no-sandbox" not in plai_steps[0]["run"]
+    assert "USE_SANDBOX" in plai_steps[0]["env"]
+    assert plai_steps[0]["env"]["USE_SANDBOX"] == "${{ inputs.use_sandbox }}"
+    assert "EVENT_NAME" in plai_steps[0]["env"]
+    assert plai_steps[0]["env"]["EVENT_NAME"] == "${{ github.event_name }}"
     assert "sandbox_wait_timeout=600" in plai_steps[0]["run"]
+    assert "--no-sandbox" in plai_steps[0]["run"]
     assert "6648bd0c290efbc41ba131ee9831ee45cd431f94/install.sh" in text
     assert "sha256sum -c -" in text
     assert "OPENSHELL_VERSION=v0.1.2" in text
@@ -74,7 +79,10 @@ def test_reusable_workflow_permissions_and_pins():
     assert "plaibook-image-warm" in text
     assert "policy set --global --yes" in text
     assert "OPENSHELL_PROVISION_TIMEOUT" in text
-    assert "inputs" not in document["on"]["workflow_call"]
+    inputs = document["on"]["workflow_call"]["inputs"]
+    assert set(inputs) == {"use_sandbox"}
+    assert inputs["use_sandbox"]["type"] == "boolean"
+    assert inputs["use_sandbox"]["default"] is True
     checkout = next(step for step in job["steps"] if step.get("name") == "Check out this workflow commit")
     wait_checkout = next(step for step in wait["steps"] if step.get("name") == "Check out this workflow commit")
     assert checkout["with"]["repository"] == "aknochow/ansible-plaibook"
@@ -110,7 +118,6 @@ def test_reusable_workflow_permissions_and_pins():
     assert "checks: write" not in text
     assert "actions: write" not in text
     assert "pull-requests: write" not in text
-    assert "--no-sandbox" not in text
     assert "review_require_ci_passing=false" in text
     assert "uv sync --locked --no-dev --project" in text
     assert "uv pip install" not in text
@@ -186,3 +193,133 @@ def test_caller_does_not_pin_a_floating_secret_ref():
         "github.event.issue.number || github.event.inputs.pr_number || github.run_id }}"
     )
     assert "head.sha" not in document["concurrency"]["group"]
+
+
+def test_security_event_name_guard_preserves_sandbox_for_pull_request_target_and_issue_comment():
+    document = _load(RUN)
+    job = document["jobs"]["review"]
+    install = next(step for step in job["steps"] if step.get("name") == "Install OpenShell")
+    policy = next(
+        step
+        for step in job["steps"]
+        if step.get("name") == "Replace the image policy and pull the review sandbox"
+    )
+    for step in (install, policy):
+        condition = step["if"]
+        assert "inputs.use_sandbox" in condition
+        assert "github.event_name != 'workflow_dispatch'" in condition
+
+    plai_step = next(step for step in job["steps"] if step.get("id") == "plai")
+    assert plai_step["env"]["USE_SANDBOX"] == "${{ inputs.use_sandbox }}"
+    assert plai_step["env"]["EVENT_NAME"] == "${{ github.event_name }}"
+
+    run_script = plai_step["run"]
+    assert '[ "${USE_SANDBOX:-true}" = "false" ] && [ "${EVENT_NAME:-}" = "workflow_dispatch" ]' in run_script
+
+    def eval_sandbox_args(use_sandbox: str | None, event_name: str) -> list[str]:
+        env_setup = f'EVENT_NAME="{event_name}"\n'
+        if use_sandbox is not None:
+            env_setup += f'USE_SANDBOX="{use_sandbox}"\n'
+        else:
+            env_setup += "unset USE_SANDBOX 2>/dev/null || true\n"
+        script = f"""
+SANDBOX_IMAGE="ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e"
+{env_setup}
+sandbox_args=(
+  -e sandbox_wait_timeout=600
+  -e sandbox_image="$SANDBOX_IMAGE"
+)
+if [ "${{USE_SANDBOX:-true}}" = "false" ] && [ "${{EVENT_NAME:-}}" = "workflow_dispatch" ]; then
+  sandbox_args=(--no-sandbox)
+fi
+printf "%s\\n" "${{sandbox_args[@]}}"
+"""
+        proc = subprocess.run(["bash", "-c", script], capture_output=True, text=True, check=True)
+        return proc.stdout.splitlines()
+
+    # pull_request_target must retain the sandbox even when use_sandbox is false
+    args_pr = eval_sandbox_args("false", "pull_request_target")
+    assert "--no-sandbox" not in args_pr
+    assert "sandbox_wait_timeout=600" in args_pr
+    digest = "sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e"
+    assert f"sandbox_image=ghcr.io/nvidia/openshell-community/sandboxes/base@{digest}" in args_pr
+
+    # issue_comment must retain the sandbox even when use_sandbox is false
+    args_comment = eval_sandbox_args("false", "issue_comment")
+    assert "--no-sandbox" not in args_comment
+    assert "sandbox_wait_timeout=600" in args_comment
+
+    # workflow_dispatch with use_sandbox=false passes --no-sandbox
+    args_dispatch_nosandbox = eval_sandbox_args("false", "workflow_dispatch")
+    assert args_dispatch_nosandbox == ["--no-sandbox"]
+
+    # workflow_dispatch with use_sandbox=true retains the sandbox
+    args_dispatch_sandbox = eval_sandbox_args("true", "workflow_dispatch")
+    assert "--no-sandbox" not in args_dispatch_sandbox
+    assert "sandbox_wait_timeout=600" in args_dispatch_sandbox
+
+    # default / unset USE_SANDBOX retains the sandbox
+    args_default = eval_sandbox_args(None, "workflow_dispatch")
+    assert "--no-sandbox" not in args_default
+    assert "sandbox_wait_timeout=600" in args_default
+
+
+def test_security_secrets_environment_permissions_and_pins_unchanged():
+    document = _load(RUN)
+    assert document["permissions"] == {}
+    wait = document["jobs"]["wait"]
+    job = document["jobs"]["review"]
+
+    expected_perms = {"contents": "read", "pull-requests": "read", "checks": "read"}
+    assert wait["permissions"] == expected_perms
+    assert job["permissions"] == expected_perms
+
+    assert job["environment"] == {"name": "plaibook-review", "deployment": False}
+    assert "environment" not in wait
+
+    secrets = document["on"]["workflow_call"]["secrets"]
+    assert set(secrets) == {
+        "CURSOR_API_KEY",
+        "PLAI_GITHUB_APP_ID",
+        "PLAI_GITHUB_APP_PRIVATE_KEY",
+    }
+    assert all(item["required"] is True for item in secrets.values())
+
+    wait_checkout = next(step for step in wait["steps"] if step.get("name") == "Check out this workflow commit")
+    review_checkout = next(step for step in job["steps"] if step.get("name") == "Check out this workflow commit")
+    fixed_commit = "6b2178d7705419dbad4fcd0457955e683b4f0931"
+    assert wait_checkout["with"]["ref"] == fixed_commit
+    assert review_checkout["with"]["ref"] == fixed_commit
+    assert wait_checkout["with"]["repository"] == "aknochow/ansible-plaibook"
+    assert review_checkout["with"]["repository"] == "aknochow/ansible-plaibook"
+
+    for step in wait["steps"] + job["steps"]:
+        if "uses" in step:
+            action, _, sha = step["uses"].split()[0].partition("@")
+            assert action
+            assert _SHA.fullmatch(sha), f"Action not pinned by SHA: {step['uses']}"
+
+
+def test_security_input_passed_through_env_not_interpolated_in_run_script():
+    document = _load(RUN)
+    for job_name, job in document["jobs"].items():
+        for step in job["steps"]:
+            run = step.get("run", "")
+            step_name = step.get("name") or step.get("id") or job_name
+            assert "${{" not in run, f"Step '{step_name}' interpolates context in run script"
+            assert "inputs." not in run, f"Step '{step_name}' references inputs in run script"
+            assert "github." not in run, f"Step '{step_name}' references github context in run script"
+
+    plai_step = next(step for step in document["jobs"]["review"]["steps"] if step.get("id") == "plai")
+    assert plai_step["env"]["USE_SANDBOX"] == "${{ inputs.use_sandbox }}"
+    assert plai_step["env"]["EVENT_NAME"] == "${{ github.event_name }}"
+
+
+def test_sandbox_enabled_byte_for_byte_equivalent_to_baseline():
+    document = _load(RUN)
+    plai_step = next(step for step in document["jobs"]["review"]["steps"] if step.get("id") == "plai")
+    run_script = plai_step["run"]
+
+    assert "-e review_require_ci_passing=false" in run_script
+    assert "-e sandbox_wait_timeout=600" in run_script
+    assert '-e sandbox_image="$SANDBOX_IMAGE"' in run_script
