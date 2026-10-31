@@ -321,5 +321,7 @@ def test_sandbox_enabled_byte_for_byte_equivalent_to_baseline():
     run_script = plai_step["run"]
 
     assert "-e review_require_ci_passing=false" in run_script
+    assert "-e review_cursor_model=gpt-5.6-luna" in run_script
+    assert "-e review_cursor_effort=xhigh" in run_script
     assert "-e sandbox_wait_timeout=600" in run_script
     assert '-e sandbox_image="$SANDBOX_IMAGE"' in run_script

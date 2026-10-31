@@ -17,7 +17,7 @@ The review starts on the pull request and waits until the other checks on that c
 The workflow runs:
 
 ```bash
-plai review org/repo/N --json --force -e review_require_ci_passing=false
+plai review org/repo/N --json --force -e review_require_ci_passing=false -e review_cursor_model=gpt-5.6-luna -e review_cursor_effort=xhigh
 ```
 
 The GitHub-hosted runner installs OpenShell v0.1.2 from the installer at commit `6648bd0c290efbc41ba131ee9831ee45cd431f94`, after checking its sha256. That installer starts a local gateway. The review sandbox image is `ghcr.io/nvidia/openshell-community/sandboxes/base` pinned by digest. That image embeds a policy the local gateway cannot activate: the sandbox stays in `ConfigurationInvalid` until the 300-second repair window expires. The workflow sets a gateway-global filesystem policy with no network rules, which replaces the image policy, then creates one sandbox from that digest and deletes it. `plai review` uses the same digest and waits up to 600 seconds for it to become ready. Model calls stay on the controller, so the guest does not need network rules. `review_require_ci_passing=false` is set because this workflow already required the other checks to pass, and a previous `plaibook review` failure must not skip the re-run. The product default for `post_results` and for `review_require_ci_passing` is unchanged.

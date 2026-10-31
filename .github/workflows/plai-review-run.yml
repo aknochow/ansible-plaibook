@@ -320,6 +320,8 @@ jobs:
             --force \
             -v \
             -e review_require_ci_passing=false \
+            -e review_cursor_model=gpt-5.6-luna \
+            -e review_cursor_effort=xhigh \
             "${sandbox_args[@]}" \
             > "${RUNNER_TEMP}/plai-review.json"
           rc=$?
