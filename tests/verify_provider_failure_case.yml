@@ -105,6 +105,7 @@
     review_delegate_host: ""
     review_short_sha: abcdef1
     review_branch: verify-provider-failure
+    review_self_refuted_dropped_count: 2
     review_type: pr
     review_platform: github
     review_hostname: ""
@@ -149,6 +150,7 @@
   ansible.builtin.assert:
     that:
       - _summary.findings | selectattr('finding_id', 'equalto', 'F115') | list | length == 1
+      - _summary.self_refuted_dropped_count == 2
       - "'F115' in (_summary | to_json)"
       - "'Provider verify failure must not drop findings' in _posted_payload.body"
       - "'SECRET_DRAFT_MUST_NOT_APPEAR' not in _posted_payload.body"
