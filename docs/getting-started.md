@@ -8,61 +8,104 @@ status: stable
 
 # Getting Started
 
-The short command is **`plai`**. The package and full command are
-**`plaibook`**. They share one entry point.
+The recommended local entry point is **`plai review`**. The full command
+is **`plaibook review`**; both names run the same program. This guide
+starts with a fresh CLI install and first PR review. Details for other
+install environments are in [Notes](#notes).
+
+## Prerequisites
+
+Have these ready before the first review:
+
+- **Python 3.10 through 3.14** and an isolated install environment such as
+  `pipx`. Python 3.15 is not supported. Python 3.11 or newer is recommended
+  when using the sandbox.
+- **Git and network access to GitHub** so the CLI can fetch its Ansible
+  collections on first use. The CLI installs them in its own cache;
+  installing `plaibook` also installs its `ansible-core` dependency, so
+  no separate Ansible install is needed for the CLI.
+- **A provider API key** and network access from this machine to that
+  provider's API. OpenAI is the primary provider in the examples below;
+  Anthropic and Gemini are supported alternatives.
+- **The selected provider's Python SDK.** The CLI checks and installs
+  the pinned SDK packages for the selected provider into its own Python
+  environment when needed. The checked-in pins are:
+
+  | Provider | CLI family | API key environment variable | Pinned Python SDK |
+  |---|---|---|---|
+  | OpenAI | `openai` | `OPENAI_API_KEY` | [`openai==3.23.0`](../plaibook/hashed/openai.in) |
+  | Anthropic | `claude` | `ANTHROPIC_API_KEY` | [`anthropic[vertex]==1.11.0` and `claude-agent-sdk==0.2.163`](../plaibook/hashed/claude.in) |
+  | Gemini | `gemini` | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | [`google-genai==2.27.0`](../plaibook/hashed/gemini.in) |
+
+- **OpenShell CLI and a reachable gateway named `openshell`** for the
+  default sandboxed PR/branch review. Install OpenShell using the
+  [OpenShell installation guide](https://docs.nvidia.com/openshell/latest/about/installation),
+  then check the connection with `openshell status`. The playbook
+  installs its Python SDK
+  ([`openshell>=0.1.3,<0.2`](../plaibook/hashed/openshell.in)) when
+  needed. You can skip the OpenShell CLI and gateway if you explicitly
+  run with `--no-sandbox`.
+
+Do not put API keys in the repository or in `vars.yml`. Keep them in your
+shell environment or a secret manager.
+
+## Install and run your first review
+
+Install the CLI in an isolated environment:
 
 ```bash
 pipx install plaibook
-plai review
-plai update
 ```
 
-`plai --version` prints `plaibook 0.1.26` for that PyPI install. A git
-install of the same tree prints the revision and a short commit, for
-example `plaibook 0.1.26 (dev, main@664b8e1d39ac)`.
+Upgrade that install later with `plai update`. Version output and the
+upgrade rules are in [Upgrade an installed CLI](#upgrade-an-installed-cli).
 
-`plai update` upgrades the install that is running. A pipx install
-uses `pipx install --force --pip-args=--no-cache-dir plaibook==VERSION`.
-A `uv tool` install uses `uv tool install --force --no-cache`. A
-virtualenv uses that interpreter's pip. An editable checkout is left
-alone. The command compares the version inside that install, not a
-different copy that happens to be on the machine. It reports the PyPI
-release as already installed only when that install's version matches
-and its recorded source is PyPI. A previous `plai update --branch`
-does not stick, including when that ref's version already matches the
-PyPI release. `--branch` checks the recorded spec after install.
-`plai update --check` compares versions and does not install. A
-non-interactive run must pass `-y` or `--yes`. Without a terminal, the
-command cancels.
+Set the OpenAI key, then replace `OWNER`, `REPO`, and `123` with the
+GitHub repository and pull request number:
 
-`plai review` is unchanged. Homebrew and Debian
-refuse `pip install` into the system Python (PEP 668); `pipx` (or
-`uv tool install plaibook`) is the install that puts `plai` on `PATH`.
-Inside a virtualenv you already manage, `pip install plaibook` works.
+```bash
+export OPENAI_API_KEY='<your OpenAI API key>'
+plai review --provider openai https://github.com/OWNER/REPO/pull/123
+```
 
-Needs Python 3.10 through 3.14 (3.10 stays on ansible-core 2.16; 3.11+
-gets 2.18/2.19). Python 3.15 is not supported. OpenShell sandboxes need Python 3.11+. A 3.10 `plai review`
-creates `~/.cache/ansible-plaibook/sandbox-runtime` from the first
-`python3.11` (or newer) it finds, installs this plaibook build, the
-OpenShell SDK, and the configured provider SDK (openai / anthropic /
-google-genai) there, and continues with that interpreter. `--no-sandbox`
-stays on the 3.10 interpreter. OpenShell sandbox *policy* does not need
-provider API hosts for a default review: model calls stay on this
-machine. Guest allow lists matter if you override `sandbox_policy`
-(that replaces the gateway default, including network) or run
-checklists that need egress. See
-[`docs/sandbox-and-agent-safety.md`](sandbox-and-agent-safety.md#openshell-network-policy-vs-provider-apis).
-`plai review` with no arguments reviews `HEAD` in the current
-directory. The wheel vendors `review.yml`. First run clones collections
-from GitHub into `~/.cache/ansible-plaibook/collections` (never
-galaxy.ansible.com, never `~/.ansible`). See
-[`plaibook/README.md`](../plaibook/README.md).
-Until this version is on PyPI, `pip install .` from this checkout is
-the same wheel. Use a virtualenv under your home directory, not `/tmp`:
-macOS XProtect blocks scripts that appear in `/tmp` and then run.
-`plai review` keeps its own scratch in `~/.cache/ansible-plaibook/tmp`
-for the same reason. AAP / execution-environment jobs keep calling
-`ansible-playbook review.yml` directly.
+`--provider openai` selects OpenAI and saves the selection to
+`~/.config/ansible-plaibook/vars.yml`; later reviews can omit the flag.
+The CLI installs the pinned provider SDK and Ansible collections when
+they are missing. GitHub PR and branch reviews use the OpenShell sandbox
+by default. Keep it enabled for public or otherwise untrusted PRs; see
+[`Sandboxes and LLM calls`](sandbox-and-agent-safety.md) for how the
+isolation works.
+
+### Select Anthropic or Gemini instead
+
+The CLI installs the corresponding pinned SDK when you select another
+provider. Set that provider's key and choose its family:
+
+```bash
+export ANTHROPIC_API_KEY='<your Anthropic API key>'
+plai review --provider claude https://github.com/OWNER/REPO/pull/123
+```
+
+```bash
+export GEMINI_API_KEY='<your Gemini API key>'
+plai review --provider gemini https://github.com/OWNER/REPO/pull/123
+```
+
+Gemini also accepts `GOOGLE_API_KEY`. Each `--provider` choice is saved
+for later runs.
+
+### Run without the sandbox
+
+For a PR whose source you trust, add `--no-sandbox`:
+
+```bash
+plai review --no-sandbox https://github.com/OWNER/REPO/pull/123
+```
+
+If selecting a provider at the same time, include both options, for
+example `plai review --provider openai --no-sandbox <PR URL>`. Without
+the sandbox, OpenShell is not required; the review runs on the local
+Python environment with the same provider key and SDK requirements.
 
 ## Review a GitHub PR or GitLab MR
 
@@ -233,3 +276,125 @@ plai review gitlab:org/repo/34 --post
 # AAP / EE:
 ansible-playbook review.yml -e review_targets_raw=gitlab:org/repo/34 -e post_results=true
 ```
+
+## Notes
+
+### Upgrade an installed CLI
+
+`plai --version` prints `plaibook 0.1.28` for a PyPI install of this
+release. A git install of the same tree prints the revision and a short
+commit, for example `plaibook 0.1.28 (dev, main@664b8e1d39ac)`.
+
+`plai update` upgrades the install that is running. A pipx install
+uses `pipx install --force --pip-args=--no-cache-dir plaibook==VERSION`.
+A `uv tool` install uses `uv tool install --force --no-cache`. A
+virtualenv uses that interpreter's pip. An editable checkout is left
+alone. The command compares the version inside that install, not a
+different copy that happens to be on the machine. It reports the PyPI
+release as already installed only when that install's version matches
+and its recorded source is PyPI. A previous `plai update --branch`
+does not stick, including when that ref's version already matches the
+PyPI release. `--branch` checks the recorded spec after install.
+`plai update --check` compares versions and does not install. A
+non-interactive run must pass `-y` or `--yes`. Without a terminal, the
+command cancels.
+
+### Install from a checkout or another isolated environment
+
+If you want to install this checkout instead of a published package,
+create a virtual environment and install the project from the repository
+root. `python3 -m venv` includes `pip`, which the CLI uses to install a
+missing provider SDK into that environment:
+
+```bash
+git clone https://github.com/aknochow/ansible-plaibook.git
+cd ansible-plaibook
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install .
+```
+
+`uv tool install plaibook` is another isolated CLI install when the
+package version you need is available. Avoid installing into Homebrew or
+Debian system Python, which may enforce PEP 668. On macOS, keep virtual
+environments out of `/tmp`: XProtect can block scripts that appear there
+and then run.
+
+### Install SDKs for a `uv` development environment
+
+When launching `ansible-playbook` directly from a `uv` development
+environment, `uv sync --extra dev` does not install provider SDKs. After
+syncing, install the hashed requirements for the provider you will use.
+First sync the project:
+
+```bash
+uv sync --extra dev
+```
+
+Then run exactly one provider install command:
+
+**OpenAI**
+
+```bash
+uv pip install --python .venv/bin/python --require-hashes \
+  -r plaibook/hashed/openai-requirements.txt
+```
+
+**Anthropic**
+
+```bash
+uv pip install --python .venv/bin/python --require-hashes \
+  -r plaibook/hashed/claude-requirements.txt
+```
+
+**Gemini**
+
+```bash
+uv pip install --python .venv/bin/python --require-hashes \
+  -r plaibook/hashed/gemini-requirements.txt
+```
+
+Then run the playbook from the checkout root. The example selects OpenAI;
+for Anthropic or Gemini, change `agent_family` to `claude` or `gemini`
+and export the matching API key from the prerequisites table above.
+
+```bash
+export OPENAI_API_KEY='<your OpenAI API key>'
+uv run --no-sync ansible-playbook review.yml \
+  -e agent_family=openai \
+  -e review_targets_raw='https://github.com/OWNER/REPO/pull/123'
+```
+
+The playbook also reads `agent_family` from
+`~/.config/ansible-plaibook/vars.yml`, so omit `-e agent_family=openai` if
+that file already selects OpenAI. Extra-vars override the saved setting.
+For a trusted PR, `-e use_sandbox=false` disables the sandbox on this
+direct-playbook path. Raw `ansible-playbook` needs Python 3.11 or newer
+for sandboxed PR reviews; unlike the CLI, it does not re-exec a Python
+3.10 controller into the sandbox runtime. AAP and execution environments
+continue to run `ansible-playbook review.yml` directly with their
+dependencies included in the environment.
+
+### Python versions, sandbox, and first-run caches
+
+Python 3.10 through 3.14 are supported. Python 3.15 is not supported.
+Python 3.10 uses the ansible-core 2.16 series; Python 3.11 and newer
+permit ansible-core 2.16 through 2.19. The OpenShell sandbox runtime uses
+Python 3.11 or newer. When `plai review` starts on Python 3.10, it creates
+`~/.cache/ansible-plaibook/sandbox-runtime` using the first Python 3.11+
+interpreter it finds, installs this plaibook build and the needed
+OpenShell and provider SDKs there, then continues with that interpreter.
+`--no-sandbox` stays on the original interpreter.
+
+On first use, the CLI fetches collections from GitHub into
+`~/.cache/ansible-plaibook/collections`; it does not install into
+`~/.ansible` or use galaxy.ansible.com. CLI scratch files are kept in
+`~/.cache/ansible-plaibook/tmp`.
+
+With the default sandbox policy, model API calls stay on the controller;
+the sandbox does not need access to OpenAI, Anthropic, or Gemini. Guest
+network rules matter if you replace `sandbox_policy` (which replaces the
+gateway's default network policy) or run checklist commands that need
+egress. See
+[`Sandboxes and LLM calls`](sandbox-and-agent-safety.md#openshell-network-policy-vs-provider-apis)
+for the network policy details.
