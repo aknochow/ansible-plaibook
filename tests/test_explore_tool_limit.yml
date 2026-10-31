@@ -171,7 +171,7 @@
               - review_explore_done | bool
               - review_exploration_incomplete | bool
               - review_explore_findings | length == 0
-              - explore_tool_calls_used == 0
+              - explore_tool_calls_used | int == 0
               - deduped_findings | length == 1
               - deduped_findings[0].finding_id == "F001"
               - deduped_findings[0].severity == "Major"
@@ -307,7 +307,7 @@
             that:
               - review_explore_done | bool
               - review_exploration_incomplete | bool
-              - explore_tool_calls_used == 1
+              - explore_tool_calls_used | int == 1
               - deduped_findings | length == 1
               - deduped_findings[0].finding_id == "F002"
               - review_verdict == "NEEDS_CHANGES"
@@ -389,7 +389,7 @@
             that:
               - review_explore_done | bool
               - not (review_exploration_incomplete | bool)
-              - explore_tool_calls_used == 1
+              - explore_tool_calls_used | int == 1
               - review_verdict == "READY_FOR_HUMAN_REVIEW"
             fail_msg: >-
               Clean exploration should not flag incomplete:
