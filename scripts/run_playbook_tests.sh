@@ -18,6 +18,17 @@ if [[ -z "${ANSIBLE_COLLECTIONS_PATH:-}" ]]; then
   fi
 fi
 
+# The suite is offline and builds throwaway git repositories. Keep it
+# independent of the developer's global/system git config (commit and
+# tag signing, hooks) and identity. Nothing here needs real credentials.
+export GIT_CONFIG_GLOBAL=/dev/null
+export GIT_CONFIG_SYSTEM=/dev/null
+export GIT_CONFIG_NOSYSTEM=1
+export GIT_AUTHOR_NAME="Test Author"
+export GIT_AUTHOR_EMAIL="test-author@example.com"
+export GIT_COMMITTER_NAME="Test Committer"
+export GIT_COMMITTER_EMAIL="test-committer@example.com"
+
 PLAYBOOKS=(
   "tests/test_briefing_snapshot.yml"
   "tests/test_checklist_execution.yml"
