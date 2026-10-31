@@ -171,6 +171,7 @@
           'nit': _active_findings | selectattr('severity', 'equalto', 'Nit') | list | length
         },
         'refuted_count': deduped_findings | default([]) | selectattr('evidence_status', 'equalto', 'refuted') | list | length,
+        'self_refuted_dropped_count': review_self_refuted_dropped_count | default(0) | int,
         'findings': deduped_findings,
         'findings_path': review_findings_path,
         'diff_stats': review_diff_stats,

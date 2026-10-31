@@ -12,7 +12,9 @@ would never reach verification) nor "every finding" (not worth the
 N-findings x M-turns cost multiplier on every Nit): Critical/Major
 (`review_verify_severities`) plus Minor findings carrying a heuristic
 borderline signal (raised by the Security lens, or touching a
-security-sensitive code pattern by keyword).
+security-sensitive code pattern by keyword). A finding that is already
+refuted is never eligible: check_evidence_provenance.py refutes on a
+deterministic text match, and a model verdict must not overturn that.
 
 A stable `finding_id` is assigned here, deterministically, as a finding
 becomes verify-eligible, rather than self-reported by a lens. Every
@@ -70,6 +72,8 @@ _MAX_HAYSTACK_CHARS = 10_000
 
 
 def _is_verify_eligible(finding: dict, verify_severities: list[str], compiled_security_pattern: re.Pattern) -> bool:
+    if finding.get("evidence_status") == "refuted":
+        return False
     if finding.get("severity") in verify_severities:
         return True
     if finding.get("severity") != "Minor":

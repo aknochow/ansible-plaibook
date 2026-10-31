@@ -1,0 +1,3 @@
+# xai-sdk 1.21.0 matches the aknochow.xai release used by this role.
+# Compile: scripts/compile-hashed-sdks.sh
+xai-sdk==1.21.0

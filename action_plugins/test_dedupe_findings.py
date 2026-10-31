@@ -203,3 +203,62 @@ def test_action_module_requires_both_args():
     )
     result = action.run(task_vars={})
     assert result["failed"] is True
+
+
+def _finding(description, severity="Major", line=10, evidence=None, status=None):
+    finding = {
+        "file": "app.py", "line": line, "severity": severity, "lens": "Quality",
+        "evidence": evidence if evidence is not None else f"evidence for {description}",
+        "fix": "fix", "description": description,
+    }
+    if status is not None:
+        finding["evidence_status"] = status
+    return finding
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        pytest.param(
+            _finding("refuted", status="refuted"),
+            _finding("real", status=None),
+            id="line-pass-refuted-first-same-severity",
+        ),
+        pytest.param(
+            _finding("real"),
+            _finding("refuted", status="refuted"),
+            id="line-pass-real-first-same-severity",
+        ),
+        pytest.param(
+            _finding("refuted", severity="Critical", status="refuted"),
+            _finding("real", severity="Minor"),
+            id="line-pass-refuted-has-higher-severity",
+        ),
+        pytest.param(
+            _finding("refuted", line=10, evidence="same code", status="refuted"),
+            _finding("real", line=20, evidence="same code"),
+            id="evidence-pass-refuted-first-same-severity",
+        ),
+        pytest.param(
+            _finding("real", severity="Minor", line=20, evidence="same code"),
+            _finding("refuted", severity="Critical", line=10, evidence="same code", status="refuted"),
+            id="evidence-pass-refuted-has-higher-severity",
+        ),
+    ],
+)
+def test_non_refuted_finding_beats_a_refuted_one(first, second):
+    survivors = dedupe_findings([first, second], SEVERITY_POINTS)
+    assert [finding["description"] for finding in survivors] == ["real"]
+
+
+def test_all_refuted_group_still_keeps_the_highest_severity():
+    survivors = dedupe_findings(
+        [_finding("low", severity="Minor", status="refuted"), _finding("high", severity="Critical", status="refuted")],
+        SEVERITY_POINTS,
+    )
+    assert [finding["description"] for finding in survivors] == ["high"]
+
+
+def test_higher_severity_still_wins_among_non_refuted_findings():
+    survivors = dedupe_findings([_finding("low", severity="Minor"), _finding("high", severity="Major")], SEVERITY_POINTS)
+    assert [finding["description"] for finding in survivors] == ["high"]
