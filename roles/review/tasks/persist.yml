@@ -178,6 +178,7 @@
         'completeness_checks': review_completeness_checks,
         'neutralization_check': review_neutralization_check,
         'checklist': review_checklist,
+        'exploration_incomplete': review_exploration_incomplete | default(false) | bool,
         'guardian_scan': {
           'available': guardian_scan_available | default(false) | bool,
           'skip_reason': guardian_scan_skip_reason | default(''),
@@ -229,6 +230,7 @@
         'findings_path': review_findings_path,
         'summary_run_scoped_path': review_summary_run_scoped_path,
         'findings_run_scoped_path': review_findings_run_scoped_path,
+        'exploration_incomplete': review_exploration_incomplete | default(false) | bool,
         'cache_hit': false
       }] }}
 

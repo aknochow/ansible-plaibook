@@ -87,10 +87,17 @@ def enrich_last_run(last_run: dict[str, Any], *, last_run_file: Path) -> dict[st
                 "branch",
                 "date",
                 "guardian_scan",
+                "exploration_incomplete",
             ):
                 if key in summary and key not in entry:
                     entry[key] = summary[key]
-                elif key in summary and key in ("scores", "findings_count", "findings", "guardian_scan"):
+                elif key in summary and key in (
+                    "scores",
+                    "findings_count",
+                    "findings",
+                    "guardian_scan",
+                    "exploration_incomplete",
+                ):
                     entry[key] = summary[key]
             if "score" not in entry and "score_overall" in summary:
                 entry["score"] = summary["score_overall"]
@@ -144,7 +151,7 @@ def format_pretty(document: dict[str, Any], *, full: bool = False) -> str:
         if name:
             header = f"{header}  {name}"
         lines.append(header)
-        if document.get("exploration_incomplete"):
+        if document.get("exploration_incomplete") or target.get("exploration_incomplete"):
             lines.append("  exploration incomplete (a search did not finish; that is not 'no matches')")
 
         guardian_line = _guardian_block_line(document, target)

@@ -1078,6 +1078,54 @@ def test_pretty_notes_incomplete_exploration():
     assert "READY_FOR_HUMAN_REVIEW" in pretty
 
 
+def test_pretty_notes_incomplete_exploration_from_target():
+    pretty = format_pretty(
+        {
+            "status": "ok",
+            "targets": [
+                {
+                    "target": "org/repo#1",
+                    "verdict": "READY_FOR_HUMAN_REVIEW",
+                    "score": 96.7,
+                    "exploration_incomplete": True,
+                }
+            ],
+        }
+    )
+    assert "exploration incomplete" in pretty
+    assert "READY_FOR_HUMAN_REVIEW" in pretty
+
+
+def test_enrich_attaches_exploration_incomplete_from_summary(tmp_path):
+    summary = tmp_path / "summary.json"
+    summary.write_text(
+        json.dumps(
+            {
+                "verdict": "NEEDS_CHANGES",
+                "score_overall": 90.0,
+                "exploration_incomplete": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    document = enrich_last_run(
+        {
+            "status": "ok",
+            "targets": [
+                {
+                    "target": "org/repo#1",
+                    "summary_path": str(summary),
+                }
+            ],
+        },
+        last_run_file=tmp_path / "last_run.json",
+    )
+    assert document["targets"][0]["exploration_incomplete"] is True
+    pretty = format_pretty(document)
+    assert "exploration incomplete" in pretty
+    assert "NEEDS_CHANGES" in pretty
+
+
 def test_pretty_explains_ci_preflight_skip_without_full_report():
     pretty = format_pretty(
         {

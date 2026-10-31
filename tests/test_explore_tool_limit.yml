@@ -1,0 +1,451 @@
+---
+# Deterministic offline test for exploration tool-call limit handling.
+#
+# When exploration reaches review_explore_max_tool_calls:
+#   (1) Exploration must stop before dispatching beyond budget
+#   (2) Lens findings from merge.yml must NOT be discarded
+#   (3) Exploration must be marked incomplete (review_exploration_incomplete: true)
+#   (4) Score must never be raised and run must not look fully explored
+#   (5) Other explore failures (e.g. auth error) must still fail as they do today
+#
+# No live model or network access. Uses tests/library/verify_provider_stub.py.
+#
+# Usage:
+#   ANSIBLE_LIBRARY=$PWD/tests/library \
+#   VERIFY_PROVIDER_STUB_FILE=$PWD/tests/.verify_provider_stub.json \
+#     ansible-playbook tests/test_explore_tool_limit.yml
+
+- name: Exploration tool-call budget preserves lens findings and marks incomplete
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_prompt_nonce: "AbCdEfGh12345678"
+    review_org_repo: aknochow/ansible-plaibook
+    review_number: "42"
+    review_branch: main
+    review_short_sha: "abcdef0"
+    review_type: commit
+    briefing_project: "aknochow/ansible-plaibook"
+    briefing_branch: main
+    review_repo_path: "{{ playbook_dir }}/.."
+    review_explore_model: claude-haiku-4-5
+    review_structured_output_max_attempts: 1
+    review_debug_dump_prompts: false
+    claude_message_module: verify_provider_stub
+    claude_provider: anthropic
+    claude_api_key: test-key-placeholder
+    agent_family: claude
+    verify_provider_stub_file: "{{ lookup('ansible.builtin.env', 'VERIFY_PROVIDER_STUB_FILE') | default(playbook_dir ~ '/.verify_provider_stub.json', true) }}"
+    severity_points:
+      Critical: 20
+      Major: 10
+      Minor: 5
+      Nit: 0
+    review_extra_notes: ""
+    review_diff_stats:
+      files_changed: 1
+      insertions: 5
+      deletions: 2
+    review_diff_categories: []
+    review_completeness_checks:
+      deleted_files: []
+      todo_fixme: []
+      trailing_whitespace: []
+    review_neutralization_check:
+      remaining_refs: []
+    review_checklist:
+      triggered: false
+      commands: []
+    guardian_scan_available: false
+    guardian_scan_skip_reason: ""
+    guardian_forced_needs_changes: false
+    guardian_blocking_findings: []
+    guardian_findings: []
+    review_full_diff: |
+      diff --git a/app.py b/app.py
+      --- a/app.py
+      +++ b/app.py
+      @@ -1,2 +1,3 @@
+      +vulnerable_code = True
+
+  environment:
+    VERIFY_PROVIDER_STUB_FILE: "{{ verify_provider_stub_file }}"
+
+  tasks:
+    - name: Load the review role vars
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../roles/review/vars/main.yml"
+
+    - name: Create a throwaway output base directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: "explore-limit-test-"
+      register: _test_output_dir
+
+    - name: Configure output base paths
+      ansible.builtin.set_fact:
+        review_output_base: "{{ _test_output_dir.path }}"
+        review_findings_path: "{{ _test_output_dir.path }}/aknochow/ansible-plaibook/main/2026-10-31-abcdef0/findings.md"
+
+    # =========================================================================
+    # Scenario 1: Tool call limit reached on turn 1
+    # Under the old behavior, an assert failed and aborted the playbook,
+    # throwing away the lens findings.
+    # Under the new behavior, exploration stops, flags incomplete, keeps
+    # lens findings, preserves NEEDS_CHANGES, and persists cleanly.
+    # =========================================================================
+    - name: "Scenario 1: Hitting tool limit stops exploration and keeps lens findings"
+      block:
+        - name: Seed lens findings with a real Major finding from Security lens
+          ansible.builtin.set_fact:
+            deduped_findings:
+              - file: "app.py"
+                line: 10
+                severity: "Major"
+                lens: "Security"
+                evidence: "vulnerable_code = True"
+                fix: "Use secure configuration"
+                replacement: "secure_code = True\n"
+                description: "Critical security issue found by lens"
+                confidence: "HIGH"
+                finding_id: "F001"
+                evidence_status: null
+            findings_critical: []
+            findings_major:
+              - file: "app.py"
+                line: 10
+                severity: "Major"
+                lens: "Security"
+                evidence: "vulnerable_code = True"
+                fix: "Use secure configuration"
+                replacement: "secure_code = True\n"
+                description: "Critical security issue found by lens"
+                confidence: "HIGH"
+                finding_id: "F001"
+                evidence_status: null
+            findings_minor: []
+            findings_nit: []
+            review_verdict: "NEEDS_CHANGES"
+            score_overall: 96.7
+            score_security: 90.0
+            score_functionality: 100.0
+            score_quality: 100.0
+            pipeline_agent_calls: []
+            pipeline_findings_reports: []
+            review_explore_max_turns: 2
+            review_explore_max_tool_calls: 1
+
+        - name: Write stub response requesting 2 tool calls (exceeding budget of 1)
+          ansible.builtin.copy:
+            dest: "{{ verify_provider_stub_file }}"
+            mode: "0600"
+            content: >-
+              {{ {
+                'stop_reason': 'tool_use',
+                'tool_calls': [
+                  {'id': 'c1', 'name': 'read_file', 'input': {'path': 'app.py'}},
+                  {'id': 'c2', 'name': 'read_file', 'input': {'path': 'app.py'}}
+                ],
+                'message': {
+                  'model': 'claude-haiku-4-5',
+                  'content': [{'type': 'text', 'text': 'inspecting repo'}]
+                },
+                'usage': {
+                  'input_tokens': 100,
+                  'output_tokens': 50,
+                  'cache_creation_input_tokens': 0,
+                  'cache_read_input_tokens': 0
+                }
+              } | to_json }}
+
+        - name: Run exploration through explore.yml
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: explore.yml
+
+        - name: Assert exploration stopped, flagged incomplete, and kept lens findings
+          ansible.builtin.assert:
+            that:
+              - review_explore_done | bool
+              - review_exploration_incomplete | bool
+              - review_explore_findings | length == 0
+              - explore_tool_calls_used == 0
+              - deduped_findings | length == 1
+              - deduped_findings[0].finding_id == "F001"
+              - deduped_findings[0].severity == "Major"
+              - review_verdict == "NEEDS_CHANGES"
+              - score_overall == 96.7
+            fail_msg: >-
+              Expected exploration to stop before dispatch with review_exploration_incomplete=true,
+              keeping the Major finding and NEEDS_CHANGES verdict. Got:
+              done={{ review_explore_done | default('') }}
+              incomplete={{ review_exploration_incomplete | default('') }}
+              findings_count={{ deduped_findings | length }}
+              verdict={{ review_verdict | default('') }}
+              score={{ score_overall | default('') }}
+            success_msg: "Exploration stopped before dispatch, flagged incomplete, and kept lens findings."
+
+        - name: Persist results through persist.yml
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: persist.yml
+
+        - name: Read persisted findings.md
+          ansible.builtin.slurp:
+            src: "{{ review_findings_path }}"
+          register: _persisted_findings_raw
+
+        - name: Read persisted summary.json
+          ansible.builtin.slurp:
+            src: "{{ review_summary_path }}"
+          register: _persisted_summary_raw
+
+        - name: Assert persisted report and summary record incomplete exploration and findings
+          vars:
+            _report_text: "{{ _persisted_findings_raw.content | b64decode }}"
+            _summary_obj: "{{ _persisted_summary_raw.content | b64decode | from_json }}"
+          ansible.builtin.assert:
+            that:
+              - "'Exploration incomplete' in _report_text"
+              - "'Critical security issue found by lens' in _report_text"
+              - "_summary_obj.exploration_incomplete | bool"
+              - "_summary_obj.verdict == 'NEEDS_CHANGES'"
+              - "_summary_obj.findings_count.major == 1"
+              - "_summary_obj.score_overall == 96.7"
+            fail_msg: >-
+              Persisted findings.md or summary.json did not reflect incomplete exploration
+              or preserved findings: summary={{ _summary_obj }}
+            success_msg: "Persisted artifacts cleanly record exploration_incomplete and preserved findings."
+
+    # =========================================================================
+    # Scenario 2: Budget exceeded across multiple turns
+    # Turn 1 uses 1 tool call within budget (max=2). Turn 2 requests 2 calls.
+    # Exceeds budget -> stops before turn 2 dispatch, flags incomplete.
+    # =========================================================================
+    - name: "Scenario 2: Tool limit exceeded on a later turn"
+      block:
+        - name: Reset state with 2 allowed tool calls across 3 turns
+          ansible.builtin.set_fact:
+            deduped_findings:
+              - file: "app.py"
+                line: 10
+                severity: "Major"
+                lens: "Security"
+                evidence: "vulnerable_code = True"
+                fix: "fix"
+                replacement: "fix\n"
+                description: "Preserved Major finding"
+                confidence: "HIGH"
+                finding_id: "F002"
+                evidence_status: null
+            findings_critical: []
+            findings_major:
+              - file: "app.py"
+                line: 10
+                severity: "Major"
+                lens: "Security"
+                evidence: "vulnerable_code = True"
+                fix: "fix"
+                replacement: "fix\n"
+                description: "Preserved Major finding"
+                confidence: "HIGH"
+                finding_id: "F002"
+                evidence_status: null
+            findings_minor: []
+            findings_nit: []
+            review_verdict: "NEEDS_CHANGES"
+            score_overall: 96.7
+            score_security: 90.0
+            score_functionality: 100.0
+            score_quality: 100.0
+            pipeline_agent_calls: []
+            review_explore_max_turns: 3
+            review_explore_max_tool_calls: 2
+
+        - name: Write stub responses for 2 turns
+          ansible.builtin.copy:
+            dest: "{{ verify_provider_stub_file }}"
+            mode: "0600"
+            content: >-
+              {{ {
+                'responses': [
+                  {
+                    'stop_reason': 'tool_use',
+                    'tool_calls': [
+                      {'id': 'c1', 'name': 'read_file', 'input': {'path': 'README.md'}}
+                    ],
+                    'message': {
+                      'model': 'claude-haiku-4-5',
+                      'content': [{'type': 'text', 'text': 'turn 1'}]
+                    },
+                    'usage': {'input_tokens': 50, 'output_tokens': 20}
+                  },
+                  {
+                    'stop_reason': 'tool_use',
+                    'tool_calls': [
+                      {'id': 'c2', 'name': 'read_file', 'input': {'path': 'README.md'}},
+                      {'id': 'c3', 'name': 'read_file', 'input': {'path': 'README.md'}}
+                    ],
+                    'message': {
+                      'model': 'claude-haiku-4-5',
+                      'content': [{'type': 'text', 'text': 'turn 2 exceeds'}]
+                    },
+                    'usage': {'input_tokens': 50, 'output_tokens': 20}
+                  }
+                ]
+              } | to_json }}
+
+        - name: Run exploration through explore.yml
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: explore.yml
+
+        - name: Assert multi-turn exploration stopped on budget breach
+          ansible.builtin.assert:
+            that:
+              - review_explore_done | bool
+              - review_exploration_incomplete | bool
+              - explore_tool_calls_used == 1
+              - deduped_findings | length == 1
+              - deduped_findings[0].finding_id == "F002"
+              - review_verdict == "NEEDS_CHANGES"
+            fail_msg: >-
+              Multi-turn exploration did not stop correctly on budget breach.
+              used={{ explore_tool_calls_used }} done={{ review_explore_done }}
+              incomplete={{ review_exploration_incomplete }}
+            success_msg: "Multi-turn exploration stopped on budget breach and kept findings."
+
+    # =========================================================================
+    # Scenario 3: Clean exploration within budget
+    # Turn 1 uses 1 tool call, Turn 2 reports findings cleanly.
+    # review_exploration_incomplete must remain false.
+    # =========================================================================
+    - name: "Scenario 3: Clean exploration within budget does not flag incomplete"
+      block:
+        - name: Reset state for clean exploration
+          ansible.builtin.set_fact:
+            deduped_findings: []
+            findings_critical: []
+            findings_major: []
+            findings_minor: []
+            findings_nit: []
+            review_verdict: "READY_FOR_HUMAN_REVIEW"
+            score_overall: 100.0
+            score_security: 100.0
+            score_functionality: 100.0
+            score_quality: 100.0
+            pipeline_agent_calls: []
+            review_explore_max_turns: 3
+            review_explore_max_tool_calls: 5
+
+        - name: Write stub responses for clean explore and report
+          ansible.builtin.copy:
+            dest: "{{ verify_provider_stub_file }}"
+            mode: "0600"
+            content: >-
+              {{ {
+                'responses': [
+                  {
+                    'stop_reason': 'tool_use',
+                    'tool_calls': [
+                      {'id': 'c1', 'name': 'read_file', 'input': {'path': 'README.md'}}
+                    ],
+                    'message': {
+                      'model': 'claude-haiku-4-5',
+                      'content': [{'type': 'text', 'text': 'turn 1 read'}]
+                    },
+                    'usage': {'input_tokens': 50, 'output_tokens': 20}
+                  },
+                  {
+                    'stop_reason': 'tool_use',
+                    'tool_calls': [
+                      {
+                        'id': 'c2',
+                        'name': 'report_findings',
+                        'input': {
+                          'findings': [],
+                          'prompt_nonce': review_prompt_nonce
+                        }
+                      }
+                    ],
+                    'message': {
+                      'model': 'claude-haiku-4-5',
+                      'content': [{'type': 'text', 'text': 'no more findings'}]
+                    },
+                    'usage': {'input_tokens': 50, 'output_tokens': 20}
+                  }
+                ]
+              } | to_json }}
+
+        - name: Run exploration through explore.yml
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: explore.yml
+
+        - name: Assert clean exploration completed without incomplete flag
+          ansible.builtin.assert:
+            that:
+              - review_explore_done | bool
+              - not (review_exploration_incomplete | bool)
+              - explore_tool_calls_used == 1
+              - review_verdict == "READY_FOR_HUMAN_REVIEW"
+            fail_msg: >-
+              Clean exploration should not flag incomplete:
+              done={{ review_explore_done }}
+              incomplete={{ review_exploration_incomplete }}
+            success_msg: "Clean exploration completed within budget with exploration_incomplete=false."
+
+    # =========================================================================
+    # Scenario 4: Other explore failures (auth errors) still fail loudly
+    # An auth error or other unhandled failure must NOT be suppressed.
+    # =========================================================================
+    - name: "Scenario 4: Provider auth failure in explore still fails loudly"
+      block:
+        - name: Reset state before auth failure test
+          ansible.builtin.set_fact:
+            review_explore_done: false
+            review_explore_findings: []
+            explore_turn_count: 0
+            explore_tool_calls_used: 0
+            review_exploration_incomplete: false
+            review_explore_max_turns: 2
+            review_explore_max_tool_calls: 5
+            explore_messages:
+              - role: user
+                content: "Decide whether this change needs checking"
+
+        - name: Write an authentication error stub
+          ansible.builtin.copy:
+            dest: "{{ verify_provider_stub_file }}"
+            mode: "0600"
+            content: >-
+              {{ {
+                'failed': true,
+                'msg': 'Error code: 401 - invalid_api_key'
+              } | to_json }}
+
+        - name: Attempt explore turn over auth error
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: explore_turn.yml
+
+        - name: Fail if the auth error did not abort the task
+          ansible.builtin.fail:
+            msg: "TEST BUG: explore_turn accepted an authentication failure without aborting"
+      rescue:
+        - name: Confirm the auth failure aborted the play
+          ansible.builtin.assert:
+            that:
+              - "'invalid_api_key' in (ansible_failed_result.msg | default(''))"
+              - "'TEST BUG' not in (ansible_failed_result.msg | default(''))"
+              - not (review_explore_done | default(false) | bool)
+            fail_msg: "Auth failure did not abort cleanly: {{ ansible_failed_result.msg | default('') }}"
+            success_msg: "Provider auth failure in explore correctly aborts the play."
+
+    - name: Clean up the throwaway output base directory
+      ansible.builtin.file:
+        path: "{{ _test_output_dir.path }}"
+        state: absent
+      when: _test_output_dir.path is defined
