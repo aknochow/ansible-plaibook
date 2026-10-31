@@ -70,6 +70,12 @@
           {{ ansible_failed_result.msg | default('xAI explore module failed')
              | xai_provider_error_message([explore_system_prompt]) }}
 
+    - name: Record the usage this failed xAI explore call billed
+      ansible.builtin.set_fact:
+        pipeline_agent_calls: >-
+          {{ pipeline_agent_calls + ([ansible_failed_result]
+             | xai_lens_usage_calls(review_org_repo ~ '#' ~ review_number, 'explore', review_explore_xai_model)) }}
+
     - name: Classify this xAI explore failure
       classify_verify_provider_failure:
         msg: "{{ ansible_failed_result.msg | default('') }}"
@@ -109,22 +115,8 @@
   when: not (_xai_explore_module_failed | default(false) | bool)
   ansible.builtin.set_fact:
     pipeline_agent_calls: >-
-      {{ pipeline_agent_calls + [{
-           'target': review_org_repo + '#' + review_number, 'lens': 'explore',
-           'model': explore_turn_result.message.model,
-           'usage': {
-             'input_tokens': explore_turn_result.usage.input_tokens | default(0) | int,
-             'output_tokens': explore_turn_result.usage.output_tokens | default(0) | int,
-             'cache_write_tokens': 0,
-             'cache_read_tokens': explore_turn_result.usage.cache_read_input_tokens | default(0) | int,
-             'thinking_tokens': (_xai_explore_raw.usage.reasoning_tokens | default(0) | int),
-             'cost_in_usd_ticks': (_xai_explore_raw.usage.cost_in_usd_ticks | default(0) | int),
-             'total_tokens': (explore_turn_result.usage.input_tokens | default(0) | int)
-               + (explore_turn_result.usage.output_tokens | default(0) | int)
-               + (explore_turn_result.usage.cache_read_input_tokens | default(0) | int)
-           },
-           'attempt': explore_attempt_number | default(1)
-         }] }}
+      {{ pipeline_agent_calls + ([_xai_explore_raw]
+         | xai_lens_usage_calls(review_org_repo ~ '#' ~ review_number, 'explore', review_explore_xai_model)) }}
 
 - name: Check whether this xAI attempt called report_findings
   when: not (_xai_explore_module_failed | default(false) | bool)

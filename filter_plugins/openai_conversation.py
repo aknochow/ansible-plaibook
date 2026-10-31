@@ -266,7 +266,7 @@ def xai_provider_error_message(msg: str, redact=None) -> str:
     ``redact``. The text is from the provider, so it stays untemplatable.
     """
     text = _GRPC_DEBUG_TEXT.sub("", str(msg or ""))
-    for name in ("XAI_API_KEY", "GROK_API_KEY"):
+    for name in ("XAI_API_KEY", "GROK_API_KEY", "ANSIBLE_GROK_API_KEY"):
         secret = os.environ.get(name)
         if secret:
             text = text.replace(secret, "<api_key>")

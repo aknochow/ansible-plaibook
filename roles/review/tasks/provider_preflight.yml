@@ -9,7 +9,7 @@
   block:
     - name: Resolve the effective local module interpreter for xAI
       ansible.builtin.set_fact:
-        _xai_runtime_python: "{{ ansible_playbook_python | default(ansible_python_interpreter) }}"
+        _xai_runtime_python: "{{ ansible_python_interpreter | default(ansible_playbook_python) }}"
 
     - name: Create a private temporary directory for xAI ansible-doc
       ansible.builtin.tempfile:

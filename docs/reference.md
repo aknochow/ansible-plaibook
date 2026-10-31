@@ -42,6 +42,7 @@ status: stable
 | `review_xai_model` | `grok-4.7` | Model for lens, explore, and verify when `agent_family=xai`. Calls `aknochow.xai.chat` (`xai-sdk` `chat.stream`), not the OpenAI-compatible endpoint. |
 | `review_xai_lens_reasoning_effort` | `high` | `reasoning_effort` for xAI lens, explore, verify, and the continuity audit unless `review_xai_continuity_reasoning_effort` is set. |
 | `review_xai_max_tokens` | `16384` | Completion budget passed as `max_tokens` to `aknochow.xai.chat`. |
+| `xai_timeout` | `1800` | Seconds one `aknochow.xai.chat` call may spend, including the module's own retries. Env `ANSIBLE_XAI_TIMEOUT`. |
 | `review_openai_lens_reasoning_effort` | API default | Optional explicit `reasoning_effort` for hosted OpenAI lens calls, such as `low`, `medium`, `high`, `xhigh`, or `max`. When this is empty and the model is `gpt-5.6`, lens calls use `none`. Explore/verify tool calls use `none` for `gpt-5.6` and `gpt-6-luna`. |
 | `review_openai_continuity_max_completion_tokens` | `review_openai_max_completion_tokens` | Completion budget for the no-tool continuity audit; prevents reasoning models from exhausting a small structured-output budget before returning JSON. |
 | `review_explore_tool_timeout_seconds` | `120` | Per-search wall-clock ceiling, enforced with `subprocess.run(timeout=)` so ansible-core 2.16 (Python 3.10) still caps grep. A failed or timed-out search is an error tool result, never an empty result. |

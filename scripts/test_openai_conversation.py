@@ -219,6 +219,13 @@ def test_provider_error_message_drops_keys_prompt_and_debug():
     assert len(clean("x" * 5000)) < 600
 
 
+def test_provider_error_message_hides_the_ansible_env_key(monkeypatch):
+    from openai_conversation import xai_provider_error_message as clean
+
+    monkeypatch.setenv("ANSIBLE_GROK_API_KEY", "not-a-real-ansible-key")
+    assert "not-a-real-ansible-key" not in clean("rejected not-a-real-ansible-key here")
+
+
 def test_provider_error_message_hides_the_environment_key(monkeypatch):
     from openai_conversation import xai_provider_error_message as clean
 

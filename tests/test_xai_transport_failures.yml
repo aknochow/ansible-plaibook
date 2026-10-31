@@ -258,6 +258,79 @@
           - "'invalid or incomplete structured output' not in _case_failure"
         fail_msg: "failure={{ _case_failure }} calls={{ _case_calls }}"
 
+    - name: Case, explore drops with billed usage, then retries inside the module
+      ansible.builtin.include_tasks: xai_explore_case.yml
+      vars:
+        xai_case_responses:
+          - { failed: true, msg: "{{ rst_stream }}", attempts: [{ usage: "{{ usage_dropped }}", error: "{{ rst_stream }}" }] }
+          - "{{ report_call | combine({'attempts': [{'usage': usage_dropped, 'error': rst_stream}, {'usage': usage_security, 'error': none}]}) }}"
+
+    - name: Confirm explore counts every billed attempt once
+      ansible.builtin.assert:
+        that:
+          - _case_failure == ""
+          - >-
+            pipeline_agent_calls | selectattr('lens', 'equalto', 'explore')
+            | map(attribute='usage.input_tokens') | map('int') | list == [7, 7, 100]
+          - >-
+            pipeline_agent_calls | map(attribute='usage.cost_in_usd_ticks') | map('int') | sum == 7000000000
+        fail_msg: "failure={{ _case_failure }} usage={{ pipeline_agent_calls }}"
+
+    - name: Case, explore auth failure still reports what it billed
+      ansible.builtin.include_tasks: xai_explore_case.yml
+      vars:
+        xai_case_responses:
+          - { failed: true, msg: "{{ unauthenticated }}", attempts: [{ usage: "{{ usage_dropped }}", error: "{{ unauthenticated }}" }] }
+
+    - name: Confirm usage was recorded before the failure was raised
+      ansible.builtin.assert:
+        that:
+          - "'StatusCode.UNAUTHENTICATED' in _case_failure"
+          - pipeline_agent_calls | map(attribute='usage.input_tokens') | map('int') | list == [7]
+        fail_msg: "failure={{ _case_failure }} usage={{ pipeline_agent_calls }}"
+
+    - name: Case, continuity audit answers after a retry inside the module
+      ansible.builtin.include_tasks: xai_continuity_case.yml
+      vars:
+        xai_case_response:
+          structured: { verdict: plausible, rationale: same defect }
+          finish_reason: REASON_STOP
+          usage: "{{ usage_security }}"
+          attempts: [{ usage: "{{ usage_dropped }}", error: "{{ rst_stream }}" }, { usage: "{{ usage_security }}", error: null }]
+
+    - name: Confirm the audit answered and counted both attempts
+      ansible.builtin.assert:
+        that:
+          - _case_failure == ""
+          - verify_result_audit_result.verdict == 'plausible'
+          - pipeline_agent_calls | map(attribute='usage.input_tokens') | map('int') | list == [7, 100]
+        fail_msg: "failure={{ _case_failure }} usage={{ pipeline_agent_calls }}"
+
+    - name: Case, continuity audit returns null structured output
+      ansible.builtin.include_tasks: xai_continuity_case.yml
+      vars:
+        xai_case_response: { structured: null, finish_reason: length, usage: "{{ usage_security }}" }
+
+    - name: Confirm null structured output is not an answer
+      ansible.builtin.assert:
+        that:
+          - _case_failure == ""
+          - verify_result_audit_result == {}
+        fail_msg: "failure={{ _case_failure }} audit={{ verify_result_audit_result }}"
+
+    - name: Case, continuity audit provider failure
+      ansible.builtin.include_tasks: xai_continuity_case.yml
+      vars:
+        xai_case_response: { failed: true, msg: "{{ unauthenticated }}", attempts: [{ usage: "{{ usage_dropped }}", error: "{{ unauthenticated }}" }] }
+
+    - name: Confirm the audit failure is sanitized and its usage kept
+      ansible.builtin.assert:
+        that:
+          - "'StatusCode.UNAUTHENTICATED' in _case_failure"
+          - "'notarealkey' not in _case_failure"
+          - pipeline_agent_calls | map(attribute='usage.input_tokens') | map('int') | list == [7]
+        fail_msg: "failure={{ _case_failure }} usage={{ pipeline_agent_calls }}"
+
   post_tasks:
     - name: Remove the stub directory
       ansible.builtin.file:

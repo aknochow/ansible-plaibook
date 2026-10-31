@@ -1,5 +1,6 @@
 """The xAI review family calls aknochow.xai.chat, not the OpenAI shim."""
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,6 +48,17 @@ def test_forced_explore_turn_requires_report_findings():
     explore = _text("dispatch_explore_turn_attempt_xai.yml")
     assert "forced last turn did not call report_findings" in explore
     assert "explore_turn_result.stop_reason != 'tool_use'" not in explore
+
+
+def test_no_task_file_names_the_xai_module_literally():
+    """A literal name fails at load for every family when the collection is absent."""
+    literal = re.compile(r"^\s*(?:-\s+)?aknochow\.xai\.chat:", re.MULTILINE)
+    assert [path.name for path in TASKS.glob("*.yml") if literal.search(path.read_text(encoding="utf-8"))] == []
+
+
+def test_preflight_checks_the_interpreter_that_runs_the_module():
+    preflight = _text("provider_preflight.yml")
+    assert '_xai_runtime_python: "{{ ansible_python_interpreter | default(ansible_playbook_python) }}"' in preflight
 
 
 def test_family_list_includes_xai():

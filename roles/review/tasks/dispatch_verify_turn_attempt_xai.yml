@@ -83,6 +83,12 @@
             _xai_verify_module_failed: true
             _xai_verify_failed_result: "{{ ansible_failed_result }}"
 
+        - name: Record the usage this failed xAI verify call billed
+          ansible.builtin.set_fact:
+            pipeline_agent_calls: >-
+              {{ pipeline_agent_calls + ([_xai_verify_failed_result]
+                 | xai_lens_usage_calls(review_org_repo ~ '#' ~ review_number, 'verify', review_verify_xai_model)) }}
+
         - name: Classify the failed xAI verify return
           ansible.builtin.include_tasks: classify_verify_provider_failure.yml
           vars:
@@ -122,22 +128,8 @@
     - not (_xai_verify_module_failed | default(false) | bool)
   ansible.builtin.set_fact:
     pipeline_agent_calls: >-
-      {{ pipeline_agent_calls + [{
-           'target': review_org_repo + '#' + review_number, 'lens': 'verify',
-           'model': verify_turn_result.message.model,
-           'usage': {
-             'input_tokens': verify_turn_result.usage.input_tokens | default(0) | int,
-             'output_tokens': verify_turn_result.usage.output_tokens | default(0) | int,
-             'cache_write_tokens': 0,
-             'cache_read_tokens': verify_turn_result.usage.cache_read_input_tokens | default(0) | int,
-             'thinking_tokens': (_xai_verify_raw.usage.reasoning_tokens | default(0) | int),
-             'cost_in_usd_ticks': (_xai_verify_raw.usage.cost_in_usd_ticks | default(0) | int),
-             'total_tokens': (verify_turn_result.usage.input_tokens | default(0) | int)
-               + (verify_turn_result.usage.output_tokens | default(0) | int)
-               + (verify_turn_result.usage.cache_read_input_tokens | default(0) | int)
-           },
-           'attempt': verify_attempt_number | default(1)
-         }] }}
+      {{ pipeline_agent_calls + ([_xai_verify_raw]
+         | xai_lens_usage_calls(review_org_repo ~ '#' ~ review_number, 'verify', review_verify_xai_model)) }}
 
 - name: Check whether this xAI attempt called report_verdict
   when:
