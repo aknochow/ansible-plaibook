@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 
 import pytest
 
+from plaibook import provider_sdk
 from plaibook.pip_hashed import hashed_requirements
 from plaibook.provider_sdk import (
     FAMILY_HASHED_FILE,
@@ -262,3 +264,13 @@ def test_hashed_files_pin_every_family_distribution():
         for _mod, dist in reqs:
             assert dist.replace("_", "-").lower() in pins
             assert pins[dist.replace("_", "-").lower()]
+
+
+def test_module_present_sees_a_package_installed_after_the_first_lookup(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(tmp_path))
+    name = "plaibook_late_install_probe"
+    assert provider_sdk._module_present(sys.executable, name) is False
+    package = tmp_path / name
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    assert provider_sdk._module_present(sys.executable, name) is True
