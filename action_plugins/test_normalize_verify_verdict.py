@@ -102,6 +102,50 @@ def test_real_verdict_passes_through_assessed():
     }
 
 
+@pytest.mark.parametrize("field", ["reachability", "trust_boundary", "worst_outcome_category", "silent_failure"])
+def test_missing_axis_field_is_not_assessed_but_keeps_the_status(field):
+    verdict = {key: value for key, value in REAL_VERDICT.items() if key != field}
+    result = normalize_verify_verdict(verdict)
+    assert result["status"] == "verified"
+    assert result["rationale"] == REAL_VERDICT["rationale"]
+    assert result["severity_assessed"] is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("reachability", "sometimes"),
+        ("reachability", None),
+        ("trust_boundary", "maybe"),
+        ("worst_outcome_category", "catastrophe"),
+        ("worst_outcome_category", ["crash-dos"]),
+        ("silent_failure", "maybe"),
+        ("silent_failure", None),
+        ("silent_failure", 1),
+    ],
+)
+def test_invalid_axis_field_is_not_assessed(field, value):
+    assert normalize_verify_verdict({**REAL_VERDICT, field: value})["severity_assessed"] is False
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(True, True), (False, False), ("true", True), ("False", False), (" TRUE ", True)],
+)
+def test_silent_failure_accepts_booleans_and_their_string_forms(value, expected):
+    result = normalize_verify_verdict({**REAL_VERDICT, "silent_failure": value})
+    assert result["severity_assessed"] is True
+    assert result["silent_failure"] is expected
+
+
+def test_invalid_axis_values_are_not_echoed():
+    result = normalize_verify_verdict({**REAL_VERDICT, "reachability": "sometimes"})
+    assert result["reachability"] == "theoretical-only"
+    assert result["trust_boundary"] == "unclear"
+    assert result["worst_outcome_category"] == "cosmetic-style"
+    assert result["silent_failure"] is False
+
+
 class _FakeShell:
     tmpdir = "/tmp/fake-tmpdir"
 

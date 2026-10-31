@@ -420,3 +420,47 @@
         fail_msg: >-
           calls={{ _stub_state.calls }} status={{ deduped_findings[0].evidence_status }}
           verdict={{ review_verdict }}
+
+    - name: Missing axis fields keep a verified Critical at Critical
+      ansible.builtin.include_tasks: verify_verdict_case.yml
+      vars:
+        verdict_case_label: verified Critical with no axis fields
+        verdict_case_finding: "{{ _verdict_major_finding | combine({'severity': 'Critical'}) }}"
+        verdict_case_input:
+          evidence_status: verified
+          evidence: a real quote
+          rationale: A real rationale.
+        verdict_case_expected_status: verified
+        verdict_case_expected_severity: Critical
+
+    - name: A missing silent_failure does not downgrade a verified Critical
+      ansible.builtin.include_tasks: verify_verdict_case.yml
+      vars:
+        verdict_case_label: verified Critical with no silent_failure
+        verdict_case_finding: "{{ _verdict_major_finding | combine({'severity': 'Critical'}) }}"
+        verdict_case_input:
+          evidence_status: verified
+          evidence: a real quote
+          rationale: A real rationale.
+          reachability: realistic
+          trust_boundary: crosses-trust-boundary
+          worst_outcome_category: crash-dos
+        verdict_case_expected_status: verified
+        verdict_case_expected_severity: Critical
+
+    - name: A complete axis answer still moves severity
+      ansible.builtin.include_tasks: verify_verdict_case.yml
+      vars:
+        verdict_case_label: verified Critical with a complete axis answer
+        verdict_case_finding: "{{ _verdict_major_finding | combine({'severity': 'Critical'}) }}"
+        verdict_case_input:
+          evidence_status: verified
+          evidence: a real quote
+          rationale: A real rationale.
+          reachability: realistic
+          trust_boundary: crosses-trust-boundary
+          worst_outcome_category: crash-dos
+          silent_failure: false
+        verdict_case_expected_status: verified
+        verdict_case_expected_severity: Major
+        verdict_case_expected_severity_status: disputed
