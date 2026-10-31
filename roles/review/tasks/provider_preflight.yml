@@ -56,7 +56,7 @@
             .doc.options.conversation_id) is defined
         fail_msg: >-
           The installed aknochow.xai.chat has no conversation_id option.
-          Install ansible-xai revision c8c8d54 or later. Every xAI review
+          Install ansible-xai revision dfbb12e or later. Every xAI review
           call sends x-grok-conv-id, and an older module rejects that argument.
   always:
     - name: Remove the xAI preflight temporary directory
