@@ -255,9 +255,10 @@
 # Cursor already appended each Security/Review attempt (including empty
 # misses and nested failed returns; never parent-only) in
 # dispatch_cursor_lens_attempt.yml; adding the successful last call
-# again here would double-count.
+# again here would double-count. xAI records every attempt in
+# dispatch_lens_xai.yml for the same reason, before a failed lens ends the play.
 - name: Record this iteration's agent calls for the pipeline-wide stats summary
-  when: agent_family != 'cursor'
+  when: agent_family not in ['cursor', 'xai']
   ansible.builtin.set_fact:
     pipeline_agent_calls: >-
       {{ pipeline_agent_calls + [

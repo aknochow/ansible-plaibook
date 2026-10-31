@@ -286,6 +286,93 @@ def xai_provider_error_message(msg: str, redact=None) -> str:
     return _copy_model_value(text, untag_type, None if untag_type is not None else _wrap_var_func())
 
 
+def _usage_int(usage: dict, key: str) -> int:
+    value = usage.get(key)
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def xai_usage_normalized(usage: dict) -> dict:
+    """Translate aknochow.xai.chat usage to the pipeline's normalized shape."""
+    if not isinstance(usage, dict):
+        usage = {}
+    cached = _usage_int(usage, "cached_tokens")
+    return {
+        "input_tokens": max(_usage_int(usage, "prompt_tokens") - cached, 0),
+        "output_tokens": _usage_int(usage, "completion_tokens"),
+        "cache_write_tokens": 0,
+        "cache_read_tokens": cached,
+        "thinking_tokens": _usage_int(usage, "reasoning_tokens"),
+        "total_tokens": _usage_int(usage, "total_tokens"),
+        "cost_in_usd_ticks": _usage_int(usage, "cost_in_usd_ticks"),
+    }
+
+
+def _xai_billed_usages(result: dict) -> list:
+    """Every usage one job billed, oldest first.
+
+    ``attempts`` has one entry per module attempt, and its last entry is the
+    response top-level ``usage`` also reports, so only one of the two counts.
+    A collection without ``attempts`` has only top-level ``usage``.
+    """
+    attempts = result.get("attempts")
+    if isinstance(attempts, list):
+        usages = [a["usage"] for a in attempts if isinstance(a, dict) and isinstance(a.get("usage"), dict)]
+        if usages:
+            return usages
+    usage = result.get("usage")
+    return [usage] if isinstance(usage, dict) and usage else []
+
+
+def xai_lens_usage_calls(results: list, target: str, lens: str, model: str) -> list:
+    """pipeline_agent_calls entries for one lens's jobs, first dispatch and retry.
+
+    An attempt with no usage is left out. It billed nothing, and a zero entry
+    would mark a model priced only by ticks as unpriced.
+    """
+    calls = []
+    for result in results or []:
+        if not isinstance(result, dict):
+            continue
+        response = result.get("response")
+        served = response.get("model") if isinstance(response, dict) else None
+        for usage in _xai_billed_usages(result):
+            calls.append(
+                {
+                    "target": target,
+                    "lens": lens,
+                    "model": served or model,
+                    "usage": xai_usage_normalized(usage),
+                    "attempt": len(calls) + 1,
+                }
+            )
+    return calls
+
+
+def xai_lens_final_result(first: dict, retry: dict) -> dict:
+    """The retry's result when one ran, so the last error is the one reported."""
+    if isinstance(retry, dict) and retry and not retry.get("skipped"):
+        return retry
+    return first
+
+
+def xai_lens_failure_reason(result: dict, redact=None) -> str:
+    """Empty when the lens has structured output. Otherwise a sanitized reason."""
+    if not isinstance(result, dict):
+        return "the lens returned no result"
+    if isinstance(result.get("structured"), dict):
+        return ""
+    if not result.get("finished"):
+        return "the job did not finish inside the wait budget"
+    error = _xai_error_text(result)
+    if error:
+        return xai_provider_error_message(error, redact)
+    reason = re.sub(r"[^A-Za-z0-9_.-]", "", str(result.get("finish_reason") or "unknown"))
+    return f"no structured output despite response_schema being set (finish_reason={reason})"
+
+
 def openai_reasoning_tokens(response: dict) -> int:
     """Return provider-reported hidden reasoning tokens from a raw response."""
     if not isinstance(response, dict):
@@ -313,4 +400,8 @@ class FilterModule:
             "xai_stop_reason": xai_stop_reason,
             "xai_lens_needs_transport_retry": xai_lens_needs_transport_retry,
             "xai_provider_error_message": xai_provider_error_message,
+            "xai_usage_normalized": xai_usage_normalized,
+            "xai_lens_usage_calls": xai_lens_usage_calls,
+            "xai_lens_final_result": xai_lens_final_result,
+            "xai_lens_failure_reason": xai_lens_failure_reason,
         }

@@ -1,0 +1,265 @@
+---
+# xAI lens retry and failure handling through real Ansible async jobs.
+# tests/library/xai_chat_stub.py stands in for aknochow.xai.chat. The job
+# results here come from async_status, not from dicts built by hand, because
+# failed_when on the wait rewrites them and until overwrites their attempts key.
+# No live model and no API key.
+
+- name: xAI transport failures
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    agent_family: xai
+    last_run_id: stubrun
+    review_org_repo: aknochow/ansible-plaibook
+    review_number: "169"
+    xai_chat_module: xai_chat_stub
+    xai_timeout: 30
+    review_xai_model: grok-4.7
+    review_explore_xai_model: grok-4.7
+    review_explore_max_turns: 1
+    review_explore_max_tool_calls: 10
+    review_structured_output_max_attempts: 2
+    security_system_prompt: "This private security prompt line must not appear\nsecond line"
+    review_system_prompt: "This private review prompt line must not appear\nsecond line"
+    explore_system_prompt: "This private explore prompt line must not appear\nsecond line"
+    # The shape of str() on the grpc errors xai-sdk chat.stream raises.
+    rst_stream: >-
+      <_MultiThreadedRendezvous of RPC that terminated with:
+      status = StatusCode.INTERNAL
+      details = "Received RST_STREAM with error code 2"
+      debug_error_string = "UNKNOWN:Error received from peer ipv4:192.0.2.1:443 {grpc_status:13}">
+    unavailable: >-
+      <_InactiveRpcError of RPC that terminated with:
+      status = StatusCode.UNAVAILABLE
+      details = "Socket closed">
+    unauthenticated: >-
+      <_InactiveRpcError of RPC that terminated with:
+      status = StatusCode.UNAUTHENTICATED
+      details = "Incorrect API key provided: xai-notarealkey123">
+    usage_security: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110, cached_tokens: 0, reasoning_tokens: 0, cost_in_usd_ticks: 1000000000 }
+    usage_review: { prompt_tokens: 200, completion_tokens: 20, total_tokens: 220, cached_tokens: 0, reasoning_tokens: 0, cost_in_usd_ticks: 2000000000 }
+    usage_dropped: { prompt_tokens: 7, completion_tokens: 1, total_tokens: 8, cached_tokens: 0, reasoning_tokens: 0, cost_in_usd_ticks: 3000000000 }
+    ok_security:
+      structured: { findings: [], scores: { security: 90 } }
+      usage: "{{ usage_security }}"
+      finish_reason: REASON_STOP
+    ok_review:
+      structured: { findings: [], scores: { quality: 80 } }
+      usage: "{{ usage_review }}"
+      finish_reason: REASON_STOP
+    report_call:
+      text: ""
+      tool_calls:
+        - { id: call1, name: report_findings, args: { findings: [] } }
+      finish_reason: REASON_STOP
+      usage: "{{ usage_security }}"
+
+  environment:
+    XAI_CHAT_STUB_FILE: "{{ xai_stub_file | default('') }}"
+
+  pre_tasks:
+    - name: Create a private directory for the stub file
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: xai-chat-stub-
+      register: _stub_dir
+
+    - name: Name the stub file
+      ansible.builtin.set_fact:
+        xai_stub_file: "{{ _stub_dir.path }}/stub.json"
+
+  tasks:
+    - name: Case, one lens drops and succeeds on retry
+      ansible.builtin.include_tasks: xai_lens_case.yml
+      vars:
+        xai_case_responses:
+          security: { failed: true, msg: "{{ rst_stream }}", attempts: [{ usage: "{{ usage_dropped }}", error: "{{ rst_stream }}" }] }
+          security-retry: "{{ ok_security }}"
+          review: "{{ ok_review }}"
+
+    - name: Confirm the retry ran, the sibling was kept, and all usage counts
+      ansible.builtin.assert:
+        that:
+          - _case_failure == ""
+          - _case_calls == ['review', 'security', 'security-retry']
+          - security_result.structured.scores.security | int == 90
+          - review_result.structured.scores.quality | int == 80
+          - security_result.usage_normalized.input_tokens | int == 100
+          - >-
+            pipeline_agent_calls | selectattr('lens', 'equalto', 'security')
+            | map(attribute='usage.input_tokens') | map('int') | list == [7, 100]
+          - >-
+            pipeline_agent_calls | selectattr('lens', 'equalto', 'review')
+            | map(attribute='usage.input_tokens') | map('int') | list == [200]
+        fail_msg: "failure={{ _case_failure }} calls={{ _case_calls }} usage={{ pipeline_agent_calls }}"
+
+    - name: Case, both lenses finish, with attempts on one and absent on the other
+      ansible.builtin.include_tasks: xai_lens_case.yml
+      vars:
+        xai_case_responses:
+          security: "{{ ok_security | combine({'attempts': [{'usage': usage_dropped, 'error': rst_stream}, {'usage': usage_security, 'error': none}]}) }}"
+          review: "{{ ok_review }}"
+
+    - name: Confirm no retry and no double count of the successful attempt
+      ansible.builtin.assert:
+        that:
+          - _case_failure == ""
+          - _case_calls == ['review', 'security']
+          - security_result.structured.scores.security | int == 90
+          - review_result.structured.scores.quality | int == 80
+          - >-
+            pipeline_agent_calls | selectattr('lens', 'equalto', 'security')
+            | map(attribute='usage.input_tokens') | map('int') | list == [7, 100]
+          - >-
+            pipeline_agent_calls | selectattr('lens', 'equalto', 'review')
+            | map(attribute='usage.input_tokens') | map('int') | list == [200]
+        fail_msg: "failure={{ _case_failure }} calls={{ _case_calls }} usage={{ pipeline_agent_calls }}"
+
+    - name: Case, one lens stays down after its retry
+      ansible.builtin.include_tasks: xai_lens_case.yml
+      vars:
+        xai_case_responses:
+          security: { failed: true, msg: "{{ rst_stream }}", attempts: [{ usage: "{{ usage_dropped }}", error: "{{ rst_stream }}" }] }
+          security-retry: { failed: true, msg: "{{ unavailable }} This private security prompt line must not appear xai-notarealkey123", attempts: [{ usage: null, error: "{{ unavailable }}" }] }
+          review: "{{ ok_review }}"
+
+    - name: Price the usage the way the run summary does
+      compute_pipeline_cost:
+        pipeline_agent_calls: "{{ pipeline_agent_calls }}"
+        pipeline_pricing_table: "{{ pipeline_pricing_table | default({}) }}"
+      register: _case_cost
+
+    - name: Confirm the play fails closed with the message and the usage
+      ansible.builtin.assert:
+        that:
+          - _case_calls == ['review', 'security', 'security-retry']
+          - "'Security lens' in _case_failure"
+          - "'StatusCode.UNAVAILABLE' in _case_failure"
+          - "'Socket closed' in _case_failure"
+          - "'Review lens' not in _case_failure"
+          - "'finish_reason=unknown' not in _case_failure"
+          - "'private security prompt' not in _case_failure"
+          - "'notarealkey' not in _case_failure"
+          - "'192.0.2.1' not in _case_failure"
+          - review_verdict is not defined
+          - security_result == {}
+          - _case_cost.total_input_tokens | int == 207
+          - (_case_cost.call_costs | map('float') | sum) > 0.4
+          - pipeline_pricing_table is defined
+        fail_msg: "failure={{ _case_failure }} calls={{ _case_calls }} cost={{ _case_cost }}"
+
+    - name: Case, authentication failure
+      ansible.builtin.include_tasks: xai_lens_case.yml
+      vars:
+        xai_case_responses:
+          security: { failed: true, msg: "{{ unauthenticated }}", attempts: [] }
+          review: "{{ ok_review }}"
+
+    - name: Confirm auth is not retried and its sibling's usage is kept
+      ansible.builtin.assert:
+        that:
+          - _case_calls == ['review', 'security']
+          - "'StatusCode.UNAUTHENTICATED' in _case_failure"
+          - "'notarealkey' not in _case_failure"
+          - >-
+            pipeline_agent_calls | map(attribute='lens') | list == ['review']
+        fail_msg: "failure={{ _case_failure }} calls={{ _case_calls }} usage={{ pipeline_agent_calls }}"
+
+    - name: Case, quota failure
+      ansible.builtin.include_tasks: xai_lens_case.yml
+      vars:
+        xai_case_responses:
+          security: "{{ ok_security }}"
+          review: { failed: true, msg: 'status = StatusCode.RESOURCE_EXHAUSTED details = "spending limit reached"' }
+
+    - name: Confirm quota is not retried
+      ansible.builtin.assert:
+        that:
+          - _case_calls == ['review', 'security']
+          - "'Review lens' in _case_failure"
+          - "'spending limit reached' in _case_failure"
+        fail_msg: "failure={{ _case_failure }} calls={{ _case_calls }}"
+
+    - name: Case, timeout failure
+      ansible.builtin.include_tasks: xai_lens_case.yml
+      vars:
+        xai_case_responses:
+          security: { failed: true, msg: "The xAI stream exceeded the client timeout of 1800 seconds before the response finished." }
+          review: "{{ ok_review }}"
+
+    - name: Confirm a timeout is not retried
+      ansible.builtin.assert:
+        that:
+          - _case_calls == ['review', 'security']
+          - "'client timeout' in _case_failure"
+        fail_msg: "failure={{ _case_failure }} calls={{ _case_calls }}"
+
+    - name: Case, finished with unparseable output
+      ansible.builtin.include_tasks: xai_lens_case.yml
+      vars:
+        xai_case_responses:
+          security: { structured: null, finish_reason: length, usage: "{{ usage_security }}" }
+          review: "{{ ok_review }}"
+
+    - name: Confirm null structured output is a failure and not an empty clean lens
+      ansible.builtin.assert:
+        that:
+          - _case_calls == ['review', 'security']
+          - "'finish_reason=length' in _case_failure"
+          - pipeline_agent_calls | length == 2
+        fail_msg: "failure={{ _case_failure }} calls={{ _case_calls }}"
+
+    - name: Case, explore auth failure
+      ansible.builtin.include_tasks: xai_explore_case.yml
+      vars:
+        xai_case_responses:
+          - { failed: true, msg: "{{ unauthenticated }}" }
+          - "{{ report_call }}"
+
+    - name: Confirm explore re-raises auth at once with the real error
+      ansible.builtin.assert:
+        that:
+          - _case_calls == ['explore']
+          - "'StatusCode.UNAUTHENTICATED' in _case_failure"
+          - "'notarealkey' not in _case_failure"
+          - "'invalid or incomplete structured output' not in _case_failure"
+        fail_msg: "failure={{ _case_failure }} calls={{ _case_calls }}"
+
+    - name: Case, explore drops then succeeds
+      ansible.builtin.include_tasks: xai_explore_case.yml
+      vars:
+        xai_case_responses:
+          - { failed: true, msg: "{{ rst_stream }}" }
+          - "{{ report_call }}"
+
+    - name: Confirm explore retried a dropped stream
+      ansible.builtin.assert:
+        that:
+          - _case_failure == ""
+          - _case_calls == ['explore', 'explore']
+          - review_explore_done | bool
+        fail_msg: "failure={{ _case_failure }} calls={{ _case_calls }}"
+
+    - name: Case, explore drops on every attempt
+      ansible.builtin.include_tasks: xai_explore_case.yml
+      vars:
+        xai_case_responses:
+          - { failed: true, msg: "{{ rst_stream }}" }
+
+    - name: Confirm explore reports the provider error, not invalid output
+      ansible.builtin.assert:
+        that:
+          - _case_calls == ['explore', 'explore']
+          - "'RST_STREAM' in _case_failure"
+          - "'provider error' in _case_failure"
+          - "'invalid or incomplete structured output' not in _case_failure"
+        fail_msg: "failure={{ _case_failure }} calls={{ _case_calls }}"
+
+  post_tasks:
+    - name: Remove the stub directory
+      ansible.builtin.file:
+        path: "{{ _stub_dir.path }}"
+        state: absent

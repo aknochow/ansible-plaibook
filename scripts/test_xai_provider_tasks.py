@@ -12,7 +12,7 @@ def _text(name: str) -> str:
 
 def test_xai_lens_uses_the_xai_sdk_module():
     lens = _text("dispatch_lens_xai.yml")
-    assert "aknochow.xai.chat:" in lens
+    assert "default('aknochow.xai.chat')" in lens
     assert "aknochow.openai.chat" not in lens
     assert "response_schema:" in lens
     assert "max_tokens:" in lens

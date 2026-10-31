@@ -1,0 +1,41 @@
+---
+# One run of the real dispatch_lens_xai.yml over a stub response per
+# conversation. Leaves the calls made in _case_calls and any play failure
+# message in _case_failure. The caller asserts on those and on the facts.
+- name: Reset lens state for this case
+  ansible.builtin.set_fact:
+    pipeline_agent_calls: []
+    _case_failure: ""
+    security_result: {}
+    review_result: {}
+
+- name: Remove the previous case's call log
+  ansible.builtin.file:
+    path: "{{ xai_stub_file }}.calls"
+    state: absent
+
+- name: Write this case's stub responses
+  ansible.builtin.copy:
+    dest: "{{ xai_stub_file }}"
+    mode: "0600"
+    content: "{{ xai_case_responses | to_json }}"
+
+- name: Run the real lens dispatch
+  block:
+    - name: Dispatch both lenses through the real async wait
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: dispatch_lens_xai
+  rescue:
+    - name: Keep the failure message
+      ansible.builtin.set_fact:
+        _case_failure: "{{ ansible_failed_result.msg | default('') }}"
+
+- name: Read the calls this case made
+  ansible.builtin.slurp:
+    src: "{{ xai_stub_file }}.calls"
+  register: _case_calls_raw
+
+- name: Keep the calls as a sorted list
+  ansible.builtin.set_fact:
+    _case_calls: "{{ (_case_calls_raw.content | b64decode).split() | sort }}"

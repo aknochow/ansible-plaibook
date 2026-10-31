@@ -3,7 +3,20 @@
 #
 # Calls aknochow.xai.chat, which uses xai-sdk chat.stream. This is not the
 # OpenAI-compatible Chat Completions path. The result is normalized here to
-# the same shape consumed by lenses.yml.
+# the same shape consumed by lenses.yml. xai_chat_module is an allowlist so
+# playbook tests can load the offline stub.
+
+- name: "xAI: resolve the lens module name"
+  ansible.builtin.set_fact:
+    _xai_lens_module: "{{ xai_chat_module | default('aknochow.xai.chat') }}"
+
+- name: "xAI: reject a lens module outside the allowlist"
+  ansible.builtin.assert:
+    that:
+      - _xai_lens_module in ['aknochow.xai.chat', 'xai_chat_stub']
+    fail_msg: >-
+      xai_chat_module '{{ _xai_lens_module }}' is not allowed.
+      The lenses will only load aknochow.xai.chat or the offline test stub.
 
 - name: "xAI: show the Security agent's request configuration"
   ansible.builtin.debug:
@@ -19,7 +32,8 @@
       ] + security_system_prompt.split('\n') }}"
 
 - name: "xAI: dispatch the Security agent"
-  aknochow.xai.chat:
+  action:
+    module: "{{ _xai_lens_module }}"
     model: "{{ review_xai_model }}"
     reasoning_effort: "{{ review_xai_lens_reasoning_effort }}"
     max_tokens: "{{ review_xai_max_tokens }}"
@@ -49,7 +63,8 @@
       ] + review_system_prompt.split('\n') }}"
 
 - name: "xAI: dispatch the Review agent"
-  aknochow.xai.chat:
+  action:
+    module: "{{ _xai_lens_module }}"
     model: "{{ review_xai_model }}"
     reasoning_effort: "{{ review_xai_lens_reasoning_effort }}"
     max_tokens: "{{ review_xai_max_tokens }}"
@@ -65,16 +80,30 @@
   poll: 0
   register: _xai_review_job
 
+# failed_when: false keeps one dead lens from ending the task and losing its
+# finished sibling. It also rewrites failed, so nothing below reads failed.
+# The decisions use finished, structured, and msg.
 - name: "xAI: wait for both lenses"
   ansible.builtin.async_status:
     jid: "{{ item.ansible_job_id }}"
   loop:
     - "{{ _xai_security_job }}"
     - "{{ _xai_review_job }}"
-  register: _xai_lens_jobs
-  until: _xai_lens_jobs.finished
+  register: _xai_lens_wait
+  until: _xai_lens_wait.finished
   retries: "{{ ((xai_timeout | float + 60) / 5) | round(0, 'ceil') | int }}"
   delay: 5
+  failed_when: false
+
+# until writes its own retry count over the result's attempts key, which is
+# where the module reports each attempt's usage. A read with no until keeps it.
+- name: "xAI: read both lens results"
+  ansible.builtin.async_status:
+    jid: "{{ item.ansible_job_id }}"
+  loop:
+    - "{{ _xai_security_job }}"
+    - "{{ _xai_review_job }}"
+  register: _xai_lens_jobs
   failed_when: false
 
 - name: "xAI: note a lens that died on a dropped stream"
@@ -84,7 +113,8 @@
 
 - name: "xAI: dispatch the Security agent again after a dropped stream"
   when: _xai_security_transport_retry | bool
-  aknochow.xai.chat:
+  action:
+    module: "{{ _xai_lens_module }}"
     model: "{{ review_xai_model }}"
     reasoning_effort: "{{ review_xai_lens_reasoning_effort }}"
     max_tokens: "{{ review_xai_max_tokens }}"
@@ -102,7 +132,8 @@
 
 - name: "xAI: dispatch the Review agent again after a dropped stream"
   when: _xai_review_transport_retry | bool
-  aknochow.xai.chat:
+  action:
+    module: "{{ _xai_lens_module }}"
     model: "{{ review_xai_model }}"
     reasoning_effort: "{{ review_xai_lens_reasoning_effort }}"
     max_tokens: "{{ review_xai_max_tokens }}"
@@ -125,42 +156,54 @@
   loop:
     - "{{ _xai_security_retry_job | default({}) }}"
     - "{{ _xai_review_retry_job | default({}) }}"
-  register: _xai_lens_retry_jobs
-  until: _xai_lens_retry_jobs.finished
+  register: _xai_lens_retry_wait
+  until: _xai_lens_retry_wait.finished
   retries: "{{ ((xai_timeout | float + 60) / 5) | round(0, 'ceil') | int }}"
   delay: 5
   failed_when: false
 
+- name: "xAI: read a retried lens's result"
+  when: item.ansible_job_id is defined
+  ansible.builtin.async_status:
+    jid: "{{ item.ansible_job_id }}"
+  loop:
+    - "{{ _xai_security_retry_job | default({}) }}"
+    - "{{ _xai_review_retry_job | default({}) }}"
+  register: _xai_lens_retry_jobs
+  failed_when: false
+
 - name: "xAI: collect both lens results"
   ansible.builtin.set_fact:
-    _xai_security_raw: >-
-      {{ (_xai_lens_retry_jobs.results | default([]))[0]
-         if ((_xai_lens_retry_jobs.results | default([])) | length) > 0
-            and ((_xai_lens_retry_jobs.results | default([]))[0].structured | default(none)) is not none
-         else _xai_lens_jobs.results[0] }}
-    _xai_review_raw: >-
-      {{ (_xai_lens_retry_jobs.results | default([]))[1]
-         if ((_xai_lens_retry_jobs.results | default([])) | length) > 1
-            and ((_xai_lens_retry_jobs.results | default([]))[1].structured | default(none)) is not none
-         else _xai_lens_jobs.results[1] }}
+    _xai_security_raw: "{{ _xai_lens_jobs.results[0] | xai_lens_final_result(_xai_lens_retry_jobs.results[0]) }}"
+    _xai_review_raw: "{{ _xai_lens_jobs.results[1] | xai_lens_final_result(_xai_lens_retry_jobs.results[1]) }}"
 
-- name: "xAI: fail loudly if the Security agent produced no structured output"
-  ansible.builtin.assert:
-    that:
-      - _xai_security_raw.structured is defined
-    fail_msg: >-
-      Security lens ({{ review_xai_model }}, agent_family=xai) produced no
-      .structured output despite response_schema being set
-      (finish_reason={{ _xai_security_raw.finish_reason | default('unknown') }}).
+# Before any failure below. review.yml's always block writes last_run from
+# these two facts, and lenses.yml does not reach its own recording on a failure.
+- name: "xAI: record every lens attempt's usage for the pipeline-wide stats summary"
+  ansible.builtin.set_fact:
+    pipeline_agent_calls: >-
+      {{ (pipeline_agent_calls | default([]))
+         + ([_xai_lens_jobs.results[0], _xai_lens_retry_jobs.results[0]]
+            | xai_lens_usage_calls(review_org_repo ~ '#' ~ review_number, 'security', review_xai_model))
+         + ([_xai_lens_jobs.results[1], _xai_lens_retry_jobs.results[1]]
+            | xai_lens_usage_calls(review_org_repo ~ '#' ~ review_number, 'review', review_xai_model)) }}
+    pipeline_pricing_table: "{{ agent_pricing }}"
 
-- name: "xAI: fail loudly if the Review agent produced no structured output"
-  ansible.builtin.assert:
-    that:
-      - _xai_review_raw.structured is defined
-    fail_msg: >-
-      Review lens ({{ review_xai_model }}, agent_family=xai) produced no
-      .structured output despite response_schema being set
-      (finish_reason={{ _xai_review_raw.finish_reason | default('unknown') }}).
+- name: "xAI: read why a lens has no structured output"
+  ansible.builtin.set_fact:
+    _xai_security_failure: "{{ _xai_security_raw | xai_lens_failure_reason([security_system_prompt]) }}"
+    _xai_review_failure: "{{ _xai_review_raw | xai_lens_failure_reason([review_system_prompt]) }}"
+
+# One lens is not a review. No verdict comes from the lens that survived.
+- name: "xAI: fail closed if either lens produced no structured output"
+  when: (_xai_security_failure | length > 0) or (_xai_review_failure | length > 0)
+  ansible.builtin.fail:
+    msg: >-
+      {{ ('Security lens (' ~ review_xai_model ~ ', agent_family=xai) failed: ' ~ _xai_security_failure ~ '. ')
+         if (_xai_security_failure | length > 0) else '' }}{{
+         ('Review lens (' ~ review_xai_model ~ ', agent_family=xai) failed: ' ~ _xai_review_failure ~ '. ')
+         if (_xai_review_failure | length > 0) else '' }}No verdict was produced, because
+      a review needs both lenses. Usage from every attempt is in the run summary.
 
 - name: "xAI: build the normalized Security result"
   ansible.builtin.set_fact:
@@ -169,14 +212,7 @@
         findings: "{{ (_xai_security_raw.structured | default({})).findings | default([]) }}"
         scores: "{{ (_xai_security_raw.structured | default({})).scores | default({}) }}"
       resolved_model: "{{ (_xai_security_raw.response | default({})).model | default(review_xai_model, true) }}"
-      usage_normalized:
-        input_tokens: "{{ [(_xai_security_raw.usage.prompt_tokens | default(0) | int) - (_xai_security_raw.usage.cached_tokens | default(0) | int), 0] | max }}"
-        output_tokens: "{{ _xai_security_raw.usage.completion_tokens | default(0) | int }}"
-        cache_write_tokens: 0
-        cache_read_tokens: "{{ _xai_security_raw.usage.cached_tokens | default(0) | int }}"
-        thinking_tokens: "{{ _xai_security_raw.usage.reasoning_tokens | default(0) | int }}"
-        total_tokens: "{{ _xai_security_raw.usage.total_tokens | default(0) | int }}"
-        cost_in_usd_ticks: "{{ _xai_security_raw.usage.cost_in_usd_ticks | default(0) | int }}"
+      usage_normalized: "{{ _xai_security_raw.usage | default({}) | xai_usage_normalized }}"
 
 - name: "xAI: build the normalized Review result"
   ansible.builtin.set_fact:
@@ -185,11 +221,4 @@
         findings: "{{ (_xai_review_raw.structured | default({})).findings | default([]) }}"
         scores: "{{ (_xai_review_raw.structured | default({})).scores | default({}) }}"
       resolved_model: "{{ (_xai_review_raw.response | default({})).model | default(review_xai_model, true) }}"
-      usage_normalized:
-        input_tokens: "{{ [(_xai_review_raw.usage.prompt_tokens | default(0) | int) - (_xai_review_raw.usage.cached_tokens | default(0) | int), 0] | max }}"
-        output_tokens: "{{ _xai_review_raw.usage.completion_tokens | default(0) | int }}"
-        cache_write_tokens: 0
-        cache_read_tokens: "{{ _xai_review_raw.usage.cached_tokens | default(0) | int }}"
-        thinking_tokens: "{{ _xai_review_raw.usage.reasoning_tokens | default(0) | int }}"
-        total_tokens: "{{ _xai_review_raw.usage.total_tokens | default(0) | int }}"
-        cost_in_usd_ticks: "{{ _xai_review_raw.usage.cost_in_usd_ticks | default(0) | int }}"
+      usage_normalized: "{{ _xai_review_raw.usage | default({}) | xai_usage_normalized }}"

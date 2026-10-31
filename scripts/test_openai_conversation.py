@@ -270,3 +270,69 @@ def test_openai_tasks_call_the_gpt56_filters():
         "review_openai_lens_reasoning_effort: "
         "\"{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_OPENAI_LENS_REASONING_EFFORT') | default('', true) }}\""
     ) in defaults
+
+
+_USAGE = {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12, "cached_tokens": 4,
+          "reasoning_tokens": 1, "cost_in_usd_ticks": 50}
+
+
+def test_usage_normalized_tolerates_missing_and_null_fields():
+    from openai_conversation import xai_usage_normalized
+
+    assert xai_usage_normalized(_USAGE) == {
+        "input_tokens": 6, "output_tokens": 2, "cache_write_tokens": 0, "cache_read_tokens": 4,
+        "thinking_tokens": 1, "total_tokens": 12, "cost_in_usd_ticks": 50,
+    }
+    assert xai_usage_normalized({"prompt_tokens": None})["input_tokens"] == 0
+    assert xai_usage_normalized(None)["total_tokens"] == 0
+
+
+def test_usage_calls_do_not_double_count_the_successful_attempt():
+    from openai_conversation import xai_lens_usage_calls as calls
+
+    job = {"usage": _USAGE, "attempts": [{"usage": dict(_USAGE, prompt_tokens=20), "error": "RST_STREAM"},
+                                         {"usage": _USAGE, "error": None}]}
+    found = calls([job], "o/r#1", "security", "grok-4.7")
+    assert [c["usage"]["input_tokens"] for c in found] == [16, 6]
+    assert [c["attempt"] for c in found] == [1, 2]
+
+
+def test_usage_calls_tolerate_absent_empty_and_null_attempts():
+    from openai_conversation import xai_lens_usage_calls as calls
+
+    # No attempts key, as with an older collection.
+    assert len(calls([{"usage": _USAGE}], "t", "review", "m")) == 1
+    # No attempt started.
+    assert calls([{"attempts": [], "msg": "bad"}], "t", "review", "m") == []
+    assert len(calls([{"attempts": [], "usage": _USAGE}], "t", "review", "m")) == 1
+    # A dropped stream that billed nothing.
+    assert calls([{"attempts": [{"usage": None, "error": "RST_STREAM"}]}], "t", "review", "m") == []
+    # until's integer retry count on the same key, and a skipped retry item.
+    assert len(calls([{"attempts": 3, "usage": _USAGE}, {"skipped": True}], "t", "review", "m")) == 1
+
+
+def test_usage_calls_number_attempts_across_first_dispatch_and_retry():
+    from openai_conversation import xai_lens_usage_calls as calls
+
+    first = {"attempts": [{"usage": _USAGE, "error": "RST_STREAM"}], "msg": "RST_STREAM"}
+    retry = {"usage": _USAGE, "response": {"model": "grok-served"}}
+    found = calls([first, retry], "t", "security", "grok-4.7")
+    assert [(c["attempt"], c["model"]) for c in found] == [(1, "grok-4.7"), (2, "grok-served")]
+
+
+def test_final_result_prefers_a_retry_that_ran():
+    from openai_conversation import xai_lens_final_result as final
+
+    first = {"msg": "first"}
+    assert final(first, {"msg": "second"}) == {"msg": "second"}
+    assert final(first, {"skipped": True}) == first
+    assert final(first, {}) == first
+
+
+def test_failure_reason_reports_the_real_error():
+    from openai_conversation import xai_lens_failure_reason as reason
+
+    assert reason({"finished": 1, "structured": {"findings": []}}) == ""
+    assert "RST_STREAM" in reason({"finished": 1, "failed": False, "msg": _RST_STREAM})
+    assert "finish_reason=length" in reason({"finished": 1, "structured": None, "finish_reason": "length"})
+    assert "wait budget" in reason({"finished": 0})
