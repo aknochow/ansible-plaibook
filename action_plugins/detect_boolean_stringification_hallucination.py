@@ -71,13 +71,12 @@ detector:
 Exclusion: a claim that an integer gets stringified, unless the integer
 is only a contrast ("unlike dot-accessed integers"). That's the real
 gotcha above, so it needs a real check. A false negative here only costs
-one verify call; a false positive refutes a finding with no check at all.
+one verify call.
 
-A finding matching all four is deterministically short-circuited to
-evidence_status: refuted in verify_finding.yml, bypassing the LLM
-verify turn entirely for that finding -- cheaper AND more reliable than
-asking a fresh model to re-derive the same correct conclusion every
-time.
+A match no longer refutes a finding directly. Because overly broad matching
+can match real findings, a match instead provides a known-pattern note in the
+verify prompt during the normal verify turn, instructing the verifier to check
+the actual code.
 """
 from __future__ import annotations
 

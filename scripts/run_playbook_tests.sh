@@ -54,6 +54,7 @@ PLAYBOOKS=(
   "tests/test_resolve_target_pr_parsing.yml"
   "tests/test_sandbox_unreachable_teardown.yml"
   "tests/test_screen_diff_comments.yml"
+  "tests/test_verify_boolean_stringification_note.yml"
   "tests/test_verify_provider_failure.yml"
   "tests/test_verify_score_recompute.yml"
   "tests/test_version_alignment.yml"
@@ -73,7 +74,7 @@ run_playbook() {
   local out rc=0
   out="$(mktemp)"
   set +e
-  if [[ "${pb}" == "tests/test_cursor_named_lens_retry.yml" || "${pb}" == "tests/test_cursor_lens_async_wait.yml" || "${pb}" == "tests/test_cursor_verify_status_error.yml" || "${pb}" == "tests/test_verify_provider_failure.yml" ]]; then
+  if [[ "${pb}" == "tests/test_cursor_named_lens_retry.yml" || "${pb}" == "tests/test_cursor_lens_async_wait.yml" || "${pb}" == "tests/test_cursor_verify_status_error.yml" || "${pb}" == "tests/test_verify_provider_failure.yml" || "${pb}" == "tests/test_verify_boolean_stringification_note.yml" ]]; then
     ANSIBLE_LIBRARY="${STUB_LIBRARY}${ANSIBLE_LIBRARY:+:${ANSIBLE_LIBRARY}}" \
       CURSOR_AGENT_STUB_FILE="${STUB_PAYLOAD}" \
       VERIFY_PROVIDER_STUB_FILE="${REPO_ROOT}/tests/.verify_provider_stub.json" \
