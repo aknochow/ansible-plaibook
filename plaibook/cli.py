@@ -360,7 +360,7 @@ def extra_vars_from_args(args: argparse.Namespace, run_id: str) -> dict:
     if args.commit:
         extras["review_type"] = "commit"
         if args.repo_path:
-            extras["repo_path"] = str(Path(args.repo_path).expanduser().resolve())
+            extras["repo_path"] = os.path.abspath(os.path.expanduser(args.repo_path))
         if args.commit_sha:
             extras["commit_sha"] = args.commit_sha
     elif args.branch_target:
