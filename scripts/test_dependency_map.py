@@ -75,9 +75,10 @@ def test_dependency_map_names_review_workflow_pins():
     assert len(checkout_refs) == 1
     caller_refs = set(re.findall(r"plai-review-run\.yml@([0-9a-f]{40})", caller))
     assert len(caller_refs) == 1
-    gateway = re.search(r"OPENSHELL_VERSION=(v\d+\.\d+\.\d+)", run)
-    installer = re.search(r"NVIDIA/OpenShell/([0-9a-f]{40})/install\.sh", run)
-    image = re.search(r"SANDBOX_IMAGE:\s*(\S+)", run)
+    pins = (ROOT / ".github" / "openshell-pins.env").read_text(encoding="utf-8")
+    gateway = re.search(r"^OPENSHELL_VERSION=(\S+)", pins, re.M)
+    installer = re.search(r"^OPENSHELL_INSTALLER_COMMIT=(\S+)", pins, re.M)
+    image = re.search(r"^SANDBOX_IMAGE=(\S+)", pins, re.M)
     assert gateway and installer and image
     required = [
         checkout_refs.pop(),

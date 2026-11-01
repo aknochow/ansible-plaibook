@@ -1,0 +1,77 @@
+name: Bump OpenShell pins
+
+# Opens a pull request when OpenShell publishes a release or the sandbox image
+# moves. The pins stay exact, and the smoke check tests them before a merge.
+# The token comes from the same plai-crew installation as the collection bump.
+# The branch below is bot-owned. Do not commit onto it.
+
+on:
+  schedule:
+    - cron: "47 12 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bump-openshell-pins
+  cancel-in-progress: true
+
+jobs:
+  bump:
+    name: Bump OpenShell gateway and image
+    runs-on: ubuntu-latest
+    environment: plaibook-crew
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Mint a plai-crew installation token
+        id: crew
+        env:
+          PLAI_CREW_APP_ID: ${{ vars.PLAI_CREW_APP_ID }}
+          PLAI_CREW_PRIVATE_KEY: ${{ secrets.PLAI_CREW_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          token="$(python3 scripts/github_app_token.py \
+            --repo "$GITHUB_REPOSITORY" \
+            --id-env PLAI_CREW_APP_ID \
+            --key-env PLAI_CREW_PRIVATE_KEY \
+            --permission contents=write \
+            --permission pull_requests=write)"
+          echo "::add-mask::${token}"
+          echo "token=${token}" >> "$GITHUB_OUTPUT"
+
+      - name: Refresh the pins
+        env:
+          GITHUB_TOKEN: ${{ steps.crew.outputs.token }}
+        run: python3 scripts/bump_openshell_pins.py --write --pr-body /tmp/openshell-pin-pr.md
+
+      - name: Open or update the pull request
+        env:
+          GH_TOKEN: ${{ steps.crew.outputs.token }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- .github/openshell-pins.env; then
+            echo "No pin moved."
+            exit 0
+          fi
+          git config user.name "plai-crew[bot]"
+          git config user.email "5277323+plai-crew[bot]@users.noreply.github.com"
+          git checkout -B chore/bump-openshell-pins
+          git add .github/openshell-pins.env docs/dependency-map.md docs/github-review-check.md
+          git commit -s -m "chore(deps): bump OpenShell pins"
+          gh auth setup-git
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*'
+          git push --force-with-lease origin chore/bump-openshell-pins
+          # REST: gh pr list uses GraphQL.
+          existing="$(gh api "repos/${GITHUB_REPOSITORY}/pulls?head=${GITHUB_REPOSITORY_OWNER}:chore/bump-openshell-pins&state=open" --jq '.[0].number // empty')"
+          if [ -n "${existing}" ]; then
+            echo "Updated existing PR #${existing}"
+            exit 0
+          fi
+          gh pr create \
+            --title "chore(deps): bump OpenShell pins" \
+            --body-file /tmp/openshell-pin-pr.md

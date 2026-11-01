@@ -14,7 +14,7 @@ name: plai
 # the GitHub App installation token, and only in the publish step, after
 # the agent has finished. That step runs a copy of the publisher taken
 # before the agent starts. The review step installs OpenShell from the
-# pinned v0.1.2 installer, which starts a local gateway. The community
+# installer pinned in .github/openshell-pins.env, which starts a local gateway. The community
 # sandbox image is pinned by digest. It embeds a policy this gateway
 # cannot activate, so the job sets a global filesystem policy with no
 # network rules, then runs plai review with that image. A boolean
@@ -155,8 +155,6 @@ jobs:
     environment:
       name: plaibook-review
       deployment: false
-    env:
-      SANDBOX_IMAGE: ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e
     steps:
       - name: Fail when this run is not a review of passed checks
         if: >-
@@ -177,6 +175,9 @@ jobs:
           # contains this line.
           ref: "dea10b445cfa3431c516e0b7c69ec814f570a781"
           persist-credentials: false
+
+      - name: Load the OpenShell pins
+        run: grep -E '^[A-Z_]+=' .github/openshell-pins.env >> "$GITHUB_ENV"
 
       - name: Require OPENAI_API_KEY
         id: provider
@@ -219,65 +220,11 @@ jobs:
             sha256sum scripts/github_app_token.py scripts/github_pr_review.py plaibook/__init__.py plaibook/finding_suggestions.py > checksums.txt
           )
 
-      - name: Install OpenShell
+      - name: Start OpenShell and pull the review sandbox
         if: >-
           steps.provider.outputs.ready == 'true' &&
           (inputs.use_sandbox || github.event_name != 'workflow_dispatch')
-        run: |
-          set -euo pipefail
-          installer="$RUNNER_TEMP/openshell-install.sh"
-          curl -fsSL "https://raw.githubusercontent.com/NVIDIA/OpenShell/6648bd0c290efbc41ba131ee9831ee45cd431f94/install.sh" -o "$installer"
-          echo "5c98a86a4b811c471b212219cb2a62d458244220ffa71ac8e3baf3700b17b871  $installer" | sha256sum -c -
-          OPENSHELL_VERSION=v0.1.2 sh "$installer"
-          if [ -x "$HOME/.local/bin/openshell" ]; then
-            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-            export PATH="$HOME/.local/bin:$PATH"
-          fi
-          openshell status
-
-      - name: Replace the image policy and pull the review sandbox
-        if: >-
-          steps.provider.outputs.ready == 'true' &&
-          (inputs.use_sandbox || github.event_name != 'workflow_dispatch')
-        env:
-          OPENSHELL_WORKSPACE: default
-          OPENSHELL_PROVISION_TIMEOUT: "180"
-        run: |
-          set -euo pipefail
-          # The pinned sandbox image embeds /etc/openshell/policy.yaml. On
-          # this gateway that policy stays ConfigurationInvalid until the
-          # 300s repair window expires. A global policy with no network
-          # rules replaces it. Model calls stay on the controller.
-          cat > "$RUNNER_TEMP/plaibook-sandbox-policy.yaml" <<'EOF'
-          version: 1
-          filesystem_policy:
-            include_workdir: true
-            read_only:
-              - /usr
-              - /lib
-              - /bin
-              - /proc
-              - /dev/urandom
-              - /etc
-              - /var/log
-            read_write:
-              - /sandbox
-              - /tmp
-              - /dev/null
-          landlock:
-            compatibility: best_effort
-          EOF
-          openshell policy set --global --yes --policy "$RUNNER_TEMP/plaibook-sandbox-policy.yaml"
-          if ! timeout 300 openshell sandbox create \
-            --name plaibook-image-warm \
-            --from "$SANDBOX_IMAGE" \
-            --detach \
-            --no-tty; then
-            openshell sandbox get plaibook-image-warm || true
-            journalctl --user -u openshell-gateway --no-pager -n 40 || true
-            exit 1
-          fi
-          openshell sandbox delete plaibook-image-warm
+        run: bash scripts/ci_openshell_up.sh
 
       - name: Run plai review
         id: plai
