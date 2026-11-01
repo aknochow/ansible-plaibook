@@ -47,7 +47,8 @@ def test_operator_vars_copy_drops_secret_named_settings(tmp_path):
     source = config / "ansible-plaibook" / "vars.yml"
     source.parent.mkdir(parents=True)
     source.write_text(
-        "agent_family: openai\nreview_openai_max_tokens: 5\nmy_api_key: x\ngithub_token: x\nreview_secret: x\n",
+        "agent_family: openai\nreview_openai_max_tokens: 5\nmy_api_key: x\ngithub_token: x\nreview_secret: x\n"
+        "nested: {keep: 1, password: x, items: [{keep: 2, api_key: x}]}\n",
         encoding="utf-8",
     )
     run = ee.prepare_run("abcDEF0123456789", home=tmp_path, env={"XDG_CONFIG_HOME": str(config)})
@@ -55,6 +56,7 @@ def test_operator_vars_copy_drops_secret_named_settings(tmp_path):
     assert yaml.safe_load(copied.read_text(encoding="utf-8")) == {
         "agent_family": "openai",
         "review_openai_max_tokens": 5,
+        "nested": {"keep": 1, "items": [{"keep": 2}]},
     }
     assert (copied.stat().st_mode & 0o777) == 0o600
 

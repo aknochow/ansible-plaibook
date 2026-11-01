@@ -245,6 +245,14 @@ def _write_passwd(run: EeRun) -> None:
     os.chmod(run.passwd, 0o644)
 
 
+def _without_secret_names(value):
+    if isinstance(value, dict):
+        return {key: _without_secret_names(item) for key, item in value.items() if not _SECRET_VAR.search(str(key))}
+    if isinstance(value, list):
+        return [_without_secret_names(item) for item in value]
+    return value
+
+
 def _copy_operator_vars(run: EeRun, env: Mapping[str, str], home: Path) -> None:
     """Give the container a copy of vars.yml, without secret-named settings.
 
@@ -258,7 +266,7 @@ def _copy_operator_vars(run: EeRun, env: Mapping[str, str], home: Path) -> None:
         settings = load_vars(path=source)
     except ConfigError as exc:
         raise EeError(str(exc)) from exc
-    kept = {key: value for key, value in settings.items() if not _SECRET_VAR.search(str(key))}
+    kept = _without_secret_names(settings)
     target = run.home / ".config" / CONFIG_DIRNAME / VARS_NAME
     target.parent.mkdir(mode=0o700, parents=True)
     target.touch(mode=0o600)
