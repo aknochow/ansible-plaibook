@@ -9,6 +9,9 @@ pipx install plaibook
 plai review
 ```
 
+New here? Follow the [Getting Started guide](docs/getting-started.md)
+for a fresh install, provider setup, and commands for your first review.
+
 No arguments reviews `HEAD` in the current directory. `plai review org/repo/123` is a pull request or merge request. `plai update` upgrades the install that just ran.
 
 The PyPI name is `plaibook`. `plai` was already taken, so the two commands are one program. Homebrew and Debian will not let you `pip install` into the system Python ([PEP 668](https://peps.python.org/pep-0668/)). A virtualenv you already manage can `pip install plaibook`. The first run puts the provider collections in `~/.cache/ansible-plaibook/collections` and does not touch `~/.ansible`.
