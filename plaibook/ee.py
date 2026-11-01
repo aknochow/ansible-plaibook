@@ -46,6 +46,9 @@ CONTAINER_LIBRARY = PurePosixPath("/plaibook/lib")
 STALE_RUN_SECONDS = 24 * 60 * 60
 MAX_RESULT_BYTES = 64 * 1024 * 1024
 ENGINE_TIMEOUT_SECONDS = 60
+COSIGN_TIMEOUT_SECONDS = 120
+SIGNING_ISSUER = "https://token.actions.githubusercontent.com"
+SIGNING_WORKFLOW = "https://github.com/aknochow/ansible-plaibook/.github/workflows/ee-publish.yml"
 
 # Names like review_openai_max_tokens are settings, so only a trailing "token" counts.
 _SECRET_VAR = re.compile(r"(?i)(api_?key|secret|password|passwd|credential|(?:^|_)token$)")
@@ -72,6 +75,9 @@ _ENGINE_ENV = (
     "DOCKER_TLS_VERIFY",
     "DOCKER_CERT_PATH",
 )
+
+# cosign needs its cache and the network. It never needs a key or token.
+_COSIGN_ENV = ("PATH", "HOME", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "SSL_CERT_FILE", "TMPDIR")
 
 _OPENAI_ENV = ("OPENAI_API_KEY", "ANSIBLE_OPENAI_API_KEY", "OPENAI_BASE_URL", "ANSIBLE_OPENAI_BASE_URL")
 _XAI_ENV = ("XAI_API_KEY", "GROK_API_KEY")
@@ -140,6 +146,83 @@ def default_image() -> str:
 def resolve_image(cli_image: str | None, env: Mapping[str, str] | None = None) -> str:
     environ = os.environ if env is None else env
     return (cli_image or "").strip() or (environ.get(ENV_IMAGE) or "").strip() or default_image()
+
+
+def verify_release_image(image: str, env: Mapping[str, str] | None = None) -> str:
+    """Check this release's signature and return the image by digest.
+
+    The tag is only used to find the image. What runs is the digest cosign
+    verified, so moving the tag afterwards changes nothing.
+    """
+    environ = os.environ if env is None else env
+    cosign = shutil.which("cosign", path=environ.get("PATH"))
+    if not cosign:
+        raise EeError(
+            f"--ee verifies {image} with cosign, which is not on PATH. "
+            "Install cosign, or choose an image yourself with --ee-image."
+        )
+    identity = f"{SIGNING_WORKFLOW}@refs/tags/v{__version__}"
+    try:
+        completed = subprocess.run(
+            [cosign, "verify", "--certificate-oidc-issuer", SIGNING_ISSUER, "--certificate-identity", identity, image],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=COSIGN_TIMEOUT_SECONDS,
+            env={name: environ[name] for name in _COSIGN_ENV if environ.get(name)},
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise EeError(f"cosign could not verify {image}: {exc}") from exc
+    if completed.returncode != 0:
+        detail = (completed.stderr or "").strip()[-1000:]
+        raise EeError(f"cosign could not verify {image} as signed by {identity}: {detail}")
+    try:
+        digests = {entry["critical"]["image"]["docker-manifest-digest"] for entry in json.loads(completed.stdout)}
+    except (ValueError, KeyError, TypeError) as exc:
+        raise EeError(f"cosign returned unreadable output for {image}.") from exc
+    if len(digests) != 1:
+        raise EeError(f"cosign returned {len(digests)} digests for {image}. Expected one.")
+    digest = str(digests.pop())
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+        raise EeError(f"cosign returned an invalid digest for {image}.")
+    return f"{image.rsplit(':', 1)[0]}@{digest}"
+
+
+def stage_checkout(root: Path, run: EeRun) -> Path:
+    """Copy a checkout's tracked files into the run, and return the tree to mount.
+
+    A checkout also holds .git, untracked files, and host_vars. Content under
+    review can read whatever is mounted. Anything that is not a git checkout,
+    such as the tree inside a wheel, is returned unchanged.
+    """
+    root = root.resolve()
+    if not (root / ".git").exists():
+        return root
+    git = shutil.which("git")
+    if not git:
+        raise EeError(f"--ee needs git to copy the tracked files of {root}.")
+    try:
+        listed = subprocess.run(
+            [git, "-C", str(root), "ls-files", "-z", "--cached"],
+            check=True,
+            capture_output=True,
+            timeout=ENGINE_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise EeError(f"Cannot list the tracked files of {root}: {exc}") from exc
+    stage = run.root / "playbook"
+    for raw in listed.stdout.split(b"\0"):
+        if not raw:
+            continue
+        relative = os.fsdecode(raw)
+        source = root / relative
+        # A file deleted in the working tree is still listed, and a submodule is a directory.
+        if not os.path.lexists(source) or (source.is_dir() and not source.is_symlink()):
+            continue
+        target = stage / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target, follow_symlinks=False)
+    return stage
 
 
 def find_engine() -> str:

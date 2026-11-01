@@ -49,7 +49,7 @@ plai review org/repo/123 --ee --ee-image "ghcr.io/aknochow/plaibook-ee@sha256:<d
 
 The default is `ghcr.io/aknochow/plaibook-ee:<plaibook version>`, the image the same release published. `PLAIBOOK_EE_IMAGE` or `--ee-image` replaces it. The image is pulled only when it is not already local.
 
-A version tag can be moved, and `plai` does not run `cosign verify`. The digest of a release does not exist until that release has been published, so it cannot be recorded in the same package. To run a verified image, use the `cosign verify` command in [Run it](#run-it) and pass the digest to `--ee-image`. A checkout ahead of the newest release runs its playbook against the older collections in that image. Pass `--ee-image` with a `:main` digest for that case.
+For the default image, `plai` runs `cosign verify` against this release's workflow identity and starts the verified digest, so moving the tag changes nothing. `cosign` must be on `PATH`, and the run stops if verification fails. An image from `--ee-image` or `PLAIBOOK_EE_IMAGE` is your choice and is not verified, and `plai` says so when it runs. To verify one yourself, use the `cosign verify` command in [Run it](#run-it) and pass the digest to `--ee-image`.
 
 ### What the container can see
 
@@ -57,7 +57,7 @@ Collections and provider SDKs come from the image. `review_runtime_from_image` s
 
 | Host path | Container path | Mode | Why |
 |---|---|---|---|
-| The playbook tree (a checkout, or the package from a wheel) | `/plaibook/playbook` or `/plaibook/lib/plaibook` | read-only | The image does not contain the playbook or the `plaibook` package. |
+| The playbook tree (a checkout's tracked files, or the package from a wheel) | `/plaibook/playbook` or `/plaibook/lib/plaibook` | read-only | The image does not contain the playbook or the `plaibook` package. A checkout's tracked files are copied into the run first, so `.git`, untracked files, and `host_vars/` are not visible and do not apply. |
 | `~/.cache/ansible-plaibook/ee-runs/<run_id>/home` | same path | read-write | The container's `$HOME`, its clones, and its results. Deleted when the run ends. |
 | `~/.cache/ansible-plaibook/ee-runs/<run_id>/runner` | `/runner` | read-write | `ansible-runner` metadata, including an env file with the values below. Deleted when the run ends. |
 | `~/.cache/ansible-plaibook/ee-runs/<run_id>/passwd` | `/etc/passwd` | read-only | Names the host UID with the run home as its home. The image entrypoint would otherwise replace `$HOME`. |
@@ -66,7 +66,7 @@ Collections and provider SDKs come from the image. `review_runtime_from_image` s
 
 These are deliberately not mounted: `~/.ssh`, the SSH agent, `~/.cache/ansible-plaibook` itself, the directory you ran `plai` from, and any engine socket. A write to the host cache could change the code the next host review runs. `ansible-runner` always mounts `$HOME/.ssh`, so `plai` starts navigator with `HOME` set to an empty directory that links only the engine's own configuration.
 
-`vars.yml` is copied into the run home without settings whose names look secret, at any depth. That filter goes by name only. A checkout's `host_vars/` is visible read-only and is not filtered. Do not keep a secret in either one.
+`vars.yml` is copied into the run home without settings whose names look secret, at any depth. That filter goes by name only. Do not keep a secret there.
 
 The environment is an allowlist. Navigator starts with only what it needs to find the engine, and the container gets the selected provider's variables, `ANSIBLE_REVIEW_*`, and the forge token for the target. `GH_TOKEN` comes from `gh auth token` on the host when neither GitHub variable is set. Values reach navigator through its environment and never appear on a command line. The container also runs as your UID with `--cap-drop=all` and `no-new-privileges`. SELinux labels are off, so that no host directory is relabeled, which removes SELinux from this container's confinement.
 

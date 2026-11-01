@@ -149,10 +149,11 @@ difference as a bump to decide, not as the same pin.
 `ghcr.io/aknochow/plaibook-ee:<plaibook version>`, computed from
 `plaibook.__version__`, which is the image built from the same release.
 A release's digest does not exist until it is published, so the package
-cannot record it. `--ee-image` takes a digest. See
+cannot record it, so `plai` verifies the signature with `cosign` and runs
+the verified digest. `--ee-image` takes a digest. See
 [Execution environment](execution-environment.md#which-image).
-`ansible-navigator` is a host tool the operator installs. It is not a
-plaibook dependency.
+`ansible-navigator` and `cosign` are host tools the operator installs. They
+are not plaibook dependencies.
 
 ## Review workflow pins
 

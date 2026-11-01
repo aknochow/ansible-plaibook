@@ -61,6 +61,83 @@ def test_operator_vars_copy_drops_secret_named_settings(tmp_path):
     assert (copied.stat().st_mode & 0o777) == 0o600
 
 
+def _fake_cosign(monkeypatch, returncode=0, stdout=None, stderr=""):
+    digest = "sha256:" + "a" * 64
+    if stdout is None:
+        stdout = json.dumps([{"critical": {"image": {"docker-manifest-digest": digest}}}])
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        seen["env"] = kwargs["env"]
+        return subprocess.CompletedProcess(command, returncode, stdout, stderr)
+
+    monkeypatch.setattr("plaibook.ee.shutil.which", lambda name, path=None: f"/bin/{name}")
+    monkeypatch.setattr("plaibook.ee.subprocess.run", fake_run)
+    return digest, seen
+
+
+def test_release_image_runs_by_the_digest_cosign_verified(monkeypatch):
+    digest, seen = _fake_cosign(monkeypatch)
+    image = f"ghcr.io/aknochow/plaibook-ee:{__version__}"
+    verified = ee.verify_release_image(image, {"PATH": "/bin", "OPENAI_API_KEY": SECRET})
+    assert verified == f"ghcr.io/aknochow/plaibook-ee@{digest}"
+    assert f"{ee.SIGNING_WORKFLOW}@refs/tags/v{__version__}" in seen["command"]
+    assert ee.SIGNING_ISSUER in seen["command"]
+    assert SECRET not in seen["env"].values()
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"returncode": 1, "stderr": "no matching signatures"},
+        {"stdout": "not json"},
+        {"stdout": "[]"},
+        {"stdout": json.dumps([{"critical": {"image": {"docker-manifest-digest": "sha256:short"}}}])},
+    ],
+)
+def test_release_image_is_refused_when_verification_fails(monkeypatch, arguments):
+    _fake_cosign(monkeypatch, **arguments)
+    with pytest.raises(ee.EeError):
+        ee.verify_release_image("example.com/ee:1", {"PATH": "/bin"})
+
+
+def test_release_image_is_refused_without_cosign(monkeypatch):
+    monkeypatch.setattr("plaibook.ee.shutil.which", lambda name, path=None: None)
+    with pytest.raises(ee.EeError, match="--ee-image"):
+        ee.verify_release_image("example.com/ee:1", {"PATH": "/bin"})
+
+
+def test_stage_checkout_copies_only_tracked_files(tmp_path):
+    root = tmp_path / "checkout"
+    (root / "roles").mkdir(parents=True)
+    (root / "review.yml").write_text("tracked\n", encoding="utf-8")
+    (root / "roles" / "gone.yml").write_text("deleted\n", encoding="utf-8")
+    (root / "roles" / "link.yml").symlink_to("../review.yml")
+    (root / ".gitignore").write_text("host_vars/\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    (root / "roles" / "gone.yml").unlink()
+    (root / "untracked.txt").write_text("private\n", encoding="utf-8")
+    (root / "host_vars").mkdir()
+    (root / "host_vars" / "localhost.yml").write_text("private\n", encoding="utf-8")
+    run = _run_dirs(tmp_path)
+    stage = ee.stage_checkout(root, run)
+    assert stage == run.root / "playbook"
+    assert sorted(p.relative_to(stage).as_posix() for p in stage.rglob("*") if not p.is_dir()) == [
+        ".gitignore",
+        "review.yml",
+        "roles/link.yml",
+    ]
+    assert (stage / "roles" / "link.yml").is_symlink()
+
+
+def test_stage_checkout_leaves_a_non_checkout_alone(tmp_path):
+    root = tmp_path / "share"
+    root.mkdir()
+    assert ee.stage_checkout(root, _run_dirs(tmp_path)) == root.resolve()
+
+
 def test_home_reaches_the_container_but_not_the_engine_client(tmp_path):
     command = _command(_run_dirs(tmp_path), tmp_path)
     senv = [command[i + 1] for i, part in enumerate(command) if part == "--senv"]
@@ -313,6 +390,7 @@ def test_review_runs_navigator_publishes_and_removes_the_run_tree(ee_host, monke
         )
         return subprocess.CompletedProcess(command, 0, "", "")
 
+    monkeypatch.setattr("plaibook.ee.verify_release_image", lambda image: image)
     monkeypatch.setattr("plaibook.cli.run_process_group", fake_group)
     assert cmd_review(_ee_args()) == 0
     assert "READY_FOR_HUMAN_REVIEW" in capsys.readouterr().out
@@ -336,6 +414,7 @@ def test_timeout_removes_the_container_and_the_run_tree(ee_host, monkeypatch):
     def fake_group(command, **kwargs):
         raise PlaybookTimeoutError(1, command)
 
+    monkeypatch.setattr("plaibook.ee.verify_release_image", lambda image: image)
     monkeypatch.setattr("plaibook.cli.run_process_group", fake_group)
     monkeypatch.setattr("plaibook.ee.stop_run_containers", lambda engine, run_id, env: stopped.append(run_id))
     assert cmd_review(_ee_args()) == 2

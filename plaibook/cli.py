@@ -895,6 +895,14 @@ def _cmd_review_ee(args: argparse.Namespace, root: Path, run_id: str, extras: di
             "review_run_ledger_host": ledger_name,
         }
         image = ee.resolve_image(getattr(args, "ee_image", None))
+        if image == ee.default_image():
+            image = ee.verify_release_image(image)
+        else:
+            print(f"--ee is running {image}, which plai has not verified.", file=sys.stderr)
+        package_dir = Path(__file__).resolve().parent
+        mount_root = ee.stage_checkout(root, run_dirs)
+        if mount_root != root.resolve() and package_dir.is_relative_to(root.resolve()):
+            package_dir = mount_root / package_dir.relative_to(root.resolve())
 
         def run_container(*, verbose: bool, env: dict[str, str] | None) -> subprocess.CompletedProcess[str]:
             command = ee.build_navigator_command(
@@ -902,8 +910,8 @@ def _cmd_review_ee(args: argparse.Namespace, root: Path, run_id: str, extras: di
                 engine=engine,
                 image=image,
                 run=run_dirs,
-                playbook_root=root,
-                package_dir=Path(__file__).resolve().parent,
+                playbook_root=mount_root,
+                package_dir=package_dir,
                 reviews_root=reviews_root,
                 extra_vars=extras,
                 credentials=credentials,
