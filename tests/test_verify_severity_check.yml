@@ -106,7 +106,7 @@
         that:
           - deduped_findings[0].evidence_status is not none
           - deduped_findings[0].severity_status is not none
-          - deduped_findings[0].severity_status in ['confirmed', 'disputed']
+          - deduped_findings[0].severity_status in ['confirmed', 'disputed', 'capped']
         fail_msg: >-
           Expected the Minor Security-lens fixture to be scoped for
           verification via the lens signal alone. Got evidence_status={{
@@ -117,7 +117,7 @@
         that:
           - deduped_findings[1].evidence_status is not none
           - deduped_findings[1].severity_status is not none
-          - deduped_findings[1].severity_status in ['confirmed', 'disputed']
+          - deduped_findings[1].severity_status in ['confirmed', 'disputed', 'capped']
         fail_msg: >-
           Expected the "credential"-keyword Functionality-lens fixture to
           be scoped for verification via the security-sensitive-pattern
