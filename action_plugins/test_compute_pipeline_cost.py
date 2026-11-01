@@ -154,7 +154,7 @@ def test_empty_calls_list_returns_zeroed_totals():
 # older/unrelated pipeline_agent_calls entry with no thinking_tokens key
 # at all must not crash the whole stats summary (see compute_pipeline_cost's
 # own comment on this deliberate asymmetry).
-def test_thinking_tokens_totals_leniently_and_is_never_priced():
+def test_thinking_tokens_total_leniently_and_are_unpriced_without_a_rate():
     calls = [
         {"model": "gemini-3.5-flash", "usage": {**_EMPTY_USAGE, "thinking_tokens": 42}},
         {"model": "claude-haiku-4-5", "usage": {**_EMPTY_USAGE, "thinking_tokens": 0}},
@@ -164,8 +164,7 @@ def test_thinking_tokens_totals_leniently_and_is_never_priced():
     assert result["total_thinking_tokens"] == 42
     # No rate for thinking tokens in PRICING_TABLE (or gemini-3.5-flash at
     # all) -- must not silently price them at $0 vs. genuinely unpriced;
-    # gemini-3.5-flash is correctly flagged unpriced, and even if it had
-    # rates, thinking_tokens has no _USAGE_RATE_PAIRS entry to price against.
+    # gemini-3.5-flash is correctly flagged unpriced.
     assert "gemini-3.5-flash" in result["unpriced_models"]
     assert result["call_costs"][0] == 0.0
 
@@ -243,3 +242,26 @@ def test_action_module_surfaces_missing_usage_subkey_as_a_clear_failure():
     result = _run_action_module(calls, PRICING_TABLE)
     assert result["failed"] is True
     assert "missing usage field" in result["msg"]
+
+
+def test_thinking_is_priced_only_for_a_model_with_a_thinking_rate():
+    table = {
+        "gemini-3.8-flash": {
+            "input_per_million": 0.75,
+            "output_per_million": 3.75,
+            "thinking_per_million": 3.75,
+        },
+        "gpt-6-luna": {"input_per_million": 0.10, "output_per_million": 0.50},
+    }
+    usage = {
+        "input_tokens": 1_000_000,
+        "output_tokens": 1_000_000,
+        "cache_write_tokens": 0,
+        "cache_read_tokens": 0,
+        "thinking_tokens": 1_000_000,
+    }
+    result = compute_pipeline_cost(
+        [{"model": "gemini-3.8-flash", "usage": usage}, {"model": "gpt-6-luna", "usage": usage}],
+        table,
+    )
+    assert result["call_costs"] == pytest.approx([8.25, 0.60])
