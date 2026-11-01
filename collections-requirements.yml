@@ -38,6 +38,12 @@ collections:
     # remains. cursor-sdk 1.0.35 and the serialized starts from #30 are
     # unchanged.
     version: b4d2672761296e7338e801cccfd7ac20b08e564d
+  - name: https://github.com/aknochow/ansible-xai.git
+    type: git
+    # SHA is ansible-xai #3 on main: conversation_id as x-grok-conv-id,
+    # attempts usage, one timeout budget across retries, and repeated
+    # JSON output. xai-sdk 1.21.0 is the hashed pin.
+    version: dfbb12ef6b1b93b9f706d198d2e56d206de11e2a
   # GitHub clones, not Galaxy FQCNs. version is the commit SHA of a
   # release tag (tags move). First-run install uses git + ansible-galaxy
   # install --no-deps and never calls galaxy.ansible.com (Python OpenSSL

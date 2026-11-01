@@ -79,6 +79,7 @@ def test_execution_environment_builds_from_the_pin_file():
         "google-genai==2.29.0",
         "openai==3.28.0",
         "cursor-sdk==1.0.37",
+        "xai-sdk==1.21.0",
         "openshell==0.1.3",
     ):
         assert pin in locked
@@ -303,6 +304,7 @@ def test_git_pins_reads_collection_requirements():
     urls = [url for url, _sha in pins]
     assert "https://github.com/aknochow/ansible-cursor.git" in urls
     assert "https://github.com/aknochow/ansible-gemini.git" in urls
+    assert "https://github.com/aknochow/ansible-xai.git" in urls
     assert all(len(sha) >= 7 for _url, sha in pins)
     assert len(pins) >= 8
 
