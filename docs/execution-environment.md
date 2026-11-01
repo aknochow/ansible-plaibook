@@ -36,6 +36,8 @@ The package starts private. Controller needs a `ghcr.io` registry credential unt
 
 ## Run a local review in it
 
+**Experimental.** Options and defaults may change. `--ee` narrows what a review can reach, but it does not keep the selected provider key or forge token away from commands that handle PR content. See [What the container can see](#what-the-container-can-see).
+
 `plai review <target> --ee` runs one PR, MR, or branch review in one container, started with `ansible-navigator`. `plai` stays on the host. It needs `ansible-navigator` (`pipx install ansible-navigator`) and Podman or Docker.
 
 ```bash

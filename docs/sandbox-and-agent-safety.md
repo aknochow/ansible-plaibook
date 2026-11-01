@@ -177,7 +177,7 @@ provider attachment.
 
 ## `plai review --ee` is a different boundary
 
-`plai review --ee` runs the whole review in one [execution environment](execution-environment.md#run-a-local-review-in-it) container with no OpenShell sandbox. That keeps the host out of reach, but the "controller" is now the container. Model calls and the commands that read PR content run there together, so those commands can read the provider key. Only a sandbox separates them.
+`plai review --ee` is experimental. It runs the whole review in one [execution environment](execution-environment.md#run-a-local-review-in-it) container with no OpenShell sandbox. That keeps the host out of reach, but the "controller" is now the container. Model calls and the commands that read PR content run there together, so those commands can read the provider key. Only a sandbox separates them.
 
 ## What we don't do
 
