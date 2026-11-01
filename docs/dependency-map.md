@@ -148,17 +148,16 @@ difference as a bump to decide, not as the same pin.
 | Id | What | SHA | Where |
 |---|---|---|---|
 | `review.caller` | `plai-review.yml` calls the reusable workflow | `9ef97d36b181af43df66f1eca4169b4dc63cbc96` | `.github/workflows/plai-review.yml` `uses:` |
-| `review.checkout` | Both checkouts inside the reusable workflow | `1b495461075838920a9bdedb6d2a5ebfe5087a5b` | `.github/workflows/plai-review-run.yml` `ref:` |
+| `review.checkout` | Both checkouts inside the reusable workflow | `f0f77166d1cda1a8c1cde4cc6d69b960ca9865b2` | `.github/workflows/plai-review-run.yml` `ref:` |
 
 Move `review.checkout` first. Then set `review.caller` to the commit
 that contains those checkout refs. The caller file on the default
 branch is the one `pull_request_target` runs. Do not point the caller
 at a commit whose workflow still checks out the previous tree.
-`1b495461075838920a9bdedb6d2a5ebfe5087a5b` is `main` with the sandbox upload fix and the continuity audit fix.
-`review.caller` is `9ef97d36b181af43df66f1eca4169b4dc63cbc96`.
-That commit contains these checkout refs, so the called workflow
-checks out `1b49546`. It is not `1b49546` itself: that tree's
-workflow file still checks out `dd28e81`.
+`f0f77166d1cda1a8c1cde4cc6d69b960ca9865b2` is `main` with the verifier's severity cap.
+`review.caller` is still `9ef97d36b181af43df66f1eca4169b4dc63cbc96`.
+That commit checks out `1b49546` until the caller moves to the commit
+that contains these checkout refs.
 
 ## CI edges
 
