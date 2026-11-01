@@ -179,6 +179,9 @@ def test_only_this_providers_key_and_this_forges_token_are_named():
         assert "GITLAB_TOKEN" in names
         assert "GH_TOKEN" not in names
     assert {"GH_TOKEN", "GITLAB_TOKEN"} <= set(ee.credential_names("openai", None, env))
+    branch = ee.credential_names("openai", "org/repo", env)
+    assert "GH_TOKEN" in branch
+    assert "GITLAB_TOKEN" not in branch
 
 
 def test_openai_family_gets_the_xai_key_only_when_it_is_the_key_in_use():

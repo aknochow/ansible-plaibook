@@ -864,7 +864,7 @@ def _cmd_review_ee(args: argparse.Namespace, root: Path, run_id: str, extras: di
         last_run_dir() / "ledger",
     )
     ledger_name = ee.ledger_host_name()
-    target = None if args.branch_target else args.target
+    target = args.branch_target or args.target
 
     environ = dict(os.environ)
     try:
