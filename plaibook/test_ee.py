@@ -47,7 +47,7 @@ def test_operator_vars_copy_drops_secret_named_settings(tmp_path):
     source = config / "ansible-plaibook" / "vars.yml"
     source.parent.mkdir(parents=True)
     source.write_text(
-        "agent_family: openai\nreview_openai_max_tokens: 5\nmy_api_key: x\ngithub_token: x\nreview_secret: x\n"
+        "agent_family: openai\nreview_openai_max_tokens: 5\nmy_api_key: x\nprivate_key: x\nbearer_value: x\ngithub_token: x\nreview_secret: x\n"
         "nested: {keep: 1, password: x, items: [{keep: 2, api_key: x}]}\n",
         encoding="utf-8",
     )

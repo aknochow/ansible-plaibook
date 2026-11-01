@@ -51,7 +51,7 @@ SIGNING_ISSUER = "https://token.actions.githubusercontent.com"
 SIGNING_WORKFLOW = "https://github.com/aknochow/ansible-plaibook/.github/workflows/ee-publish.yml"
 
 # Names like review_openai_max_tokens are settings, so only a trailing "token" counts.
-_SECRET_VAR = re.compile(r"(?i)(api_?key|secret|password|passwd|credential|(?:^|_)token$)")
+_SECRET_VAR = re.compile(r"(?i)(api_?key|private_?key|secret|password|passwd|credential|bearer|(?:^|_)token$)")
 
 # What the navigator process needs to find the container engine. Everything
 # else is dropped: ansible-runner copies every ANSIBLE_* variable into the
