@@ -148,13 +148,13 @@ difference as a bump to decide, not as the same pin.
 | Id | What | SHA | Where |
 |---|---|---|---|
 | `review.caller` | `plai-review.yml` calls the reusable workflow | `cac3fbb388f924f929a3bada2ebd730f484576fc` | `.github/workflows/plai-review.yml` `uses:` |
-| `review.checkout` | Both checkouts inside the reusable workflow | `dd28e81b9c722ef68819eb363f62d58b1db4d0cf` | `.github/workflows/plai-review-run.yml` `ref:` |
+| `review.checkout` | Both checkouts inside the reusable workflow | `1b495461075838920a9bdedb6d2a5ebfe5087a5b` | `.github/workflows/plai-review-run.yml` `ref:` |
 
 Move `review.checkout` first. Then set `review.caller` to the commit
 that contains those checkout refs. The caller file on the default
 branch is the one `pull_request_target` runs. Do not point the caller
 at a commit whose workflow still checks out the previous tree.
-`dd28e81b9c722ef68819eb363f62d58b1db4d0cf` is `main` with the hashed SDK install fix and the current model prices.
+`1b495461075838920a9bdedb6d2a5ebfe5087a5b` is `main` with the sandbox upload fix and the continuity audit fix.
 `review.caller` is `cac3fbb388f924f929a3bada2ebd730f484576fc`.
 That commit contains these checkout refs, so the called workflow
 checks out `dd28e81`. It is not `dd28e81` itself: that tree's
