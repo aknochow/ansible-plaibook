@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Name the collection a review family runs on, for run results."""
+"""Name the collection and effort a review ran with, for run results."""
 
 from __future__ import annotations
+
+import re
 
 import yaml
 
@@ -13,6 +15,7 @@ _COLLECTION_BY_FAMILY = {
     "openai": "openai",
     "xai": "xai",
 }
+_PIN = re.compile(r"[0-9a-f]{7,40}")
 
 
 def review_collection_ref(family: str, requirements_path: str) -> str:
@@ -35,10 +38,18 @@ def review_collection_ref(family: str, requirements_path: str) -> str:
     url = f"https://github.com/aknochow/ansible-{name}.git"
     for row in rows:
         if isinstance(row, dict) and row.get("name") == url:
-            return f"aknochow.{name}@{str(row.get('version') or '')[:7]}".rstrip("@")
+            version = str(row.get("version") or "")
+            return f"aknochow.{name}@{version[:7]}" if _PIN.fullmatch(version) else ""
     return ""
+
+
+def review_effort_label(lens: str, tools: str) -> str:
+    """Describe the effort sent to lens calls and to explore and verify calls."""
+    if lens == tools:
+        return lens or ""
+    return f"lens {lens or 'default'}, tools {tools or 'default'}"
 
 
 class FilterModule:
     def filters(self):
-        return {"review_collection_ref": review_collection_ref}
+        return {"review_collection_ref": review_collection_ref, "review_effort_label": review_effort_label}

@@ -342,6 +342,9 @@ def _run_detail(result: dict[str, Any]) -> str:
         names = [str(item).strip() for item in models if str(item).strip()]
         if names:
             parts.append(", ".join(names))
+    effort = result.get("effort")
+    if isinstance(effort, str) and effort.strip():
+        parts.append(f"effort {effort.strip()}")
     agents = result.get("agents_dispatched")
     if isinstance(agents, int) and agents > 0:
         parts.append(f"{agents} agents")

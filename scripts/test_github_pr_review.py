@@ -732,9 +732,10 @@ def test_summary_names_the_collection_after_the_family():
         "agent_family": "openai",
         "collection": "aknochow.openai@3657a67",
         "models": ["gpt-6-luna"],
+        "effort": "lens medium, tools none",
         "targets": [{"verdict": "READY_FOR_HUMAN_REVIEW", "score": 100.0}],
     }
-    assert "openai · aknochow.openai@3657a67 · gpt-6-luna" in summary_body(result, [])
+    assert "openai · aknochow.openai@3657a67 · gpt-6-luna · effort lens medium, tools none" in summary_body(result, [])
 
 
 def test_summary_includes_models_cost_and_tokens():

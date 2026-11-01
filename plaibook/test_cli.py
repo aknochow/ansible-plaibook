@@ -2647,10 +2647,11 @@ def test_format_pretty_names_the_provider_collection_and_model():
             "agent_family": "openai",
             "collection": "aknochow.openai@3657a67",
             "models": ["gpt-6-luna"],
+            "effort": "high",
             "targets": [],
         }
     )
-    assert "provider: openai · aknochow.openai@3657a67 · gpt-6-luna" in text
+    assert "provider: openai · aknochow.openai@3657a67 · gpt-6-luna · effort high" in text
 
 
 def test_format_pretty_omits_an_unknown_provider():

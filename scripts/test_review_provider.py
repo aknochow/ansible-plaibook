@@ -3,11 +3,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parents[1] / "filter_plugins"))
+
+from review_provider import review_collection_ref, review_effort_label
+
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "filter_plugins"))
-
-from review_provider import review_collection_ref
-
 _PINS = ROOT / "collections-requirements.yml"
 
 
@@ -47,3 +47,19 @@ def test_pin_for_another_collection_is_not_used(tmp_path):
         encoding="utf-8",
     )
     assert review_collection_ref("openai", str(pins)) == ""
+
+
+def test_unsafe_pin_text_is_not_shown(tmp_path):
+    pins = tmp_path / "pins.yml"
+    pins.write_text(
+        'collections:\n  - name: https://github.com/aknochow/ansible-openai.git\n    version: "\\n<!--"\n',
+        encoding="utf-8",
+    )
+    assert review_collection_ref("openai", str(pins)) == ""
+
+
+def test_effort_label():
+    assert review_effort_label("high", "high") == "high"
+    assert review_effort_label("medium", "none") == "lens medium, tools none"
+    assert review_effort_label("", "none") == "lens default, tools none"
+    assert review_effort_label("", "") == ""

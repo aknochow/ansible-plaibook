@@ -402,7 +402,7 @@ def _short_why(text: str, limit: int = 200) -> str:
 
 
 def _provider_line(document: dict[str, Any]) -> str:
-    """Name the family, collection, and models this run used."""
+    """Name the family, collection, models, and effort this run used."""
     parts: list[str] = []
     family = document.get("agent_family")
     if family and family != "unknown":
@@ -412,6 +412,8 @@ def _provider_line(document: dict[str, Any]) -> str:
     models = document.get("models")
     if isinstance(models, list) and models:
         parts.append(", ".join(sanitize_display_line(model) for model in models))
+    if document.get("effort"):
+        parts.append(f"effort {sanitize_display_line(document['effort'])}")
     return f"  provider: {' · '.join(parts)}" if parts else ""
 
 

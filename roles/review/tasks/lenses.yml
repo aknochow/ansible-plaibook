@@ -1,6 +1,23 @@
 ---
 # Parallel dispatch of Security and Review agents, each with shared briefing + lens-specific steering.
 
+# Results are written outside the role, where these defaults are not visible.
+- name: Record the effort this run sends to the provider
+  ansible.builtin.set_fact:
+    review_run_effort: >-
+      {%- if agent_family == 'openai' -%}
+      {{ (review_openai_model | openai_lens_reasoning_effort(review_openai_lens_reasoning_effort))
+         | review_effort_label(review_explore_openai_model | openai_tool_reasoning_effort) }}
+      {%- elif agent_family == 'xai' -%}
+      {{ review_xai_lens_reasoning_effort }}
+      {%- elif agent_family == 'gemini' -%}
+      {{ review_gemini_thinking_level }}
+      {%- elif agent_family == 'cursor' -%}
+      {{ review_cursor_effort }}
+      {%- elif agent_family == 'claude_cli' -%}
+      {{ review_claude_cli_effort }}
+      {%- endif -%}
+
 - name: Domains this port has steering blocks for
   ansible.builtin.set_fact:
     known_steering_domains:
