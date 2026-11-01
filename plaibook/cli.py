@@ -8,9 +8,9 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
-from plaibook import version_text
+from plaibook import ee, version_text
 from plaibook.collections import CollectionInstallError, ensure_collections
 from plaibook.config import (
     FAMILIES,
@@ -29,8 +29,11 @@ from plaibook.playbook import (
     build_ansible_command,
     find_playbook_root,
     generate_run_id,
+    last_run_dir,
     last_run_path,
+    playbook_timeout_seconds,
     run_ansible_playbook,
+    run_process_group,
     runtime_tmp_dir,
 )
 from plaibook.progress import create_progress_file
@@ -135,6 +138,7 @@ Examples:
   plai review org/repo/123 -f
   plai review org/repo/123 --provider cursor
   plai review org/repo/123 --no-sandbox
+  plai review org/repo/123 --ee
   plai update
   plai update --check
   plai update --branch main
@@ -289,6 +293,24 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
             "pr/branch when this process is not already inside OpenShell. "
             "Python 3.10 switches to ~/.cache/ansible-plaibook/sandbox-runtime "
             "(Python 3.11+). --no-sandbox stays on this interpreter."
+        ),
+    )
+    review.add_argument(
+        "--ee",
+        action="store_true",
+        help=(
+            "Run this PR/MR or branch review in one execution-environment container "
+            "with ansible-navigator. Keeps ~/.ssh, the SSH agent, and other provider "
+            "keys out of the review. The key this review uses is still inside the "
+            "container with the commands that read PR content. See docs/execution-environment.md."
+        ),
+    )
+    review.add_argument(
+        "--ee-image",
+        metavar="REF",
+        help=(
+            "Image for --ee, preferably by digest. "
+            "Default: PLAIBOOK_EE_IMAGE, then ghcr.io/aknochow/plaibook-ee:<plaibook version>."
         ),
     )
     review.add_argument(
@@ -579,6 +601,11 @@ def cmd_review(args: argparse.Namespace) -> int:
     if conflict:
         print(conflict, file=sys.stderr)
         return 2
+    if getattr(args, "ee", False):
+        return _cmd_review_ee(args, root, run_id, extras)
+    if getattr(args, "ee_image", None):
+        print("--ee-image needs --ee.", file=sys.stderr)
+        return 2
     from plaibook.runtime import controller_python
 
     wrapper = controller_python()
@@ -629,12 +656,32 @@ def cmd_review(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr)
         return 2
 
+    def run_playbook(*, verbose: bool, env: dict[str, str] | None) -> subprocess.CompletedProcess[str]:
+        return run_ansible_playbook(command, playbook_root=root, verbose=verbose, env=env)
+
+    return _run_and_report(
+        args,
+        run=run_playbook,
+        scratch_dir=runtime_tmp_dir,
+        summary_file=last_run_path(run_id),
+    )
+
+
+def _run_and_report(
+    args: argparse.Namespace,
+    *,
+    run: Callable[..., subprocess.CompletedProcess[str]],
+    scratch_dir: Callable[[], Path],
+    summary_file: Path,
+    finalize: Callable[[], None] | None = None,
+) -> int:
+    """Run the playbook with the spinner and failure log, then print last_run."""
     structured = args.as_json or args.as_yaml
     inherit_tty = (not structured) and ansible_verbosity(args) > 0
     failures_path = ""
     log_unavailable = False
     try:
-        _, failures_path = create_task_failures_log(directory=str(runtime_tmp_dir()))
+        _, failures_path = create_task_failures_log(directory=str(scratch_dir()))
     except (OSError, ScratchDirError):
         failures_path = ""
         log_unavailable = True
@@ -642,23 +689,19 @@ def cmd_review(args: argparse.Namespace) -> int:
         if inherit_tty:
             sys.stderr.write(_progress_line(args))
             sys.stderr.flush()
-            result = run_ansible_playbook(
-                command,
-                playbook_root=root,
+            result = run(
                 verbose=True,
                 env=_playbook_env(failures_path),
             )
         elif spinner_enabled(sys.stderr):
-            progress_dir, progress_path = create_progress_file(directory=str(runtime_tmp_dir()))
+            progress_dir, progress_path = create_progress_file(directory=str(scratch_dir()))
             try:
                 with WaitSpinner(
                     _progress_line(args).rstrip("\n"),
                     stream=sys.stderr,
                     progress_file=progress_path,
                 ):
-                    result = run_ansible_playbook(
-                        command,
-                        playbook_root=root,
+                    result = run(
                         verbose=False,
                         env=_playbook_env(failures_path, {"PLAIBOOK_PROGRESS_FILE": progress_path}),
                     )
@@ -672,9 +715,7 @@ def cmd_review(args: argparse.Namespace) -> int:
             if not structured:
                 sys.stderr.write(_progress_line(args))
                 sys.stderr.flush()
-            result = run_ansible_playbook(
-                command,
-                playbook_root=root,
+            result = run(
                 verbose=False,
                 env=_playbook_env(failures_path),
             )
@@ -684,7 +725,7 @@ def cmd_review(args: argparse.Namespace) -> int:
         if failures_path:
             discard_task_failure_log(failures_path)
         return 130
-    except (PlaybookTimeoutError, ScratchDirError, ValueError) as exc:
+    except (PlaybookTimeoutError, ScratchDirError, ee.EeError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         _emit_task_failures(
             failures_path,
@@ -702,10 +743,22 @@ def cmd_review(args: argparse.Namespace) -> int:
             sys.stderr.write("\n")
         captured = ""
         showed_structured_capture = True
+    if finalize is not None:
+        try:
+            finalize()
+        except (ee.EeError, OSError) as exc:
+            print(str(exc), file=sys.stderr)
+            _emit_task_failures(
+                failures_path,
+                args,
+                captured_already_shown=showed_structured_capture,
+                playbook_rc=result.returncode,
+                log_unavailable=log_unavailable,
+            )
+            return 2
     # Always last_run.<run_id>.json — never last_run.json. The playbook
     # always-block writes both (including same-commit cache hits); the
     # canonical path is last-write-wins and can belong to another run.
-    summary_file = last_run_path(run_id)
     if not summary_file.is_file():
         showed_capture = False
         if captured.strip():
@@ -747,6 +800,150 @@ def cmd_review(args: argparse.Namespace) -> int:
         log_unavailable=log_unavailable,
     )
     return result.returncode
+
+
+def _ee_refusal(args: argparse.Namespace, extras: dict) -> str | None:
+    if args.commit:
+        return (
+            "--ee reviews a PR/MR or a branch. A local commit is your own content, and "
+            "the review writes into that checkout. Run it without --ee."
+        )
+    if args.branch_target and os.path.exists(os.path.expanduser(args.branch_target)):
+        return "--ee cannot read a local path. Pass a remote branch reference, or run without --ee."
+    if extras.get("use_sandbox") is True:
+        return "--ee does not start an OpenShell sandbox inside the container. Pass one of --ee and --sandbox."
+    return None
+
+
+def _host_path_var(value: object, default: Path) -> Path:
+    """An absolute host path from extra-vars or vars.yml, or *default*."""
+    if isinstance(value, str) and value.strip() and "{{" not in value:
+        return Path(value).expanduser().absolute()
+    return default
+
+
+def _cmd_review_ee(args: argparse.Namespace, root: Path, run_id: str, extras: dict) -> int:
+    """One review in one container, started with ansible-navigator."""
+    refusal = _ee_refusal(args, extras)
+    if refusal:
+        print(refusal, file=sys.stderr)
+        return 2
+    if getattr(args, "provider", None) or "agent_family" not in extras:
+        try:
+            resolve_family(
+                cli_family=getattr(args, "provider", None),
+                stdin=sys.stdin,
+                stderr=sys.stderr,
+            )
+        except (ValueError, ConfigError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+    try:
+        operator_vars = load_vars()
+    except ConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    family = (
+        extras.get("agent_family")
+        or operator_vars.get("agent_family")
+        or (os.environ.get("ANSIBLE_REVIEW_AGENT_FAMILY") or "").strip()
+        or None
+    )
+    if family == "claude_cli":
+        print("--ee cannot use claude_cli. The claude binary is not in the image.", file=sys.stderr)
+        return 2
+
+    reviews_root = _host_path_var(
+        extras.get("review_output_base") or operator_vars.get("review_output_base"),
+        Path.home() / "reviews",
+    ).resolve()
+    ledger_dir = _host_path_var(
+        extras.get("review_run_ledger_dir")
+        or operator_vars.get("review_run_ledger_dir")
+        or os.environ.get("ANSIBLE_REVIEW_RUN_LEDGER_DIR"),
+        last_run_dir() / "ledger",
+    )
+    ledger_name = ee.ledger_host_name()
+    target = None if args.branch_target else args.target
+
+    environ = dict(os.environ)
+    try:
+        navigator = ee.navigator_bin()
+        engine = ee.find_engine()
+        reviews_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        run_dirs = ee.prepare_run(run_id)
+    except (ee.EeError, OSError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    try:
+        host_env = ee.engine_env(run_dirs)
+        if not (environ.get("GITHUB_TOKEN") or environ.get("GH_TOKEN")):
+            token = ee.github_token_from_cli()
+            if token:
+                environ["GH_TOKEN"] = token
+        credentials = ee.credential_names(str(family) if family else None, target, environ)
+        for name in credentials:
+            host_env[name] = environ[name]
+        options = ee.container_options(run_dirs, engine, host_env)
+        extras = {
+            **extras,
+            "use_sandbox": False,
+            "review_runtime_from_image": True,
+            "ansible_python_interpreter": ee.IMAGE_PYTHON,
+            "review_output_base": str(reviews_root),
+            "review_run_ledger_dir": str(run_dirs.ledger),
+            "review_run_ledger_host": ledger_name,
+        }
+        image = ee.resolve_image(getattr(args, "ee_image", None))
+
+        def run_container(*, verbose: bool, env: dict[str, str] | None) -> subprocess.CompletedProcess[str]:
+            command = ee.build_navigator_command(
+                navigator=navigator,
+                engine=engine,
+                image=image,
+                run=run_dirs,
+                playbook_root=root,
+                package_dir=Path(__file__).resolve().parent,
+                reviews_root=reviews_root,
+                extra_vars=extras,
+                credentials=credentials,
+                options=options,
+                extra_env=env,
+                verbosity=ansible_verbosity(args),
+            )
+            try:
+                return run_process_group(
+                    command,
+                    env=host_env,
+                    verbose=verbose,
+                    timeout=playbook_timeout_seconds(),
+                    cwd=str(run_dirs.home),
+                    stdin=subprocess.DEVNULL,
+                )
+            except (PlaybookTimeoutError, PlaybookInterruptedError):
+                ee.stop_run_containers(engine, run_id, host_env)
+                raise
+
+        def publish() -> None:
+            ee.publish_results(
+                run_dirs,
+                reviews_root=reviews_root,
+                ledger_dir=ledger_dir,
+                ledger_name=ledger_name,
+            )
+
+        return _run_and_report(
+            args,
+            run=run_container,
+            scratch_dir=lambda: run_dirs.tmp,
+            summary_file=last_run_path(run_id),
+            finalize=publish,
+        )
+    except ee.EeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    finally:
+        ee.remove_run(run_dirs)
 
 
 def _print_pipx_output(result: subprocess.CompletedProcess[str]) -> None:

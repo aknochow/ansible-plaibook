@@ -378,7 +378,7 @@ review_run_ledger_enabled: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_RUN
 # stores have no append operation -- a read-modify-write from two
 # machines silently loses entries.
 review_run_ledger_dir: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_RUN_LEDGER_DIR') | default(lookup('env', 'HOME') ~ '/.cache/ansible-plaibook/ledger', true) }}"
-review_run_ledger_host: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_RUN_LEDGER_HOST') | default(lookup('pipe', 'hostname -s'), true) | lower | regex_replace('[^a-z0-9_.-]', '-') }}"
+review_run_ledger_host: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_RUN_LEDGER_HOST') | default(lookup('pipe', 'hostname -s 2>/dev/null || uname -n'), true) | lower | regex_replace('[^a-z0-9_.-]', '-') }}"
 review_run_ledger_path: "{{ review_run_ledger_dir }}/{{ review_run_ledger_host }}.jsonl"
 
 # Kill switch for briefing.yml's same-commit fast path: set false to

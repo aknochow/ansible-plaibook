@@ -8,7 +8,7 @@ status: stable
 
 # Execution environment
 
-`ghcr.io/aknochow/plaibook-ee` is the container Automation Controller uses to run [`review.yml`](../review.yml). `plai` and `plaibook` are not in the image. They are host commands that shell out to `ansible-playbook review.yml` and print the summary. A job template, and `ansible-navigator`, run the playbook inside this image.
+`ghcr.io/aknochow/plaibook-ee` is the container Automation Controller uses to run [`review.yml`](../review.yml). `plai` and `plaibook` are not in the image. They are host commands that shell out to `ansible-playbook review.yml` and print the summary. A job template, `ansible-navigator`, and `plai review --ee` run the playbook inside this image.
 
 ## Run it
 
@@ -33,6 +33,66 @@ ansible-navigator run review.yml \
 Pass the same extra vars you would pass to `ansible-playbook` (`-e review_type=commit`, and so on). GitHub, GitLab, and OpenShell credentials are job inputs. They are not baked into the image. `ssh_proxy.py` and OpenShell certs are not in the image either.
 
 The package starts private. Controller needs a `ghcr.io` registry credential until the package is made public. This workflow cannot change that setting.
+
+## Run a local review in it
+
+`plai review <target> --ee` runs one PR, MR, or branch review in one container, started with `ansible-navigator`. `plai` stays on the host. It needs `ansible-navigator` (`pipx install ansible-navigator`) and Podman or Docker.
+
+```bash
+plai review org/repo/123 --ee
+plai review org/repo/123 --ee --ee-image "ghcr.io/aknochow/plaibook-ee@sha256:<digest>"
+```
+
+`--ee` is not a queue and is not needed for running reviews at the same time. Its purpose is to keep host credentials away from a review of untrusted content. A local commit review (`--commit`) is refused, because that review writes into your checkout. A local path as the branch target is refused, because it is not in the container. `--sandbox` and `claude_cli` are refused too. The `claude` binary is not in the image, and OpenShell stays a separate choice.
+
+### Which image
+
+The default is `ghcr.io/aknochow/plaibook-ee:<plaibook version>`, the image the same release published. `PLAIBOOK_EE_IMAGE` or `--ee-image` replaces it. The image is pulled only when it is not already local.
+
+A version tag can be moved, and `plai` does not run `cosign verify`. The digest of a release does not exist until that release has been published, so it cannot be recorded in the same package. To run a verified image, use the `cosign verify` command in [Run it](#run-it) and pass the digest to `--ee-image`. A checkout ahead of the newest release runs its playbook against the older collections in that image. Pass `--ee-image` with a `:main` digest for that case.
+
+### What the container can see
+
+Collections and provider SDKs come from the image. `review_runtime_from_image` skips the per-run installs, no collection cache is mounted, and each container has its own home, so concurrent runs with different pins cannot share a collection path.
+
+| Host path | Container path | Mode | Why |
+|---|---|---|---|
+| The playbook tree (a checkout, or the package from a wheel) | `/plaibook/playbook` or `/plaibook/lib/plaibook` | read-only | The image does not contain the playbook or the `plaibook` package. |
+| `~/.cache/ansible-plaibook/ee-runs/<run_id>/home` | same path | read-write | The container's `$HOME`, its clones, and its results. Deleted when the run ends. |
+| `~/.cache/ansible-plaibook/ee-runs/<run_id>/runner` | `/runner` | read-write | `ansible-runner` metadata, including an env file with the values below. Deleted when the run ends. |
+| `~/.cache/ansible-plaibook/ee-runs/<run_id>/passwd` | `/etc/passwd` | read-only | Names the host UID with the run home as its home. The image entrypoint would otherwise replace `$HOME`. |
+| `~/reviews`, or `review_output_base` | same path | read-write | Prior rounds and this round's report. |
+| `/etc/ssh/ssh_known_hosts`, when it exists | same path | read-only | `ansible-runner` mounts it. It holds public host keys. |
+
+These are deliberately not mounted: `~/.ssh`, the SSH agent, `~/.cache/ansible-plaibook` itself, the directory you ran `plai` from, and any engine socket. A write to the host cache could change the code the next host review runs. `ansible-runner` always mounts `$HOME/.ssh`, so `plai` starts navigator with `HOME` set to an empty directory that links only the engine's own configuration.
+
+`vars.yml` is copied into the run home. A checkout's `host_vars/` is visible read-only. Do not keep a secret in either one.
+
+The environment is an allowlist. Navigator starts with only what it needs to find the engine, and the container gets the selected provider's variables, `ANSIBLE_REVIEW_*`, and the forge token for the target. `GH_TOKEN` comes from `gh auth token` on the host when neither GitHub variable is set. Values reach navigator through its environment and never appear on a command line. The container also runs as your UID with `--cap-drop=all` and `no-new-privileges`. SELinux labels are off, so that no host directory is relabeled, which removes SELinux from this container's confinement.
+
+### What is not isolated
+
+This step separates the review from the host. It does not separate the provider key from tool execution.
+
+| Process | Provider key and forge token |
+|---|---|
+| `plai`, `ansible-navigator`, and the engine client on the host | Visible, in their environment |
+| `ansible-playbook` in the container and the model modules | Visible |
+| `git`, `gh`, `ai-guardian`, exploration searches, and `CHECKLIST.md` commands in the container | Visible. They run as the same UID, inherit that environment, and can read `/runner/artifacts/*/env.list`. |
+
+The container has unrestricted network egress. A command that gets code execution from PR content can read the selected provider key and forge token and send them anywhere, and can edit `~/reviews`. It cannot reach the host's other keys, SSH keys, or files outside the table. `CHECKLIST.md` is read from the target ref and its commands pass an allowlist, and that is the control on this path. Use a narrowly scoped forge token. An OpenShell sandbox runs those commands away from the keys, and `--ee` does not replace that.
+
+### Where results land
+
+| Result | Host path |
+|---|---|
+| This run's summary | `~/.cache/ansible-plaibook/last_run.<run_id>.json` |
+| Report and `summary.json` | `review_output_base` (`~/reviews/...`), including the run-scoped `summary.<id>.json` and `findings.<id>.md` |
+| Ledger | One line appended to `~/.cache/ansible-plaibook/ledger/<host>.jsonl`, named for the host and not the container |
+
+`last_run.json` is not updated by `--ee`. Read the run-scoped file. `plai` treats what the container wrote as untrusted. It refuses a last-run file that links out of the run or a target path outside the reviews directory, and copies only ledger lines carrying this run's ID.
+
+A run tree left behind by a killed `plai` is removed by the next `--ee` run after 24 hours. It contains the env file until then, in a directory only you can read.
 
 ## Build command
 
