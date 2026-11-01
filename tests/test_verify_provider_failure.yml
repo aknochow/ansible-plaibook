@@ -417,8 +417,8 @@
              'evidence': 'verify_result_evidence: placeholder',
              'rationale': 'The placeholder value reaches the merge task unchanged.'}) }}
         verdict_case_expected_status: verified
-        verdict_case_expected_severity: Critical
-        verdict_case_expected_severity_status: disputed
+        verdict_case_expected_severity: Major
+        verdict_case_expected_severity_status: capped
 
     - name: Reset verify state before the already refuted finding
       ansible.builtin.include_tasks: verify_provider_failure_reset.yml

@@ -162,12 +162,47 @@ def test_undisputed_severity_keeps_the_original_value_and_is_marked_confirmed():
 
 
 def test_disputed_severity_overwrites_severity_but_keeps_original_visible():
-    # Finding at index 1 was originally Minor; suggested_severity of
-    # Critical models a truly-Critical issue misclassified down.
-    result = _merge(1, "verified", "e", "r", False, suggested_severity="Critical")
-    assert result[1]["severity"] == "Critical"
+    # Finding at index 1 was originally Minor.
+    result = _merge(1, "verified", "e", "r", False, suggested_severity="Major")
+    assert result[1]["severity"] == "Major"
     assert result[1]["original_severity"] == "Minor"
     assert result[1]["severity_status"] == "disputed"
+
+
+def test_verifier_cannot_raise_a_finding_to_critical():
+    result = _merge(1, "verified", "e", "r", False, suggested_severity="Critical")
+    assert result[1]["severity"] == "Major"
+    assert result[1]["original_severity"] == "Minor"
+    assert result[1]["suggested_severity"] == "Critical"
+    assert result[1]["severity_status"] == "capped"
+
+
+def test_a_major_finding_with_a_critical_suggestion_stays_major_and_is_capped():
+    result = _merge(0, "verified", "e", "r", False, suggested_severity="Critical")
+    assert result[0]["severity"] == "Major"
+    assert result[0]["severity_status"] == "capped"
+
+
+def test_a_lens_critical_stays_critical_when_the_verifier_agrees():
+    findings = [{**BASELINE_FIXTURE_FINDINGS[0], "severity": "Critical"}, BASELINE_FIXTURE_FINDINGS[1]]
+    result = merge_verify_result(
+        findings=findings,
+        verify_index=0,
+        evidence_status="verified",
+        verification_evidence="e",
+        verification_rationale="r",
+        requires_execution=False,
+        suggested_severity="Critical",
+        reachability="realistic",
+        trust_boundary="unclear",
+        worst_outcome_category="data-corruption",
+        silent_failure=False,
+        used_static_reachability_trace=False,
+        claim_input={},
+        audit_result={},
+    )
+    assert result[0]["severity"] == "Critical"
+    assert result[0]["severity_status"] == "confirmed"
 
 
 def test_disputed_severity_can_downgrade_too():

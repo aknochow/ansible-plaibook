@@ -11,6 +11,9 @@
      > {{ fence }}
      > {{ f.verification_evidence | regex_replace('\r?\n', '\n     > ') }}
      > {{ fence }}
+{% if f.severity_status == 'capped' %}
+   - **Severity capped**: the verifier suggested {{ f.suggested_severity }} for this {{ f.original_severity }} finding. It stays at {{ f.severity }}; check it by hand.
+{% endif %}
 {% if f.severity_status == 'disputed' %}
    - **Severity re-assessed**: {{ f.original_severity }} → {{ f.severity }} ({{ f.worst_outcome_category }}, reachability: {{ f.reachability }}, trust boundary: {{ f.trust_boundary }}{{ ', silent failure' if f.silent_failure | bool else '' }})
 {% endif %}
