@@ -401,8 +401,27 @@ def _short_why(text: str, limit: int = 200) -> str:
     return collapsed[: limit - 1].rstrip() + "…"
 
 
+def _provider_line(document: dict[str, Any]) -> str:
+    """Name the family, collection, models, and effort this run used."""
+    parts: list[str] = []
+    family = document.get("agent_family")
+    if family and family != "unknown":
+        parts.append(sanitize_display_line(family))
+    if document.get("collection"):
+        parts.append(sanitize_display_line(document["collection"]))
+    models = document.get("models")
+    if isinstance(models, list) and models:
+        parts.append(", ".join(sanitize_display_line(model) for model in models))
+    if document.get("effort"):
+        parts.append(f"effort {sanitize_display_line(document['effort'])}")
+    return f"  provider: {' · '.join(parts)}" if parts else ""
+
+
 def _footer(document: dict[str, Any], targets: list[dict[str, Any]] | None = None) -> list[str]:
     lines: list[str] = [version_text()]
+    provider = _provider_line(document)
+    if provider:
+        lines.append(provider)
     cost = document.get("cost_usd")
     if cost is not None and cost != "":
         try:
