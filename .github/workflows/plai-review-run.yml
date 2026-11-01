@@ -81,7 +81,7 @@ jobs:
           # the pull request head. Move this to a commit that contains the
           # review code, then point plai-review.yml at the commit that
           # contains this line.
-          ref: "1b495461075838920a9bdedb6d2a5ebfe5087a5b"
+          ref: "f0f77166d1cda1a8c1cde4cc6d69b960ca9865b2"
           persist-credentials: false
 
       - name: Resolve the pull request
@@ -175,7 +175,7 @@ jobs:
           # the pull request head. Move this to a commit that contains the
           # review code, then point plai-review.yml at the commit that
           # contains this line.
-          ref: "1b495461075838920a9bdedb6d2a5ebfe5087a5b"
+          ref: "f0f77166d1cda1a8c1cde4cc6d69b960ca9865b2"
           persist-credentials: false
 
       - name: Require OPENAI_API_KEY
