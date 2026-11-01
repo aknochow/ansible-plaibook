@@ -53,6 +53,16 @@ The default is `ghcr.io/aknochow/plaibook-ee:<plaibook version>`, the image the 
 
 For the default image, `plai` runs `cosign verify` against this release's workflow identity and starts the verified digest, so moving the tag changes nothing. `cosign` must be on `PATH`, and the run stops if verification fails. An image from `--ee-image` or `PLAIBOOK_EE_IMAGE` is your choice and is not verified, and `plai` says so when it runs. To verify one yourself, use the `cosign verify` command in [Run it](#run-it) and pass the digest to `--ee-image`.
 
+### Keep the provider key on the host
+
+```bash
+plai review org/repo/123 --ee --ee-model-proxy
+```
+
+**Experimental, and only for the hosted OpenAI API.** `plai` keeps `OPENAI_API_KEY` on the host and starts a proxy on `127.0.0.1` for this run. The container gets a random token and the proxy's address. The proxy accepts only that token, forwards only `POST /v1/chat/completions` to `api.openai.com`, drops other request headers, and stops when the run ends.
+
+A stolen token stops working when the run ends, but until then it can spend up to 500 requests on any model the key allows. This does not cover the forge token, which is still in the container, and network egress is still open. The model call travels over plain HTTP between the container and the host, so the OpenAI module warns about it. It has been run on macOS with Podman only.
+
 ### What the container can see
 
 Collections and provider SDKs come from the image. `review_runtime_from_image` skips the per-run installs, no collection cache is mounted, and each container has its own home, so concurrent runs with different pins cannot share a collection path.

@@ -140,6 +140,31 @@ def test_stage_checkout_leaves_a_non_checkout_alone(tmp_path):
     assert ee.stage_checkout(root, _run_dirs(tmp_path)) == root.resolve()
 
 
+def test_model_proxy_replaces_the_key_with_a_run_token():
+    environ = {"OPENAI_API_KEY": SECRET, "ANSIBLE_OPENAI_API_KEY": SECRET, "GITHUB_TOKEN": "forge"}
+    proxy = ee.start_model_proxy("openai", "podman", environ)
+    try:
+        assert SECRET not in environ.values()
+        assert environ["OPENAI_API_KEY"] == proxy.token
+        assert environ["OPENAI_BASE_URL"] == f"http://host.containers.internal:{proxy.port}/v1"
+    finally:
+        proxy.stop()
+
+
+@pytest.mark.parametrize(
+    ("family", "environ"),
+    [
+        ("xai", {"OPENAI_API_KEY": SECRET}),
+        (None, {"OPENAI_API_KEY": SECRET}),
+        ("openai", {"OPENAI_API_KEY": SECRET, "OPENAI_BASE_URL": "https://example.com/v1"}),
+        ("openai", {}),
+    ],
+)
+def test_model_proxy_refuses_what_it_does_not_support(family, environ):
+    with pytest.raises(ee.EeError, match="--ee-model-proxy"):
+        ee.start_model_proxy(family, "podman", environ)
+
+
 def test_home_reaches_the_container_but_not_the_engine_client(tmp_path):
     command = _command(_run_dirs(tmp_path), tmp_path)
     senv = [command[i + 1] for i, part in enumerate(command) if part == "--senv"]

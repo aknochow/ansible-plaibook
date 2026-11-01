@@ -31,6 +31,7 @@ import yaml
 
 from plaibook import __version__
 from plaibook.config import CONFIG_DIRNAME, VARS_NAME, ConfigError, load_vars, vars_path
+from plaibook.model_proxy import ModelProxy
 from plaibook.playbook import ANSIBLE_CFG_NAME, PLAYBOOK_NAME, ansible_tool_bin, last_run_dir, last_run_path
 
 IMAGE_REPOSITORY = "ghcr.io/aknochow/plaibook-ee"
@@ -423,6 +424,24 @@ def github_token_from_cli(env: Mapping[str, str] | None = None) -> str | None:
     if completed.returncode != 0:
         return None
     return completed.stdout.strip() or None
+
+
+def start_model_proxy(family: str | None, engine: str, environ: dict[str, str]) -> ModelProxy:
+    """Replace the OpenAI key in *environ* with a run token for a proxy on the host."""
+    if family != "openai":
+        raise EeError("--ee-model-proxy supports only the openai provider for now.")
+    if environ.get("OPENAI_BASE_URL") or environ.get("ANSIBLE_OPENAI_BASE_URL"):
+        raise EeError("--ee-model-proxy supports only the hosted OpenAI API, so a custom base URL is refused.")
+    key = environ.get("OPENAI_API_KEY") or environ.get("ANSIBLE_OPENAI_API_KEY")
+    if not key:
+        raise EeError("--ee-model-proxy needs OPENAI_API_KEY on the host.")
+    proxy = ModelProxy(key)
+    proxy.start()
+    environ.pop("ANSIBLE_OPENAI_API_KEY", None)
+    environ["OPENAI_API_KEY"] = proxy.token
+    host = "host.containers.internal" if engine == "podman" else "host.docker.internal"
+    environ["OPENAI_BASE_URL"] = f"http://{host}:{proxy.port}/v1"
+    return proxy
 
 
 def _is_rootless(engine: str, env: Mapping[str, str]) -> bool:

@@ -306,6 +306,14 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
         ),
     )
     review.add_argument(
+        "--ee-model-proxy",
+        action="store_true",
+        help=(
+            "Experimental, with --ee and the hosted OpenAI API. Keep the provider key on the host "
+            "and give the container a token for this run. The forge token is still in the container."
+        ),
+    )
+    review.add_argument(
         "--ee-image",
         metavar="REF",
         help=(
@@ -606,6 +614,9 @@ def cmd_review(args: argparse.Namespace) -> int:
     if getattr(args, "ee_image", None):
         print("--ee-image needs --ee.", file=sys.stderr)
         return 2
+    if getattr(args, "ee_model_proxy", False):
+        print("--ee-model-proxy needs --ee.", file=sys.stderr)
+        return 2
     from plaibook.runtime import controller_python
 
     wrapper = controller_python()
@@ -867,6 +878,7 @@ def _cmd_review_ee(args: argparse.Namespace, root: Path, run_id: str, extras: di
     target = args.branch_target or args.target
 
     environ = dict(os.environ)
+    proxy = None
     try:
         navigator = ee.navigator_bin()
         engine = ee.find_engine()
@@ -881,6 +893,8 @@ def _cmd_review_ee(args: argparse.Namespace, root: Path, run_id: str, extras: di
             token = ee.github_token_from_cli()
             if token:
                 environ["GH_TOKEN"] = token
+        if getattr(args, "ee_model_proxy", False):
+            proxy = ee.start_model_proxy(str(family) if family else None, engine, environ)
         credentials = ee.credential_names(str(family) if family else None, target, environ)
         for name in credentials:
             host_env[name] = environ[name]
@@ -951,6 +965,8 @@ def _cmd_review_ee(args: argparse.Namespace, root: Path, run_id: str, extras: di
         print(str(exc), file=sys.stderr)
         return 2
     finally:
+        if proxy:
+            proxy.stop()
         ee.remove_run(run_dirs)
 
 
