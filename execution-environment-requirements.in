@@ -23,6 +23,8 @@ setuptools==84.0.0
 urllib3==2.8.0
 # GHSA-6q48-6c7w-9gw2. 2026.10.18 is the first fixed release.
 certifi==2026.10.19
+# CVE-2026-119194, CVE-2026-119195, CVE-2026-119196, CVE-2026-119197. 0.6.5 is the first fixed release.
+pyasn1==0.6.5
 # ensurepip's pip vendors certifi 2026.6.17. 26.2.2 vendors 2026.10.19.
 pip==26.2.2
 dumb-init==1.2.5

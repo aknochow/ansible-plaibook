@@ -1,7 +1,7 @@
 name: plai
 
 # pull_request_target reads this file from the base branch. A pull
-# request cannot replace the workflow that receives CURSOR_API_KEY or
+# request cannot replace the workflow that receives OPENAI_API_KEY or
 # the GitHub App private key. pull_request is not a trigger: that event
 # runs the workflow file from the pull request and still injects those
 # secrets for a same-repository head. pull_request_target reviews only
@@ -21,7 +21,7 @@ name: plai
 # the GitHub App installation token. PLAI_GITHUB_APP_ID and
 # PLAI_GITHUB_APP_PRIVATE_KEY post the review as the GitHub App whose
 # slug is plai-review.
-# CURSOR_API_KEY, PLAI_GITHUB_APP_ID, and PLAI_GITHUB_APP_PRIVATE_KEY
+# OPENAI_API_KEY, PLAI_GITHUB_APP_ID, and PLAI_GITHUB_APP_PRIVATE_KEY
 # are environment secrets on plaibook-review. GitHub rejects environment
 # on this caller job because it uses a reusable workflow. The called
 # review job sets the environment. Deployment branches are main only.
@@ -82,7 +82,7 @@ jobs:
       contents: read
       pull-requests: read
       checks: read
-    uses: aknochow/ansible-plaibook/.github/workflows/plai-review-run.yml@0efef2798a129fd9ddc9d07a5b04b740fa259a37
+    uses: aknochow/ansible-plaibook/.github/workflows/plai-review-run.yml@cac3fbb388f924f929a3bada2ebd730f484576fc
     # Every trigger but workflow_dispatch keeps the sandbox, in the called
     # workflow, whatever this resolves to.
     with:
@@ -91,6 +91,6 @@ jobs:
     # and organization secrets stay on the caller. The called job's
     # plaibook-review environment supplies the values.
     secrets:
-      CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       PLAI_GITHUB_APP_ID: ${{ secrets.PLAI_GITHUB_APP_ID }}
       PLAI_GITHUB_APP_PRIVATE_KEY: ${{ secrets.PLAI_GITHUB_APP_PRIVATE_KEY }}
