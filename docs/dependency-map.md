@@ -30,6 +30,7 @@ SDK version, or a review-workflow pin is missing from this file.
 | aknochow.gemini | [ansible-gemini](https://github.com/aknochow/ansible-gemini) | Gemini module. Pins `google-genai`. |
 | aknochow.openai | [ansible-openai](https://github.com/aknochow/ansible-openai) | OpenAI-compatible chat module. Pins the `openai` SDK. |
 | aknochow.cursor | [ansible-cursor](https://github.com/aknochow/ansible-cursor) | Cursor agent module. Pins `cursor-sdk`. |
+| aknochow.xai | [ansible-xai](https://github.com/aknochow/ansible-xai) | xAI chat module. Pins `xai-sdk`. |
 | aknochow.openshell | [ansible-openshell](https://github.com/aknochow/ansible-openshell) | Sandbox lifecycle and the SSH proxy. Pins the `openshell` Python SDK. |
 
 The provider collections do not import each other. Plaibook composes
@@ -84,7 +85,7 @@ SHA.
 | `collection.gemini` | ansible-gemini | `016d7e2e5eceb2052304c740ee6a4abf44ca48ce` | ansible-gemini #28. Commit standards on main. `google-genai` 2.27.0 is still the pin from #22. |
 | `collection.openai` | ansible-openai | `3657a671018dfda9f18328d2b0c179038f100797` | ansible-openai #30. Commit standards on main. `openai` 3.23.0 is still the pin from #25. |
 | `collection.cursor` | ansible-cursor | `b4d2672761296e7338e801cccfd7ac20b08e564d` | ansible-cursor #39. Sends reasoning_effort for grok-4.7. The #38 start retry remains. `cursor-sdk` 1.0.35 and the serialized starts from #30 are unchanged. |
-| `collection.xai` | ansible-xai | not pinned | `agent_family=xai` calls `aknochow.xai.chat`. The GitHub repo is private, so it is not in `collections-requirements.yml`. Install it locally. Interface checked against `dfbb12e` (`xai-sdk` 1.21.0), ansible-xai #3. That revision sends `conversation_id` as `x-grok-conv-id`, keeps tool calls on assistant turns, reports `attempts` usage, spends one `timeout` budget across retries, and accepts a response that repeats the same JSON object. |
+| `collection.xai` | ansible-xai | `dfbb12ef6b1b93b9f706d198d2e56d206de11e2a` | ansible-xai #3. `agent_family=xai` calls `aknochow.xai.chat`. `xai-sdk` 1.21.0 is the hashed pin. That revision sends `conversation_id` as `x-grok-conv-id`, keeps tool calls on assistant turns, reports `attempts` usage, spends one `timeout` budget across retries, and accepts a response that repeats the same JSON object. |
 | `collection.community.general` | community.general | `049524674b13ad9782849c427266935c8ec61954` | Release 13.4.0. Do not float to the default branch. |
 | `collection.kubernetes.core` | kubernetes.core | `0f472b53e2ee73e11b5f9067ab0826d76183c157` | Release 6.5.0. Do not float to the default branch. |
 | `collection.ansible.posix` | ansible.posix | `e98d9a0756458be1ac710988498000973889075c` | Release 2.2.2. Do not float to the default branch. |
@@ -141,6 +142,7 @@ difference as a bump to decide, not as the same pin.
 | google-genai | `google-genai==2.29.0` | `google-genai==2.27.0` |
 | openai | `openai==3.28.0` | `openai==3.23.0` |
 | cursor-sdk | `cursor-sdk==1.0.37` | `cursor-sdk==1.0.35` |
+| xai-sdk | `xai-sdk==1.21.0` | `xai-sdk==1.21.0` |
 | openshell | `openshell==0.1.3` | `openshell==0.1.3` |
 
 ## Review workflow pins

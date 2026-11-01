@@ -30,6 +30,7 @@ IMPORTS = (
     "openai",
     "google.genai",
     "cursor_sdk",
+    "xai_sdk",
     "openshell",
     "kubernetes",
 )
