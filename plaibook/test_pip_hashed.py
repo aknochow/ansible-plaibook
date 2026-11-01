@@ -43,7 +43,7 @@ def test_pip_install_hashed_argv_require_hashes():
 def test_missing_pip_uses_uv_pip(monkeypatch):
     monkeypatch.setattr("plaibook.pip_hashed.shutil.which", lambda name: "/usr/bin/uv" if name == "uv" else None)
     argv = hashed_install_argv("/opt/plaibook/bin/python", "openai-requirements.txt", has_pip=False)
-    assert argv[:5] == ["/usr/bin/uv", "pip", "install", "--python", "/opt/plaibook/bin/python"]
+    assert argv[:6] == ["/usr/bin/uv", "pip", "install", "--no-config", "--python", "/opt/plaibook/bin/python"]
     assert "--require-hashes" in argv
     assert "--dry-run" not in argv
     dry = hashed_install_argv(
