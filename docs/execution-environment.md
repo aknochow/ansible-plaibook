@@ -66,7 +66,7 @@ Collections and provider SDKs come from the image. `review_runtime_from_image` s
 
 These are deliberately not mounted: `~/.ssh`, the SSH agent, `~/.cache/ansible-plaibook` itself, the directory you ran `plai` from, and any engine socket. A write to the host cache could change the code the next host review runs. `ansible-runner` always mounts `$HOME/.ssh`, so `plai` starts navigator with `HOME` set to an empty directory that links only the engine's own configuration.
 
-`vars.yml` is copied into the run home. A checkout's `host_vars/` is visible read-only. Do not keep a secret in either one.
+`vars.yml` is copied into the run home without settings whose names look secret. That filter goes by name only. A checkout's `host_vars/` is visible read-only and is not filtered. Do not keep a secret in either one.
 
 The environment is an allowlist. Navigator starts with only what it needs to find the engine, and the container gets the selected provider's variables, `ANSIBLE_REVIEW_*`, and the forge token for the target. `GH_TOKEN` comes from `gh auth token` on the host when neither GitHub variable is set. Values reach navigator through its environment and never appear on a command line. The container also runs as your UID with `--cap-drop=all` and `no-new-privileges`. SELinux labels are off, so that no host directory is relabeled, which removes SELinux from this container's confinement.
 

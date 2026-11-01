@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import socket
 import stat
@@ -26,8 +27,10 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Mapping
 
+import yaml
+
 from plaibook import __version__
-from plaibook.config import CONFIG_DIRNAME, VARS_NAME, vars_path
+from plaibook.config import CONFIG_DIRNAME, VARS_NAME, ConfigError, load_vars, vars_path
 from plaibook.playbook import ANSIBLE_CFG_NAME, PLAYBOOK_NAME, ansible_tool_bin, last_run_dir, last_run_path
 
 IMAGE_REPOSITORY = "ghcr.io/aknochow/plaibook-ee"
@@ -43,6 +46,9 @@ CONTAINER_LIBRARY = PurePosixPath("/plaibook/lib")
 STALE_RUN_SECONDS = 24 * 60 * 60
 MAX_RESULT_BYTES = 64 * 1024 * 1024
 ENGINE_TIMEOUT_SECONDS = 60
+
+# Names like review_openai_max_tokens are settings, so only a trailing "token" counts.
+_SECRET_VAR = re.compile(r"(?i)(api_?key|secret|password|passwd|credential|(?:^|_)token$)")
 
 # What the navigator process needs to find the container engine. Everything
 # else is dropped: ansible-runner copies every ANSIBLE_* variable into the
@@ -240,14 +246,23 @@ def _write_passwd(run: EeRun) -> None:
 
 
 def _copy_operator_vars(run: EeRun, env: Mapping[str, str], home: Path) -> None:
-    """Give the container a copy of vars.yml. It must not rewrite the host file."""
+    """Give the container a copy of vars.yml, without secret-named settings.
+
+    It must not rewrite the host file. Any review variable may be set there, so
+    this filters by name instead of listing what is allowed.
+    """
     source = vars_path(env=env, home=home)
     if not source.is_file():
         return
+    try:
+        settings = load_vars(path=source)
+    except ConfigError as exc:
+        raise EeError(str(exc)) from exc
+    kept = {key: value for key, value in settings.items() if not _SECRET_VAR.search(str(key))}
     target = run.home / ".config" / CONFIG_DIRNAME / VARS_NAME
     target.parent.mkdir(mode=0o700, parents=True)
-    shutil.copyfile(source, target)
-    os.chmod(target, 0o600)
+    target.touch(mode=0o600)
+    target.write_text(yaml.safe_dump(kept, sort_keys=False), encoding="utf-8")
 
 
 def remove_run(run: EeRun) -> None:

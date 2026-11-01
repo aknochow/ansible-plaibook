@@ -42,6 +42,23 @@ def _command(run: ee.EeRun, tmp_path: Path, **overrides) -> list[str]:
     return ee.build_navigator_command(**arguments)
 
 
+def test_operator_vars_copy_drops_secret_named_settings(tmp_path):
+    config = tmp_path / "cfg"
+    source = config / "ansible-plaibook" / "vars.yml"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "agent_family: openai\nreview_openai_max_tokens: 5\nmy_api_key: x\ngithub_token: x\nreview_secret: x\n",
+        encoding="utf-8",
+    )
+    run = ee.prepare_run("abcDEF0123456789", home=tmp_path, env={"XDG_CONFIG_HOME": str(config)})
+    copied = run.home / ".config" / "ansible-plaibook" / "vars.yml"
+    assert yaml.safe_load(copied.read_text(encoding="utf-8")) == {
+        "agent_family": "openai",
+        "review_openai_max_tokens": 5,
+    }
+    assert (copied.stat().st_mode & 0o777) == 0o600
+
+
 def test_home_reaches_the_container_but_not_the_engine_client(tmp_path):
     command = _command(_run_dirs(tmp_path), tmp_path)
     senv = [command[i + 1] for i, part in enumerate(command) if part == "--senv"]
