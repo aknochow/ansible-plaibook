@@ -123,10 +123,9 @@ def compute_pipeline_cost(pipeline_agent_calls: list[dict], pipeline_pricing_tab
     # pipeline_agent_calls producer to carry it would be the kind of
     # brittle "one missing field crashes the whole stats summary" failure
     # the strict/lenient split already exists to avoid for optional data.
-    # Not priced (no _USAGE_RATE_PAIRS entry): visibility into a real,
-    # billable-on-paid-tiers token category, same "surface it, don't
-    # invent a rate" discipline as gemini-3.7-flash's own unpriced_models
-    # handling above.
+    # Priced only for a model with thinking_per_million. Gemini reports
+    # thoughts apart from output and bills them at the output rate. OpenAI
+    # reasoning is already inside output_tokens, so its rows have no rate.
     total_thinking_tokens = sum(_usage_value_lenient(call, "thinking_tokens") for call in pipeline_agent_calls)
 
     seen_models = list(dict.fromkeys(call["model"] for call in pipeline_agent_calls))
@@ -152,7 +151,7 @@ def compute_pipeline_cost(pipeline_agent_calls: list[dict], pipeline_pricing_tab
         rates = pipeline_pricing_table.get(_model_base(call["model"]), {})
         cost = sum(
             _usage_value_lenient(call, usage_key) * float(rates.get(rate_key) or 0)
-            for usage_key, rate_key in _USAGE_RATE_PAIRS
+            for usage_key, rate_key in (*_USAGE_RATE_PAIRS, ("thinking_tokens", "thinking_per_million"))
         )
         call_costs.append(cost / 1_000_000)
 
