@@ -95,6 +95,10 @@ this process is already inside a sandbox (in-guest JWT). The SDK needs
 Python 3.11+; a 3.10 `plai` switches to
 `~/.cache/ansible-plaibook/sandbox-runtime` for that sandbox.
 `--no-sandbox` stays on this interpreter (`--sandbox` to require it).
+`--ee` runs a PR/MR or branch review in one execution-environment container
+with `ansible-navigator`. The provider key is still in that container with the
+commands that read PR content. See
+[Execution environment](../docs/execution-environment.md#run-a-local-review-in-it).
 
 ## Output sugar
 

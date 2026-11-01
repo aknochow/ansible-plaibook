@@ -145,6 +145,16 @@ difference as a bump to decide, not as the same pin.
 | xai-sdk | `xai-sdk==1.21.0` | `xai-sdk==1.21.0` |
 | openshell | `openshell==0.1.3` | `openshell==0.1.3` |
 
+`plai review --ee` adds no pin. Its default image is
+`ghcr.io/aknochow/plaibook-ee:<plaibook version>`, computed from
+`plaibook.__version__`, which is the image built from the same release.
+A release's digest does not exist until it is published, so the package
+cannot record it, so `plai` verifies the signature with `cosign` and runs
+the verified digest. `--ee-image` takes a digest. See
+[Execution environment](execution-environment.md#which-image).
+`ansible-navigator` and `cosign` are host tools the operator installs. They
+are not plaibook dependencies.
+
 ## Review workflow pins
 
 | Id | What | SHA | Where |

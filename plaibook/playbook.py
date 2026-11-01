@@ -294,11 +294,24 @@ def run_ansible_playbook(
     async_dir = async_dir_override(merged)
     if async_dir:
         merged["ANSIBLE_ASYNC_DIR"] = async_dir
+    return run_process_group(command, env=merged, verbose=verbose, timeout=timeout)
+
+
+def run_process_group(
+    command: list[str],
+    *,
+    env: dict[str, str],
+    verbose: bool,
+    timeout: float,
+    **popen_kwargs,
+) -> subprocess.CompletedProcess[str]:
+    """Run *command* in its own session. See :func:`run_ansible_playbook`."""
     kwargs: dict = {
         "args": command,
-        "env": merged,
+        "env": env,
         "text": True,
         "start_new_session": True,
+        **popen_kwargs,
     }
     if not verbose:
         kwargs["stdout"] = subprocess.PIPE

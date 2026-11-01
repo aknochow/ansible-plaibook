@@ -17,7 +17,10 @@
 # russh. Each helper already applies subprocess.run(timeout=) —
 # GALAXY_TIMEOUT_SECONDS (600), provider SDK 300, OpenShell SDK 300.
 
+# The execution environment already carries both at its own pins. A
+# per-run install would ignore the image and clone every collection.
 - name: Ensure review collections are installed
+  when: not (review_runtime_from_image | default(false) | bool)
   ansible.builtin.command:
     argv:
       - "{{ ansible_playbook_python | default(ansible_python_interpreter) }}"
@@ -36,6 +39,7 @@
   changed_when: "'Installing Ansible collections' in (_ensure_collections.stderr | default(''))"
 
 - name: Ensure the selected provider Python SDK is installed
+  when: not (review_runtime_from_image | default(false) | bool)
   ansible.builtin.command:
     argv:
       - "{{ ansible_playbook_python | default(ansible_python_interpreter) }}"

@@ -63,6 +63,9 @@
     # it never needs isolation from itself. Override explicitly (-e
     # use_sandbox=true) if you want it anyway.
     use_sandbox: "{{ review_type != 'commit' }}"
+    # true when the execution environment supplies collections and provider
+    # SDKs (`plai review --ee`). Nothing is installed at run time.
+    review_runtime_from_image: false
     # Fallback when the openshell CLI has no gateway config on this machine.
     # A configured gateway (default name: openshell) replaces this with
     # gateway_endpoint from ~/.config/openshell/gateways/<name>/metadata.json.
