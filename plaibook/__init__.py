@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 __all__ = ["__version__", "version_text"]
 
-__version__ = "0.1.29"
+__version__ = "0.1.30"
 
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _REVISION = re.compile(r"^[A-Za-z0-9._/-]{1,80}$")

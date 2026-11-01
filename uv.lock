@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.10, <3.15"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -818,7 +818,7 @@ wheels = [
 
 [[package]]
 name = "plaibook"
-version = "0.1.29"
+version = "0.1.30"
 source = { editable = "." }
 dependencies = [
     { name = "ansible-core", version = "2.16.19", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
