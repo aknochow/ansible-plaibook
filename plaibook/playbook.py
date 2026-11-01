@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import math
 import os
+import pwd
 import secrets
 import shutil
 import signal
@@ -234,6 +235,26 @@ def playbook_timeout_seconds(env: dict[str, str] | None = None) -> float:
     return value
 
 
+def async_dir_override(environ: dict[str, str]) -> str | None:
+    """Return an async job directory when HOME is not the account's home.
+
+    Ansible's async wrapper writes job files under $HOME, but async_status
+    looks in the account's home from the password database. When the two
+    differ, every async task fails with "could not find job". An explicit
+    ANSIBLE_ASYNC_DIR is left alone.
+    """
+    home = environ.get("HOME")
+    if not home or environ.get("ANSIBLE_ASYNC_DIR"):
+        return None
+    try:
+        account_home = pwd.getpwuid(os.getuid()).pw_dir
+    except KeyError:
+        account_home = None
+    if account_home and os.path.realpath(account_home) == os.path.realpath(home):
+        return None
+    return os.path.join(home, ".ansible_async")
+
+
 def _kill_process_group(proc: subprocess.Popen[str]) -> None:
     try:
         os.killpg(proc.pid, signal.SIGKILL)
@@ -270,6 +291,9 @@ def run_ansible_playbook(
     merged["ANSIBLE_CONFIG"] = str(playbook_root / ANSIBLE_CFG_NAME)
     merged["TMPDIR"] = str(runtime_tmp_dir(home))
     merge_collections_path(merged, home=home)
+    async_dir = async_dir_override(merged)
+    if async_dir:
+        merged["ANSIBLE_ASYNC_DIR"] = async_dir
     kwargs: dict = {
         "args": command,
         "env": merged,
