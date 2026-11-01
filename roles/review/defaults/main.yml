@@ -197,9 +197,9 @@ review_xai_continuity_reasoning_effort: "{{ lookup('ansible.builtin.env', 'ANSIB
 review_xai_max_tokens: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_XAI_MAX_TOKENS') | default(16384, true) | int }}"
 review_explore_xai_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_EXPLORE_XAI_MODEL') | default(review_xai_model, true) }}"
 review_verify_xai_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_VERIFY_XAI_MODEL') | default(review_xai_model, true) }}"
-# GPT-5.6 is an intentional alias: OpenAI documents that it routes to the
-# flagship gpt-5.6-sol model. Operators can select gpt-5.6-terra or
-# gpt-5.6-luna with ANSIBLE_REVIEW_OPENAI_MODEL on api.openai.com.
+# gpt-6-luna is the default because it costs a small fraction of gpt-5.6,
+# which routes to the flagship gpt-5.6-sol. Operators can select another
+# model with ANSIBLE_REVIEW_OPENAI_MODEL on api.openai.com.
 # An xAI key and no OpenAI key replaces that Claude-default fallback with
 # grok-4.7. If review_agent_model was explicitly overridden, preserve that
 # choice for the OpenAI family. ANSIBLE_REVIEW_OPENAI_MODEL and
@@ -219,7 +219,7 @@ review_openai_model: >-
              )
            )
            else (
-             'gpt-5.6'
+             'gpt-6-luna'
              if (review_agent_model | default('')) == 'claude-opus-4-6'
              else review_agent_model
            )
