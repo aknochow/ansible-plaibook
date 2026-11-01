@@ -69,36 +69,64 @@ echo "Running ${#PLAYBOOKS[@]} offline Ansible playbook test(s)..."
 # named-lens retry playbook swaps in tests/library/cursor_agent_stub.py
 # (no live Cursor) via ANSIBLE_LIBRARY + cursor_agent_module.
 STUB_LIBRARY="${REPO_ROOT}/tests/library"
-STUB_PAYLOAD="${REPO_ROOT}/tests/.cursor_agent_stub.json"
 
+# One playbook, called through xargs below. Its own HOME, TMPDIR, and stub
+# files keep it from racing the others over last_run.json, the review output
+# directory, and stub payloads. Async results need an explicit path, because
+# async_status does not read the changed HOME.
 run_playbook() {
   local pb="$1"
-  local out rc=0
-  out="$(mktemp)"
+  local results="$2"
+  local name work rc=0
+  name="$(printf '%s' "${pb}" | tr '/' '_')"
+  work="$(mktemp -d "${results}/work.XXXXXX")"
+  mkdir -p "${work}/home" "${work}/tmp"
   set +e
-  if [[ "${pb}" == "tests/test_cursor_named_lens_retry.yml" || "${pb}" == "tests/test_cursor_lens_async_wait.yml" || "${pb}" == "tests/test_cursor_verify_status_error.yml" || "${pb}" == "tests/test_verify_provider_failure.yml" || "${pb}" == "tests/test_verify_boolean_stringification_note.yml" || "${pb}" == "tests/test_explore_tool_limit.yml" ]]; then
-    ANSIBLE_LIBRARY="${STUB_LIBRARY}${ANSIBLE_LIBRARY:+:${ANSIBLE_LIBRARY}}" \
-      CURSOR_AGENT_STUB_FILE="${STUB_PAYLOAD}" \
-      VERIFY_PROVIDER_STUB_FILE="${REPO_ROOT}/tests/.verify_provider_stub.json" \
-      ansible-playbook "${pb}" >"${out}" 2>&1
+  if [[ "${pb}" == "tests/test_cursor_named_lens_retry.yml" || "${pb}" == "tests/test_cursor_lens_async_wait.yml" || "${pb}" == "tests/test_cursor_verify_status_error.yml" || "${pb}" == "tests/test_explore_tool_limit.yml" || "${pb}" == "tests/test_verify_boolean_stringification_note.yml" || "${pb}" == "tests/test_verify_provider_failure.yml" ]]; then
+    HOME="${work}/home" TMPDIR="${work}/tmp" ANSIBLE_ASYNC_DIR="${work}/async" \
+      ANSIBLE_LIBRARY="${STUB_LIBRARY}${ANSIBLE_LIBRARY:+:${ANSIBLE_LIBRARY}}" \
+      CURSOR_AGENT_STUB_FILE="${work}/cursor_agent_stub.json" \
+      VERIFY_PROVIDER_STUB_FILE="${work}/verify_provider_stub.json" \
+      ansible-playbook "${pb}" >"${results}/${name}.log" 2>&1
   else
-    ansible-playbook "${pb}" >"${out}" 2>&1
+    HOME="${work}/home" TMPDIR="${work}/tmp" ANSIBLE_ASYNC_DIR="${work}/async" \
+      ansible-playbook "${pb}" >"${results}/${name}.log" 2>&1
   fi
   rc=$?
   set -euo pipefail
-  cat "${out}"
-  if [[ "${rc}" -ne 0 ]]; then
-    echo "::error file=${pb},title=Playbook test failed::${pb} exited ${rc}"
-    rm -f "${out}"
-    return "${rc}"
-  fi
-  rm -f "${out}"
+  rm -rf "${work}"
+  printf '%s\n' "${rc}" >"${results}/${name}.rc"
 }
 
+if [[ "${1:-}" == "--run-one" ]]; then
+  run_playbook "$2" "$3"
+  exit 0
+fi
+
+# Logs print in list order after the run, so output does not interleave.
+# xargs, not `wait -n`: macOS runners have bash 3.2.
+if [[ -z "${PLAYBOOK_TEST_JOBS:-}" ]]; then
+  PLAYBOOK_TEST_JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+fi
+results="$(mktemp -d "${TMPDIR:-/tmp}/plaibook-playbook-tests-XXXXXX")"
+printf '%s\n' "${PLAYBOOKS[@]}" |
+  xargs -P "${PLAYBOOK_TEST_JOBS}" -I{} bash "${BASH_SOURCE[0]}" --run-one {} "${results}"
+
+failed=0
 for pb in "${PLAYBOOKS[@]}"; do
+  name="$(printf '%s' "${pb}" | tr '/' '_')"
   echo "--- Running ${pb} ---"
-  run_playbook "${pb}"
+  cat "${results}/${name}.log"
+  rc="$(cat "${results}/${name}.rc" 2>/dev/null || echo 1)"
+  if [[ "${rc}" -ne 0 ]]; then
+    echo "::error file=${pb},title=Playbook test failed::${pb} exited ${rc}"
+    failed=1
+  fi
 done
+rm -rf "${results}"
+if [[ "${failed}" -ne 0 ]]; then
+  exit 1
+fi
 
 # Private dir + file the failure callback will accept. A clean play must
 # leave the file empty. A planned ignored failure must name the task and
