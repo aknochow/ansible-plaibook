@@ -86,6 +86,7 @@ def test_release_image_runs_by_the_digest_cosign_verified(monkeypatch):
     assert f"{ee.SIGNING_WORKFLOW}@refs/tags/v{__version__}" in seen["command"]
     assert ee.SIGNING_ISSUER in seen["command"]
     assert SECRET not in seen["env"].values()
+    assert seen["env"]["DOCKER_CONFIG"]
 
 
 @pytest.mark.parametrize(

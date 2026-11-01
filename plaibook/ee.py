@@ -162,15 +162,22 @@ def verify_release_image(image: str, env: Mapping[str, str] | None = None) -> st
             "Install cosign, or choose an image yourself with --ee-image."
         )
     identity = f"{SIGNING_WORKFLOW}@refs/tags/v{__version__}"
+    command = [cosign, "verify", "--certificate-oidc-issuer", SIGNING_ISSUER, "--certificate-identity", identity, image]
     try:
-        completed = subprocess.run(
-            [cosign, "verify", "--certificate-oidc-issuer", SIGNING_ISSUER, "--certificate-identity", identity, image],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=COSIGN_TIMEOUT_SECONDS,
-            env={name: environ[name] for name in _COSIGN_ENV if environ.get(name)},
-        )
+        # The release image is public. An empty config keeps registry logins out
+        # of this, and a credential helper in ~/.docker cannot break it.
+        with tempfile.TemporaryDirectory() as docker_config:
+            completed = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=COSIGN_TIMEOUT_SECONDS,
+                env={
+                    **{name: environ[name] for name in _COSIGN_ENV if environ.get(name)},
+                    "DOCKER_CONFIG": docker_config,
+                },
+            )
     except (OSError, subprocess.SubprocessError) as exc:
         raise EeError(f"cosign could not verify {image}: {exc}") from exc
     if completed.returncode != 0:
