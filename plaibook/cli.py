@@ -299,7 +299,7 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
         "--ee",
         action="store_true",
         help=(
-            "Run this PR/MR or branch review in one execution-environment container "
+            "Experimental. Run this PR/MR or branch review in one execution-environment container "
             "with ansible-navigator. Keeps ~/.ssh, the SSH agent, and other provider "
             "keys out of the review. The key this review uses is still inside the "
             "container with the commands that read PR content. See docs/execution-environment.md."
