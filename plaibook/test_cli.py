@@ -2637,3 +2637,23 @@ def test_relative_repo_path_is_resolved_for_the_playbook(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     extras = extra_vars_from_args(_args(commit=True, repo_path="."), "runId0123456789")
     assert extras["repo_path"] == os.getcwd()
+
+
+def test_format_pretty_names_the_provider_collection_and_model():
+    from plaibook.summary import format_pretty as render
+
+    text = render(
+        {
+            "agent_family": "openai",
+            "collection": "aknochow.openai@3657a67",
+            "models": ["gpt-6-luna"],
+            "targets": [],
+        }
+    )
+    assert "provider: openai · aknochow.openai@3657a67 · gpt-6-luna" in text
+
+
+def test_format_pretty_omits_an_unknown_provider():
+    from plaibook.summary import format_pretty as render
+
+    assert "provider:" not in render({"agent_family": "unknown", "targets": []})

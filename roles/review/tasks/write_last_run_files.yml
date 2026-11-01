@@ -20,6 +20,14 @@
     state: directory
     mode: "0700"
 
+# review.yml includes this file outside the role, where role defaults are
+# not visible. A family set only through the environment has to be read
+# from there, or the result reports it as unknown.
+- name: Resolve the family and collection this run used
+  ansible.builtin.set_fact:
+    _last_run_agent_family: >-
+      {{ agent_family | default(lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_AGENT_FAMILY'), true) | default('unknown', true) }}
+
 # Compute content once so fixed and run-scoped copies stay byte-identical.
 - name: Render the last-run summary content
   ansible.builtin.set_fact:
@@ -47,7 +55,8 @@
         'cost_usd': (pipeline_call_costs | default([]) | map('float') | sum) | round(4),
         'total_input_tokens': pipeline_total_input_tokens | default(0) | int,
         'total_output_tokens': pipeline_total_output_tokens | default(0) | int,
-        'agent_family': agent_family | default('unknown'),
+        'agent_family': _last_run_agent_family,
+        'collection': _last_run_agent_family | review_collection_ref(playbook_dir ~ '/collections-requirements.yml'),
         'models': pipeline_agent_calls | default([]) | map(attribute='model') | list | select | list | unique | list,
         'total_thinking_tokens': pipeline_total_thinking_tokens | default(0) | int,
         'agents_dispatched': pipeline_agent_calls | default([]) | length,
@@ -173,7 +182,7 @@
         },
         'commit': review_short_sha | default(''),
         'branch': review_branch | default(''),
-        'agent_family': agent_family | default('unknown'),
+        'agent_family': _last_run_agent_family,
         'models': pipeline_agent_calls | default([]) | map(attribute='model') | list | select | list | unique | list,
         'review_type': review_type | default(''),
         'target': review_org_repo | default('') ~ '#' ~ (review_number | default('')),

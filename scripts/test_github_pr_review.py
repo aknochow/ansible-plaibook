@@ -727,6 +727,16 @@ def test_comment_plan_updates_instead_of_stacking():
     assert "unchecked name" in prose[0]["text"]
 
 
+def test_summary_names_the_collection_after_the_family():
+    result = {
+        "agent_family": "openai",
+        "collection": "aknochow.openai@3657a67",
+        "models": ["gpt-6-luna"],
+        "targets": [{"verdict": "READY_FOR_HUMAN_REVIEW", "score": 100.0}],
+    }
+    assert "openai · aknochow.openai@3657a67 · gpt-6-luna" in summary_body(result, [])
+
+
 def test_summary_includes_models_cost_and_tokens():
     result = {
         "agent_family": "cursor",

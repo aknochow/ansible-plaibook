@@ -334,6 +334,9 @@ def _run_detail(result: dict[str, Any]) -> str:
     family = result.get("agent_family")
     if isinstance(family, str) and family.strip() and family != "unknown":
         parts.append(family.strip())
+    collection = result.get("collection")
+    if isinstance(collection, str) and collection.strip():
+        parts.append(collection.strip())
     models = result.get("models")
     if isinstance(models, list):
         names = [str(item).strip() for item in models if str(item).strip()]
