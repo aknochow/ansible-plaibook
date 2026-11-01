@@ -226,8 +226,11 @@ def _module_present(python: str, name: str) -> bool:
         f"sys.exit(0 if importlib.util.find_spec({name!r}) else 1)\n"
     )
     if _same_executable(python):
+        import importlib
         import importlib.util
 
+        # A pip install in this process leaves the import finders' caches stale.
+        importlib.invalidate_caches()
         return importlib.util.find_spec(name) is not None
     completed = _run([python, "-c", probe], timeout=60)
     return completed.returncode == 0
