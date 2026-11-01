@@ -158,12 +158,12 @@ def test_caller_does_not_pin_a_floating_secret_ref():
     assert "environment" not in job
     pinned = (
         "aknochow/ansible-plaibook/.github/workflows/plai-review-run.yml"
-        "@0efef2798a129fd9ddc9d07a5b04b740fa259a37"
+        "@cac3fbb388f924f929a3bada2ebd730f484576fc"
     )
     assert job["uses"] == pinned
     assert job["with"] == {"use_sandbox": "${{ github.event_name != 'workflow_dispatch' || inputs.use_sandbox }}"}
     assert job["secrets"] == {
-        "CURSOR_API_KEY": "${{ secrets.CURSOR_API_KEY }}",
+        "OPENAI_API_KEY": "${{ secrets.OPENAI_API_KEY }}",
         "PLAI_GITHUB_APP_ID": "${{ secrets.PLAI_GITHUB_APP_ID }}",
         "PLAI_GITHUB_APP_PRIVATE_KEY": "${{ secrets.PLAI_GITHUB_APP_PRIVATE_KEY }}",
     }
@@ -172,7 +172,7 @@ def test_caller_does_not_pin_a_floating_secret_ref():
     assert "job.workflow_sha" not in text
     assert "uses: ./." not in text
     assert "@main" not in text
-    assert "CURSOR_API_KEY" in text
+    assert "OPENAI_API_KEY" in text
     assert "PLAIBOOK_PROVIDER_TOKEN" not in text
     assert "PLAIBOOK_DISPATCH_TOKEN" not in text
     assert "checks: write" not in text
