@@ -147,19 +147,18 @@ difference as a bump to decide, not as the same pin.
 
 | Id | What | SHA | Where |
 |---|---|---|---|
-| `review.caller` | `plai-review.yml` calls the reusable workflow | `0efef2798a129fd9ddc9d07a5b04b740fa259a37` | `.github/workflows/plai-review.yml` `uses:` |
-| `review.checkout` | Both checkouts inside the reusable workflow | `6b2178d7705419dbad4fcd0457955e683b4f0931` | `.github/workflows/plai-review-run.yml` `ref:` |
+| `review.caller` | `plai-review.yml` calls the reusable workflow | `9ef97d36b181af43df66f1eca4169b4dc63cbc96` | `.github/workflows/plai-review.yml` `uses:` |
+| `review.checkout` | Both checkouts inside the reusable workflow | `1b495461075838920a9bdedb6d2a5ebfe5087a5b` | `.github/workflows/plai-review-run.yml` `ref:` |
 
 Move `review.checkout` first. Then set `review.caller` to the commit
 that contains those checkout refs. The caller file on the default
 branch is the one `pull_request_target` runs. Do not point the caller
 at a commit whose workflow still checks out the previous tree.
-`6b2178d7705419dbad4fcd0457955e683b4f0931` is the merge of `main` into the Cursor timeout branch.
-That tree includes the 1800-second Cursor lens limit.
-`review.caller` is `0efef2798a129fd9ddc9d07a5b04b740fa259a37`.
+`1b495461075838920a9bdedb6d2a5ebfe5087a5b` is `main` with the sandbox upload fix and the continuity audit fix.
+`review.caller` is `9ef97d36b181af43df66f1eca4169b4dc63cbc96`.
 That commit contains these checkout refs, so the called workflow
-checks out `6b2178d`. It is not `6b2178d` itself: that tree's
-workflow file still checks out `b9fee9a`.
+checks out `1b49546`. It is not `1b49546` itself: that tree's
+workflow file still checks out `dd28e81`.
 
 ## CI edges
 

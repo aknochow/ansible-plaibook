@@ -1,0 +1,298 @@
+---
+# End-to-end regression test for boolean-stringification findings:
+# Matching findings must NOT be refuted without a verify turn. Overly broad
+# matching previously refuted findings (and dropped non-boolean findings) with
+# zero agent calls. Under the current behavior, matching findings are sent to the
+# normal verify turn with a known-pattern hint note in the verify prompt, and
+# verified by checking the actual code.
+#
+# Three separate scenarios/plays, each testing that verify dispatches properly:
+# 1. Real MR 42 fixture gets a verify turn, receives the known-pattern note,
+#    and is not refuted without a check.
+# 2. A finding containing "non-boolean" text in its description matches the
+#    detector due to overly broad matching, but is NOT dropped/refuted without
+#    a verify turn; it gets a verify turn.
+# 3. An unrelated finding gets a verify turn without the known-pattern note.
+#
+# Usage:
+#   ANSIBLE_LIBRARY=$PWD/tests/library \
+#   VERIFY_PROVIDER_STUB_FILE=$PWD/tests/.verify_provider_stub.json \
+#     ansible-playbook tests/test_verify_boolean_stringification_note.yml
+
+- name: "Scenario 1: a matched boolean-stringification finding must get a verify turn and not be refuted without one"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_delegate_host: ""
+    review_repo_path: "{{ playbook_dir }}/.."
+    review_org_repo: "aknochow/ansible-plaibook"
+    review_number: "test-verify-boolean-stringification"
+    claude_message_module: verify_provider_stub
+    claude_agent_module: verify_provider_stub
+    gemini_generate_module: verify_provider_stub
+    openai_chat_module: verify_provider_stub
+    verify_provider_stub_file: "{{ lookup('ansible.builtin.env', 'VERIFY_PROVIDER_STUB_FILE') | default(playbook_dir ~ '/.verify_provider_stub.json', true) }}"
+
+    boolean_stringification_fixture_findings:
+      - lens: Functionality
+        file: "examples/provider_interop_comparison.yml"
+        line: 157
+        severity: Critical
+        confidence: HIGH
+        description: !unsafe >-
+          Jinja2 string comparison instead of boolean: the `correct`
+          field is set via a Jinja2 expression `{{ structured ==
+          benchmark_tasks[idx].expected }}`, which yields the Python
+          string 'True' or 'False', not an actual boolean. Later,
+          `selectattr('correct')` (lines 225, 229) filters on
+          truthiness — but in Ansible/Jinja2, the string 'False' is
+          truthy (it's a non-empty string), so every task will always be
+          counted as correct regardless of actual result. The same bug
+          exists in the Gemini normalize task at line 189.
+        evidence: !unsafe >-
+          correct: "{{ structured == benchmark_tasks[idx].expected }}"
+        fix: >-
+          Use the Ansible bool filter on the selectattr side: change
+          `selectattr('correct')` to `selectattr('correct', 'equalto',
+          'True')` in both aggregate lines, or restructure the entry to
+          use a native boolean by wrapping in a | bool filter.
+
+  environment:
+    VERIFY_PROVIDER_STUB_FILE: "{{ verify_provider_stub_file }}"
+
+  tasks:
+    - name: Write stub payload for verify provider
+      ansible.builtin.copy:
+        dest: "{{ verify_provider_stub_file }}"
+        mode: "0600"
+        content: >-
+          {{
+            {
+              'calls': 0,
+              'message': {'model': 'claude-haiku-4-5', 'content': [{'type': 'text', 'text': 'Checked the actual code.'}]},
+              'usage': {'input_tokens': 100, 'output_tokens': 20},
+              'tool_calls': [
+                {
+                  'name': 'report_verdict',
+                  'input': {
+                    'evidence_status': 'verified',
+                    'evidence': 'Checked the source',
+                    'rationale': 'Confirmed by source check',
+                    'requires_execution': false,
+                    'reachability': 'realistic',
+                    'trust_boundary': 'crosses-trust-boundary',
+                    'worst_outcome_category': 'availability-degradation',
+                    'silent_failure': false
+                  }
+                }
+              ]
+            } | to_json
+          }}
+
+    - name: Initialize pipeline-wide agent usage accounting
+      ansible.builtin.set_fact:
+        pipeline_agent_calls: []
+
+    - name: "Seed deduped_findings as a fact"
+      ansible.builtin.set_fact:
+        deduped_findings: "{{ boolean_stringification_fixture_findings }}"
+
+    - name: Run the verify stage in isolation
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: verify.yml
+
+    - name: Assert a match still gets a verify turn
+      ansible.builtin.assert:
+        that:
+          - pipeline_agent_calls | length > 0
+        fail_msg: >-
+          A matched boolean-stringification finding must still get a verify turn.
+          Got 0 agent calls.
+
+    - name: Assert a match is not refuted without a verify turn
+      ansible.builtin.assert:
+        that:
+          - deduped_findings[0].evidence_status == "verified"
+        fail_msg: >-
+          A matched finding must not be refuted without a verify turn.
+          Got evidence_status={{ deduped_findings[0].evidence_status }}
+
+    - name: Assert the verify prompt received the known pattern note
+      ansible.builtin.assert:
+        that:
+          - "'## Known pattern note' in verify_system_prompt"
+          - "'check the actual code' in verify_system_prompt"
+        fail_msg: >-
+          Verify prompt was missing the known pattern note guidance.
+
+- name: "Scenario 2: non-boolean text matching the detector is not dropped and gets a verify turn"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_delegate_host: ""
+    review_repo_path: "{{ playbook_dir }}/.."
+    review_org_repo: "aknochow/ansible-plaibook"
+    review_number: "test-verify-non-boolean"
+    claude_message_module: verify_provider_stub
+    claude_agent_module: verify_provider_stub
+    gemini_generate_module: verify_provider_stub
+    openai_chat_module: verify_provider_stub
+    verify_provider_stub_file: "{{ lookup('ansible.builtin.env', 'VERIFY_PROVIDER_STUB_FILE') | default(playbook_dir ~ '/.verify_provider_stub.json', true) }}"
+
+    non_boolean_fixture_findings:
+      - lens: Functionality
+        file: "examples/provider_interop_comparison.yml"
+        line: 200
+        severity: Critical
+        confidence: HIGH
+        description: !unsafe >-
+          Jinja stringifies this into a string, so the non-empty string is truthy
+          regardless of the actual result for non-boolean inputs.
+        evidence: !unsafe >-
+          result: "{{ item.value }}"
+        fix: >-
+          Ensure non-boolean inputs are handled correctly.
+
+  environment:
+    VERIFY_PROVIDER_STUB_FILE: "{{ verify_provider_stub_file }}"
+
+  tasks:
+    - name: Write stub payload for verify provider
+      ansible.builtin.copy:
+        dest: "{{ verify_provider_stub_file }}"
+        mode: "0600"
+        content: >-
+          {{
+            {
+              'calls': 0,
+              'message': {'model': 'claude-haiku-4-5', 'content': [{'type': 'text', 'text': 'Checked the actual code.'}]},
+              'usage': {'input_tokens': 100, 'output_tokens': 20},
+              'tool_calls': [
+                {
+                  'name': 'report_verdict',
+                  'input': {
+                    'evidence_status': 'verified',
+                    'evidence': 'Checked the source',
+                    'rationale': 'Non-boolean inputs verified against code',
+                    'requires_execution': false,
+                    'reachability': 'realistic',
+                    'trust_boundary': 'crosses-trust-boundary',
+                    'worst_outcome_category': 'availability-degradation',
+                    'silent_failure': false
+                  }
+                }
+              ]
+            } | to_json
+          }}
+
+    - name: Initialize pipeline-wide agent usage accounting
+      ansible.builtin.set_fact:
+        pipeline_agent_calls: []
+
+    - name: "Seed deduped_findings as a fact"
+      ansible.builtin.set_fact:
+        deduped_findings: "{{ non_boolean_fixture_findings }}"
+
+    - name: Run the verify stage in isolation
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: verify.yml
+
+    - name: Assert non-boolean finding gets a verify turn and is not dropped
+      ansible.builtin.assert:
+        that:
+          - pipeline_agent_calls | length > 0
+          - deduped_findings | length == 1
+          - deduped_findings[0].evidence_status == "verified"
+        fail_msg: >-
+          Non-boolean finding was dropped or did not get a verify turn.
+
+- name: "Scenario 3: an unrelated Critical finding gets a verify turn without the known pattern note"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_delegate_host: ""
+    review_repo_path: "{{ playbook_dir }}/.."
+    review_org_repo: "aknochow/ansible-plaibook"
+    review_number: "test-verify-boolean-stringification-control"
+    claude_message_module: verify_provider_stub
+    claude_agent_module: verify_provider_stub
+    gemini_generate_module: verify_provider_stub
+    openai_chat_module: verify_provider_stub
+    verify_provider_stub_file: "{{ lookup('ansible.builtin.env', 'VERIFY_PROVIDER_STUB_FILE') | default(playbook_dir ~ '/.verify_provider_stub.json', true) }}"
+
+    unrelated_fixture_findings:
+      - lens: Security
+        file: "roles/review/tasks/verify_target_freshness.yml"
+        line: 21
+        severity: Critical
+        confidence: MEDIUM
+        description: >-
+          The GitLab API poll task's argv builds a URL path directly
+          from review_org_repo/review_number without validating their
+          character set first, which this fixture claims (for test
+          purposes only) allows a path-injection style attack.
+        evidence: "'projects/' + (review_org_repo | replace('/', '%2F')) + '/merge_requests/' + (review_number | string)"
+        fix: >-
+          Assert review_org_repo/review_number match a safe character
+          set immediately after parsing review_target.
+
+  environment:
+    VERIFY_PROVIDER_STUB_FILE: "{{ verify_provider_stub_file }}"
+
+  tasks:
+    - name: Write stub payload for verify provider
+      ansible.builtin.copy:
+        dest: "{{ verify_provider_stub_file }}"
+        mode: "0600"
+        content: >-
+          {{
+            {
+              'calls': 0,
+              'message': {'model': 'claude-haiku-4-5', 'content': [{'type': 'text', 'text': 'Checked the actual code.'}]},
+              'usage': {'input_tokens': 100, 'output_tokens': 20},
+              'tool_calls': [
+                {
+                  'name': 'report_verdict',
+                  'input': {
+                    'evidence_status': 'verified',
+                    'evidence': 'Checked the source',
+                    'rationale': 'Path injection verified',
+                    'requires_execution': false,
+                    'reachability': 'realistic',
+                    'trust_boundary': 'crosses-trust-boundary',
+                    'worst_outcome_category': 'availability-degradation',
+                    'silent_failure': false
+                  }
+                }
+              ]
+            } | to_json
+          }}
+
+    - name: Initialize pipeline-wide agent usage accounting
+      ansible.builtin.set_fact:
+        pipeline_agent_calls: []
+
+    - name: "Seed deduped_findings as a fact"
+      ansible.builtin.set_fact:
+        deduped_findings: "{{ unrelated_fixture_findings }}"
+
+    - name: Run the verify stage in isolation
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: verify.yml
+
+    - name: Assert the unrelated finding went through the normal verify dispatch path
+      ansible.builtin.assert:
+        that:
+          - pipeline_agent_calls | length > 0
+          - "'## Known pattern note' not in verify_system_prompt"
+        fail_msg: >-
+          Unrelated finding had unexpected verify behavior.

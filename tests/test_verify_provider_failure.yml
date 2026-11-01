@@ -549,7 +549,7 @@
         verdict_case_expected_status: verified
         verdict_case_expected_severity: Major
 
-    - name: A boolean stringification claim is still refuted with no model call
+    - name: A boolean stringification claim reaches the verifier
       ansible.builtin.include_tasks: verify_verdict_case.yml
       vars:
         verdict_case_label: boolean stringification claim
@@ -567,7 +567,7 @@
           fix: Coerce with | bool.
         verdict_case_input: >-
           {{ _verdict_critical_axes | combine({'evidence_status': 'verified',
-             'evidence': 'a real quote', 'rationale': 'A real rationale.'}) }}
-        verdict_case_expected_status: refuted
+             'evidence': 'a real quote', 'rationale': 'A real rationale.',
+             'worst_outcome_category': 'crash-dos'}) }}
+        verdict_case_expected_status: verified
         verdict_case_expected_severity: Major
-        verdict_case_expected_calls: 0
