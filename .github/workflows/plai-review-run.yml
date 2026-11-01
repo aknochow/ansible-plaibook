@@ -2,7 +2,7 @@ name: plai
 
 # Runs plai review on this runner after the other checks on the pull
 # request have passed, then posts one pull request review. Does not call
-# a controller. post_results stays false. The provider is cursor. Sibling
+# a controller. post_results stays false. The provider is openai. Sibling
 # repositories must call this file at a full commit SHA. Checkout is a
 # fixed commit of this repository, written
 # in this file. Callers do not pass a ref. Values that reach the shell
@@ -23,8 +23,8 @@ name: plai
 # When false on workflow_dispatch, the job skips OpenShell and passes
 # --no-sandbox to plai review. Trigger events other than workflow_dispatch
 # always retain the sandbox.
-# CURSOR_API_KEY stays in that step because the
-# Cursor SDK call runs on the controller. The job token is read-only and
+# OPENAI_API_KEY stays in that step because the
+# OpenAI call runs on the controller. The job token is read-only and
 # is used to fetch the pull request. Tool execution runs in the sandbox.
 # The review job sets environment plaibook-review. A caller job cannot:
 # GitHub rejects environment on a job that uses a reusable workflow.
@@ -48,7 +48,7 @@ on:
         default: true
         required: false
     secrets:
-      CURSOR_API_KEY:
+      OPENAI_API_KEY:
         required: true
       PLAI_GITHUB_APP_ID:
         required: true
@@ -178,17 +178,17 @@ jobs:
           ref: "6b2178d7705419dbad4fcd0457955e683b4f0931"
           persist-credentials: false
 
-      - name: Require CURSOR_API_KEY
+      - name: Require OPENAI_API_KEY
         id: provider
         env:
-          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -euo pipefail
-          if [ -z "${CURSOR_API_KEY}" ]; then
-            echo "CURSOR_API_KEY is unset. No review ran."
+          if [ -z "${OPENAI_API_KEY}" ]; then
+            echo "OPENAI_API_KEY is unset. No review ran."
             exit 1
           fi
-          echo "CURSOR_API_KEY is present"
+          echo "OPENAI_API_KEY is present"
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - name: Install uv
@@ -286,8 +286,9 @@ jobs:
           # This job's token cannot write the pull request.
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
-          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
-          ANSIBLE_REVIEW_AGENT_FAMILY: cursor
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANSIBLE_REVIEW_AGENT_FAMILY: openai
+          ANSIBLE_REVIEW_OPENAI_MODEL: gpt-6-luna
           # OpenShell 0.1 rejects an empty workspace. The CLI default is "default".
           OPENSHELL_WORKSPACE: default
           # Ansible's log is Python stderr. Without this the step stays blank
