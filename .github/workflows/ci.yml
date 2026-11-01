@@ -62,7 +62,9 @@ jobs:
           echo "ANSIBLE_COLLECTIONS_PATH=${dest}" >> "$GITHUB_ENV"
           uv run --python "${{ matrix.python-version }}" python scripts/ci-install-collections.py
 
+      # Lint reads files, so one job covers every Python and OS.
       - name: Run ansible-lint check
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
         env:
           ANSIBLE_COLLECTIONS_PATH: ${{ runner.temp }}/plaibook-collections
         run: uv run --python ${{ matrix.python-version }} ansible-lint --offline
