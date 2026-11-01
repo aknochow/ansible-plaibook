@@ -33,6 +33,7 @@ PLAYBOOKS=(
   "tests/test_briefing_snapshot.yml"
   "tests/test_checklist_execution.yml"
   "tests/test_commit_range.yml"
+  "tests/test_continuity_audit_other_family.yml"
   "tests/test_cursor_named_lens_retry.yml"
   "tests/test_cursor_lens_async_wait.yml"
   "tests/test_cursor_verify_status_error.yml"

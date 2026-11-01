@@ -150,9 +150,10 @@
 
 # The module name is a template because the collection is not in
 # collections-requirements.yml. A literal name fails when this file loads,
-# for every agent_family, on an install without the collection.
+# for every agent_family, on an install without the collection. Ansible
+# resolves the template before it checks `when`, so this is set for every
+# family.
 - name: "xAI: resolve the continuity-audit module name"
-  when: agent_family == 'xai'
   ansible.builtin.set_fact:
     _xai_continuity_module: "{{ xai_chat_module | default('aknochow.xai.chat') }}"
 

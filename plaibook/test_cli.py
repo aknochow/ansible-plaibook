@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -2582,3 +2583,9 @@ def test_review_refuses_python_315_before_ansible(monkeypatch, capsys):
     assert code == 2
     assert "Python 3.15 is not supported" in err
     assert "3.10 through 3.14" in err
+
+
+def test_relative_repo_path_is_resolved_for_the_playbook(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    extras = extra_vars_from_args(_args(commit=True, repo_path="."), "runId0123456789")
+    assert extras["repo_path"] == os.getcwd()
