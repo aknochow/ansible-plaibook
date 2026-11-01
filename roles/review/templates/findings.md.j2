@@ -25,7 +25,7 @@
 
 ### Verdict: {{ review_verdict }}
 {% if review_exploration_incomplete | default(false) %}
-**Exploration incomplete**: at least one repo search did not finish cleanly (timeout or tool error). That is not evidence the pattern is absent.
+**Exploration incomplete**: at least one repo search did not finish cleanly (timeout or tool error) or the tool-call limit was reached. That is not evidence the pattern is absent.
 {% endif %}
 {% if guardian_forced_needs_changes | default(false) %}
 **Blocked by ai-guardian**: {{ guardian_blocking_findings | length }} finding(s) in a blocking category ({{ guardian_blocking_findings | map(attribute='rule_id') | list | unique | join(', ') }}) — see Security Scan below. This applies independently of the lens/verify scores and findings above.

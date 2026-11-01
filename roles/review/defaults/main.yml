@@ -477,7 +477,9 @@ review_explore_max_turns: 3
 review_explore_tool_timeout_seconds: 120
 # Total number of read-only exploration tool calls in one target. This keeps a
 # model that repeatedly asks for searches from consuming an unbounded wall
-# clock even when each individual command stays within its timeout.
+# clock even when each individual command stays within its timeout. Reaching
+# this limit stops exploration without failing the review, flags
+# review_exploration_incomplete, and preserves lens findings.
 review_explore_max_tool_calls: 12
 # Separate from review_agent_model: explore's job (decide whether
 # something needs checking, do a simple read/grep, report) is a much
