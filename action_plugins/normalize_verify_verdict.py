@@ -126,7 +126,12 @@ def normalize_verify_verdict(verdict) -> dict:
     rationale = verdict.get("rationale")
     status = verdict.get("evidence_status")
 
-    if status not in _VALID_STATUSES or is_placeholder_text(evidence) or is_placeholder_text(rationale):
+    if (
+        not isinstance(status, str)
+        or status not in _VALID_STATUSES
+        or is_placeholder_text(evidence)
+        or is_placeholder_text(rationale)
+    ):
         return {
             "status": "inconclusive",
             "evidence": "" if is_placeholder_text(evidence) else evidence,

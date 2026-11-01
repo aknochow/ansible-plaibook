@@ -183,3 +183,10 @@ def test_action_module_returns_the_normalized_values():
 
 def test_action_module_requires_the_verdict_argument():
     assert _run_action_module({})["failed"] is True
+
+
+@pytest.mark.parametrize("status", [["verified"], {"status": "verified"}, 1, None])
+def test_non_string_status_is_inconclusive(status):
+    result = normalize_verify_verdict({**REAL_VERDICT, "evidence_status": status})
+    assert result["status"] == "inconclusive"
+    assert result["rationale"] == UNSUPPORTED_RATIONALE
