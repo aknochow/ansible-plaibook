@@ -173,7 +173,7 @@ def test_caller_does_not_pin_a_floating_secret_ref():
     assert "environment" not in job
     pinned = (
         "aknochow/ansible-plaibook/.github/workflows/plai-review-run.yml"
-        "@20a302a208c48067af70b5d01b1385d4af966dff"
+        "@831bd8693698b10fa152aaf2dc32c5e674883513"
     )
     assert job["uses"] == pinned
     assert job["with"] == {"use_sandbox": "${{ github.event_name != 'workflow_dispatch' || inputs.use_sandbox }}"}
