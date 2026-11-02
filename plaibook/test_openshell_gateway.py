@@ -93,3 +93,47 @@ def test_existing_proxy_path_is_kept(tmp_path):
     chosen = tmp_path / "ssh_proxy.py"
     chosen.write_text("#!/usr/bin/env python\n", encoding="utf-8")
     assert mod.openshell_ssh_proxy(str(chosen), home=str(tmp_path)) == str(chosen)
+
+
+def _installed_scripts(home):
+    cache = home / ".cache" / "ansible-plaibook" / "collections"
+    return cache / "ansible_collections" / "aknochow" / "openshell" / "scripts"
+
+
+def test_unset_proxy_uses_the_installed_collection_script(tmp_path):
+    mod = _filter()
+    installed = _installed_scripts(tmp_path)
+    installed.mkdir(parents=True)
+    script = installed / "ssh_proxy.py"
+    script.write_text("#!/usr/bin/env python\n", encoding="utf-8")
+    assert mod.openshell_ssh_proxy("", home=str(tmp_path)) == str(script)
+
+
+def test_developer_checkout_is_not_used_unless_configured(tmp_path):
+    mod = _filter()
+    checkout = tmp_path / "code" / "ansible-openshell" / "scripts"
+    checkout.mkdir(parents=True)
+    (checkout / "ssh_proxy.py").write_text("stale\n", encoding="utf-8")
+    installed = _installed_scripts(tmp_path)
+    installed.mkdir(parents=True)
+    script = installed / "ssh_proxy.py"
+    script.write_text("#!/usr/bin/env python\n", encoding="utf-8")
+    assert mod.openshell_ssh_proxy("", home=str(tmp_path)) == str(script)
+
+
+def test_collection_search_path_is_used_when_plaibook_cache_is_absent(tmp_path):
+    mod = _filter()
+    ee = tmp_path / "usr" / "share" / "ansible" / "collections"
+    scripts = ee / "ansible_collections" / "aknochow" / "openshell" / "scripts"
+    scripts.mkdir(parents=True)
+    script = scripts / "ssh_proxy.py"
+    script.write_text("#!/usr/bin/env python\n", encoding="utf-8")
+    home = tmp_path / "home"
+    home.mkdir()
+    assert mod.openshell_ssh_proxy("", home=str(home), collection_paths=[str(ee)]) == str(script)
+    assert mod.openshell_ssh_proxy("", home=str(home), collection_paths=str(ee)) == str(script)
+
+
+def test_no_proxy_found_returns_the_configured_value(tmp_path):
+    mod = _filter()
+    assert mod.openshell_ssh_proxy("", home=str(tmp_path), collection_paths=[]) == ""
