@@ -80,10 +80,10 @@ SHA.
 
 | Id | Collection | SHA | Which change |
 |---|---|---|---|
-| `collection.openshell` | ansible-openshell | `09cd2f193a77b3d59b263c62224e23fe364fa6e8` | ansible-openshell #38. Commit standards on main. SDK range is still `openshell>=0.1.3,<0.2` from #36. |
-| `collection.claude` | ansible-claude | `dfc061b6bf0bf0c1462435ef1c1f106d830a52b0` | ansible-claude #34. Commit standards on main. SDK pins are still `anthropic` 1.11.0 and `claude-agent-sdk` 0.2.163 from #30. |
-| `collection.gemini` | ansible-gemini | `016d7e2e5eceb2052304c740ee6a4abf44ca48ce` | ansible-gemini #28. Commit standards on main. `google-genai` 2.27.0 is still the pin from #22. |
-| `collection.openai` | ansible-openai | `3657a671018dfda9f18328d2b0c179038f100797` | ansible-openai #30. Commit standards on main. `openai` 3.23.0 is still the pin from #25. |
+| `collection.openshell` | ansible-openshell | `9b0ae7ac6285d44c288a2ecacea3b6afa5c8b6fa` | ansible-openshell #42. Its development lock tests SDK 0.1.6. SDK range is still `openshell>=0.1.3,<0.2` from #36. |
+| `collection.claude` | ansible-claude | `e5522de6a00d26f74aa6204a8dc7d21dcb3cbbdb` | ansible-claude #37. Lock off published advisories. SDK pins are still `anthropic` 1.11.0 and `claude-agent-sdk` 0.2.163 from #30. |
+| `collection.gemini` | ansible-gemini | `3242c63b1ab50f62336aeb66ae7bbd57901c76cf` | ansible-gemini #29. Lock off published advisories. `google-genai` 2.27.0 is still the pin from #22. |
+| `collection.openai` | ansible-openai | `136ca89afc96ee2a1c23bc66f649373439106b20` | ansible-openai #32. Lock off published advisories. The collection locks `openai` 3.29.0 since #27. |
 | `collection.cursor` | ansible-cursor | `b4d2672761296e7338e801cccfd7ac20b08e564d` | ansible-cursor #39. Sends reasoning_effort for grok-4.7. The #38 start retry remains. `cursor-sdk` 1.0.35 and the serialized starts from #30 are unchanged. |
 | `collection.xai` | ansible-xai | `dfbb12ef6b1b93b9f706d198d2e56d206de11e2a` | ansible-xai #3. `agent_family=xai` calls `aknochow.xai.chat`. `xai-sdk` 1.21.0 is the hashed pin. That revision sends `conversation_id` as `x-grok-conv-id`, keeps tool calls on assistant turns, reports `attempts` usage, spends one `timeout` budget across retries, and accepts a response that repeats the same JSON object. |
 | `collection.community.general` | community.general | `049524674b13ad9782849c427266935c8ec61954` | Release 13.4.0. Do not float to the default branch. |
@@ -103,7 +103,7 @@ head start.
 | `sdk.anthropic` | anthropic | `anthropic[vertex]>=0.84.0` | same floor, via the collection | `anthropic==1.11.0` | `plaibook/hashed/claude-requirements.txt` |
 | `sdk.claude-agent` | claude-agent-sdk | `claude-agent-sdk>=0.2.144` | same floor, via the collection | `claude-agent-sdk==0.2.163` | `plaibook/hashed/claude-requirements.txt` |
 | `sdk.gemini` | google-genai | `google-genai>=1.0.0` | same floor, via the collection | `google-genai==2.27.0` | `plaibook/hashed/gemini-requirements.txt` |
-| `sdk.openai` | openai | `openai>=1.58.0` | same floor, via the collection | `openai==3.23.0` | `plaibook/hashed/openai-requirements.txt` |
+| `sdk.openai` | openai | `openai>=1.58.0` | same floor, via the collection | `openai==3.29.0` | `plaibook/hashed/openai-requirements.txt` |
 | `sdk.cursor` | cursor-sdk | `cursor-sdk>=1.0.31,<2.0.0` | `cursor-sdk>=1.0.31,<2.0.0` in `pyproject.toml` | `cursor-sdk==1.0.35` | `plaibook/hashed/cursor-requirements.txt` and `sandbox-runtime-requirements.txt` |
 | `sdk.openshell` | openshell | `openshell>=0.1.3,<0.2` | `openshell>=0.1.3,<0.2` in `pyproject.toml` and `plaibook/openshell_sdk.py` | `openshell==0.1.6` | `plaibook/hashed/openshell-requirements.txt` |
 
@@ -142,7 +142,7 @@ difference as a bump to decide, not as the same pin.
 | anthropic | `anthropic[vertex]==1.13.0` | `anthropic==1.11.0` |
 | claude-agent-sdk | `claude-agent-sdk==0.2.165` | `claude-agent-sdk==0.2.163` |
 | google-genai | `google-genai==2.29.0` | `google-genai==2.27.0` |
-| openai | `openai==3.28.0` | `openai==3.23.0` |
+| openai | `openai==3.29.0` | `openai==3.29.0` |
 | cursor-sdk | `cursor-sdk==1.0.37` | `cursor-sdk==1.0.35` |
 | xai-sdk | `xai-sdk==1.21.0` | `xai-sdk==1.21.0` |
 | openshell | `openshell==0.1.6` | `openshell==0.1.6` |

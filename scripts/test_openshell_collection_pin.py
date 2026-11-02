@@ -27,7 +27,7 @@ REQUIREMENTS = ROOT / "collections-requirements.yml"
 # Fetch only this reviewed commit. A pull request that changes the pin
 # must change these constants too; the YAML values are never passed to git.
 ALLOWED_REMOTE = "https://github.com/aknochow/ansible-openshell.git"
-ALLOWED_SHA = "09cd2f193a77b3d59b263c62224e23fe364fa6e8"
+ALLOWED_SHA = "9b0ae7ac6285d44c288a2ecacea3b6afa5c8b6fa"
 
 
 def _openshell_pin() -> tuple[str, str]:
