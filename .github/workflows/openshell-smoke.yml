@@ -26,7 +26,7 @@ jobs:
           persist-credentials: false
 
       - name: Load the OpenShell pins
-        run: grep -E '^[A-Z_]+=' .github/openshell-pins.env >> "$GITHUB_ENV"
+        run: grep -E '^[A-Z0-9_]+=' .github/openshell-pins.env >> "$GITHUB_ENV"
 
       - name: Start OpenShell and a sandbox
         env:

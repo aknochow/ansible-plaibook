@@ -76,6 +76,16 @@ def test_reusable_workflow_permissions_and_pins():
     image = r"^SANDBOX_IMAGE=ghcr\.io/nvidia/openshell-community/sandboxes/base@sha256:[0-9a-f]{64}$"
     assert re.search(image, pins, re.M)
     assert "openshell-pins.env" in text
+    for workflow in (text, (ROOT / ".github" / "workflows" / "openshell-smoke.yml").read_text(encoding="utf-8")):
+        load = re.search(r"grep -E '([^']+)' \.github/openshell-pins\.env", workflow)
+        assert load
+        loaded = [line for line in pins.splitlines() if re.search(load.group(1), line)]
+        assert {line.partition("=")[0] for line in loaded} == {
+            "OPENSHELL_VERSION",
+            "OPENSHELL_INSTALLER_COMMIT",
+            "OPENSHELL_INSTALLER_SHA256",
+            "SANDBOX_IMAGE",
+        }
     assert "base:latest" not in text
     assert 'sha="${GITHUB_SHA}"' not in text
     assert "workflow_run" not in text
