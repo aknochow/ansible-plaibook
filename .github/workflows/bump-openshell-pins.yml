@@ -1,7 +1,7 @@
 name: Bump OpenShell pins
 
-# Opens a pull request when OpenShell publishes a release or the sandbox image
-# moves. The pins stay exact, and the smoke check tests them before a merge.
+# Opens a pull request when OpenShell publishes a release, its Python SDK moves,
+# or the sandbox image moves. The pins stay exact, and the smoke check tests them before a merge.
 # The token comes from the same plai-crew installation as the collection bump.
 # The branch below is bot-owned. Do not commit onto it.
 
@@ -30,6 +30,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+
       - name: Mint a plai-crew installation token
         id: crew
         env:
@@ -56,14 +59,14 @@ jobs:
           GH_TOKEN: ${{ steps.crew.outputs.token }}
         run: |
           set -euo pipefail
-          if git diff --quiet -- .github/openshell-pins.env; then
+          if git diff --quiet; then
             echo "No pin moved."
             exit 0
           fi
           git config user.name "plai-crew[bot]"
           git config user.email "5277323+plai-crew[bot]@users.noreply.github.com"
           git checkout -B chore/bump-openshell-pins
-          git add .github/openshell-pins.env docs/dependency-map.md docs/github-review-check.md
+          git add -u
           git commit -s -m "chore(deps): bump OpenShell pins"
           gh auth setup-git
           git fetch origin '+refs/heads/*:refs/remotes/origin/*'

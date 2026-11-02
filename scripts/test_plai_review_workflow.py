@@ -91,7 +91,8 @@ def test_reusable_workflow_permissions_and_pins():
     assert "workflow_run" not in text
     assert "checksums.txt" in text
     assert "plaibook-image-warm" in script
-    assert "policy set --global --yes" in script
+    assert "--global" not in script
+    assert '--policy "$RUNNER_TEMP/plaibook-sandbox-policy.yaml"' in script
     assert "OPENSHELL_PROVISION_TIMEOUT" in script
     inputs = document["on"]["workflow_call"]["inputs"]
     assert set(inputs) == {"use_sandbox"}

@@ -80,9 +80,9 @@ def test_execution_environment_builds_from_the_pin_file():
         "openai==3.28.0",
         "cursor-sdk==1.0.37",
         "xai-sdk==1.21.0",
-        "openshell==0.1.3",
     ):
         assert pin in locked
+    assert re.search(r"(?m)^openshell==0\.1\.\d+ ", locked)
     assert "--hash=sha256:" in locked
     assert "gh-cli.repo" not in text
     assert "65d55875faa3281959676d91da15a9380583281586ac31bbd3d32b7924a9f4d2" in text

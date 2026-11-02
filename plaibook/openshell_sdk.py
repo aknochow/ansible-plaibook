@@ -37,7 +37,7 @@ from plaibook.runtime import interpreter_is_externally_managed
 
 # Matches aknochow.openshell (OPENSHELL_SDK_SPEC) and the 0.1 gateway
 # started by the upstream installer. 0.0.116 encodes CreateSandboxRequest
-# fields that gateway rejects. 0.1.3 is current PyPI; <0.2 is the ceiling.
+# fields that gateway rejects. <0.2 is the ceiling.
 SDK_SPEC = "openshell>=0.1.3,<0.2"
 HASHED_REQUIREMENTS = "openshell-requirements.txt"
 RUNTIME_HASHED_REQUIREMENTS = "sandbox-runtime-requirements.txt"

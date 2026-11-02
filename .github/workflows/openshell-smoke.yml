@@ -8,6 +8,7 @@ on:
   pull_request:
     paths:
       - .github/openshell-pins.env
+      - plaibook/hashed/openshell-requirements.txt
       - .github/workflows/openshell-smoke.yml
       - scripts/ci_openshell_up.sh
 

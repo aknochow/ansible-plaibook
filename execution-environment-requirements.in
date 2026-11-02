@@ -13,7 +13,7 @@ google-genai==2.29.0
 openai==3.28.0
 cursor-sdk==1.0.37
 xai-sdk==1.21.0
-openshell==0.1.3
+openshell==0.1.6
 grpcio==1.84.0
 protobuf==7.36.2
 kubernetes==37.0.1

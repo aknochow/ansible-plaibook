@@ -16,8 +16,8 @@ name: plai
 # before the agent starts. The review step installs OpenShell from the
 # installer pinned in .github/openshell-pins.env, which starts a local gateway. The community
 # sandbox image is pinned by digest. It embeds a policy this gateway
-# cannot activate, so the job sets a global filesystem policy with no
-# network rules, then runs plai review with that image. A boolean
+# cannot activate, so the job and review.yml give the sandbox a filesystem policy with
+# no network rules. A boolean
 # workflow_call input, use_sandbox (default true), lets an owner-started
 # CI review test the pipeline without OpenShell to measure duration.
 # When false on workflow_dispatch, the job skips OpenShell and passes
