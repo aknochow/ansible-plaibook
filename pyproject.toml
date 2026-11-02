@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "plaibook"
-version = "0.1.30"
+version = "0.1.31"
 description = "Ansible-native AI code-review pipeline"
 readme = "README.md"
 requires-python = ">=3.10,<3.15"
