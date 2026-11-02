@@ -2,7 +2,7 @@
 # ignore-unfixed and exit-code 1. Each entry expires 2026-11-09.
 # pip 26.2.2 still vendors msgpack 1.1.2. The installed pin is 1.2.3.
 # setuptools 70.3.0 and urllib3 2.7.0 are vendored copies, not the
-# installed pins (setuptools 84.0.0, urllib3 2.8.0). pip 26.2.2 vendors
+# installed pins (setuptools 84.2.1, urllib3 2.8.0). pip 26.2.2 vendors
 # certifi 2026.10.19, so that advisory is not ignored.
 vulnerabilities:
   - id: CVE-2026-19481
