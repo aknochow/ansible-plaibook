@@ -867,6 +867,6 @@ git_empty_tree_sha: "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 # A clone is retried only when git reports a network failure, because a missing
 # repo or a bad credential fails the same way every time.
 review_clone_transient_pattern: >-
-  Could not resolve host|Temporary failure in name resolution|Failed to connect|Connection timed out|Connection reset|The requested URL returned error: 50[234]|early EOF|TLS connection was non-properly terminated
+  Could not resolve host|Could not resolve proxy|Couldn't connect to server|Temporary failure in name resolution|Failed to connect|Connection timed out|Connection reset|The requested URL returned error: 50[234]|early EOF|TLS connection was non-properly terminated
 review_clone_retries: 3
 review_clone_retry_delay: 10
