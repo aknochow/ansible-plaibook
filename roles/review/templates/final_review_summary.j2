@@ -15,7 +15,7 @@ Failure target: {{ review_failed_target | default('unknown target') | regex_repl
 Failure reason: {{ review_pipeline_error | default('The review pipeline failed without a recorded error.') | regex_replace('[\r\n\t]+', ' ') }}
 {% elif review_regression_gate_failed | default(false) | bool %}
 Failure target: {{ ((review_org_repo | default('unknown repository')) ~ '#' ~ (review_number | default('unknown'))) | regex_replace('[\r\n\t]', ' ') }}
-Failure reason: fail_on_regressions is enabled and the review found {{ findings_critical | default([]) | length }} Critical and {{ findings_major | default([]) | length }} Major finding(s).
+Failure reason: fail_on_regressions is enabled and the review found {{ findings_critical | default([]) | length }} Critical and {{ findings_major | default([]) | length }} Major finding(s){{ ' and a blocking secret' if guardian_forced_needs_changes | default(false) | bool else '' }}.
 {% elif records | length == 0 %}
 Skip reason: no review result was recorded. The run may have stopped before a target could be reviewed.
 {% endif %}
