@@ -77,7 +77,7 @@ def test_execution_environment_builds_from_the_pin_file():
         "anthropic[vertex]==1.13.0",
         "claude-agent-sdk==0.2.165",
         "google-genai==2.29.0",
-        "openai==3.28.0",
+        "openai==3.29.0",
         "cursor-sdk==1.0.37",
         "xai-sdk==1.21.0",
     ):
