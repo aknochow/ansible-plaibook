@@ -71,6 +71,13 @@
     # gateway_endpoint from ~/.config/openshell/gateways/<name>/metadata.json.
     sandbox_gateway: "https://host.openshell.internal:17670"
     sandbox_image: "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
+    # Filesystem rules and no network rules, so sandbox commands have no egress.
+    # An empty policy leaves the image's own, which this gateway cannot activate:
+    # the sandbox then times out. Setting this replaces the whole policy.
+    sandbox_policy:
+      filesystem:
+        read_only: [/usr, /lib, /bin, /proc, /dev/urandom, /etc, /var/log]
+        read_write: [/sandbox, /tmp, /dev/null]
     # SSH ProxyCommand runs on the controller, not in the sandbox.
     # ansible_playbook_python is this process (the 3.11 sandbox-runtime
     # after plai re-execs). Do not use ansible_python_interpreter here:

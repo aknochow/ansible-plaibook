@@ -163,11 +163,10 @@ OpenShell sandbox policy.
 | PR clone (already on the controller) | `github.com`, `api.github.com`, `gitlab.com` |
 
 **Sandbox guest.** Only if you attach an OpenShell provider, run an
-agent CLI in the guest, or a `CHECKLIST.md` command phones home. Default
-`sandbox_policy` is empty (`{}`), which means "do not override the
-gateway default." Setting `sandbox_policy` **replaces** the gateway
-policy, including `network_policies`. An override that only lists
-filesystem paths is a deny-all network policy. Re-state any needed
+agent CLI in the guest, or a `CHECKLIST.md` command phones home. The
+default `sandbox_policy` in `review.yml` lists filesystem paths and no
+network rules, so guest commands have no egress. Setting `sandbox_policy`
+**replaces** that policy, including `network_policies`. Re-state any needed
 egress in that same object (see `examples/ai_guardian_scan.yml`).
 
 If you do need guest egress to providers, start from the same host
