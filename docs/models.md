@@ -18,8 +18,13 @@ A review makes three kinds of model call:
 - **Explore.** Up to `review_explore_max_turns` turns that read files beyond the diff with read-only tools. PR reviews only.
 - **Verify.** An independent re-check of each Critical and Major finding.
 
-Some providers apply the effort setting to all three, and some only to
-the lenses. The tables below say which.
+Verify sometimes makes a fourth call, the **continuity audit**. When a
+re-review claims a finding continues one from the previous round, a
+separate single call checks that the claim matches the real prior
+finding. Every provider runs it, and it uses the verify model.
+
+Some providers apply the effort setting to all of these, and some only
+to the lenses. The tables below say which.
 
 ## Starting settings
 
@@ -50,7 +55,7 @@ any variable on this page in the same file to keep it, or pass it with
 |---|---|---|
 | Lenses | `review_openai_model` | `review_openai_lens_reasoning_effort`. Empty sends no effort, so the API default applies. |
 | Explore and verify | `review_explore_openai_model`, `review_verify_openai_model` (both default to `review_openai_model`) | `none` for `gpt-6-luna` and `gpt-5.6`, because Chat Completions refuses function tools with any other effort. The API default for other models. |
-| Continuity audit | `review_openai_model` | `review_openai_continuity_reasoning_effort`, which defaults to the lens effort. |
+| Continuity audit | `review_verify_openai_model` | `review_openai_continuity_reasoning_effort`, which defaults to the lens effort. |
 
 The lens effort accepts `low`, `medium`, `high`, `xhigh`, or `max`.
 Higher effort costs more and takes longer. It does not reliably find
@@ -84,7 +89,7 @@ endpoint at `https://api.x.ai/v1`, not through the xAI SDK. Prefer
 | Call | Model | Effort |
 |---|---|---|
 | Lenses, explore, verify | `review_xai_model`, `review_explore_xai_model`, `review_verify_xai_model` | `review_xai_lens_reasoning_effort`, default `high`, for all three. |
-| Continuity audit | `review_xai_model` | `review_xai_continuity_reasoning_effort`, which defaults to the lens effort. |
+| Continuity audit | `review_verify_xai_model` | `review_xai_continuity_reasoning_effort`, which defaults to the lens effort. |
 
 Calls go through `aknochow.xai.chat`, which uses the xAI SDK's
 `chat.stream`. A high-effort lens on a large diff can run for many
