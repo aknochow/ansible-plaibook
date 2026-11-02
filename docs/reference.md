@@ -61,5 +61,6 @@ status: stable
 | Variable | Default | Purpose |
 |---|---|---|
 | `cleanup_sandbox_onfail` | `true` | Tears the sandbox down even after a failed run. Set `false` to leave a failed run's sandbox up for debugging. |
-| `sandbox_policy` | `{}` (no override) | Passed to `aknochow.openshell.sandbox`. Empty keeps the gateway default. Any explicit policy **replaces** that default, including network egress. Default `plai review` does not need OpenAI/Anthropic/Gemini/Cursor hosts in the *guest*; those SDK calls run on the controller. See [sandbox-and-agent-safety.md](sandbox-and-agent-safety.md#openshell-network-policy-vs-provider-apis). |
+| `sandbox_policy` | Filesystem paths, no network rules | Passed to `aknochow.openshell.sandbox`. Sandbox commands have no egress. Any explicit policy **replaces** this one, including `network_policies`. `{}` keeps the image's own policy, which may never activate. |
+| `sandbox_workspace` | `OPENSHELL_WORKSPACE`, then `default` | OpenShell workspace for the review sandbox. |
 | `sandbox_tls_source` | n/a | Overrides the sandbox's TLS source when the default doesn't apply. |

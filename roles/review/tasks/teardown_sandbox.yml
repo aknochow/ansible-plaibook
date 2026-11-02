@@ -5,6 +5,7 @@
   block:
     - name: "Delete the sandbox ({{ sandbox.sandbox.name }})"
       aknochow.openshell.sandbox:
+        workspace: "{{ (sandbox.sandbox.workspace if (sandbox.sandbox is defined) else '') | default('default', true) }}"
         gateway: "{{ sandbox_gateway }}"
         tls_cert: "{{ sandbox_tls_cert | default(omit, true) }}"
         tls_key: "{{ sandbox_tls_key | default(omit, true) }}"
