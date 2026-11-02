@@ -387,7 +387,7 @@ def ensure_openshell_sdk(
         return
     if interpreter_is_externally_managed(exe):
         installed = _installed_version(exe)
-        if installed and version_satisfies(installed):
+        if installed and version_satisfies(installed) and _sdk_importable(exe):
             # pip cannot replace it here. An in-range copy still works.
             out = stderr if stderr is not None else sys.stderr
             out.write(
@@ -583,6 +583,21 @@ def _interpreter_satisfies(python: str) -> bool:
             "protobuf is too old for OpenShell's generated code. Upgrade protobuf."
         )
         raise OpenshellSdkError(detail)
+    return completed.returncode == 0
+
+
+def _sdk_importable(python: str) -> bool:
+    """True when *python* can import openshell.SandboxClient."""
+    if _same_executable(python):
+        try:
+            from openshell import SandboxClient
+        except Exception:
+            return False
+        return SandboxClient is not None
+    completed = _run(
+        [python, "-c", "from openshell import SandboxClient; raise SystemExit(SandboxClient is None)"],
+        timeout=60,
+    )
     return completed.returncode == 0
 
 

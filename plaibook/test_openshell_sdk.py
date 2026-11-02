@@ -760,6 +760,7 @@ def test_externally_managed_keeps_an_older_in_range_sdk(monkeypatch, capsys):
     monkeypatch.setattr(sdk, "_interpreter_satisfies", lambda _exe: False)
     monkeypatch.setattr(sdk, "interpreter_is_externally_managed", lambda _exe: True)
     monkeypatch.setattr(sdk, "_installed_version", lambda _exe: "0.1.4")
+    monkeypatch.setattr(sdk, "_sdk_importable", lambda _exe: True)
     err = io.StringIO()
     sdk.ensure_openshell_sdk("/usr/bin/python3", stderr=err)
     assert "0.1.4" in err.getvalue() and "kept" in err.getvalue()
@@ -772,5 +773,17 @@ def test_externally_managed_without_an_sdk_still_refuses(monkeypatch):
     monkeypatch.setattr(sdk, "_interpreter_satisfies", lambda _exe: False)
     monkeypatch.setattr(sdk, "interpreter_is_externally_managed", lambda _exe: True)
     monkeypatch.setattr(sdk, "_installed_version", lambda _exe: None)
+    with pytest.raises(sdk.OpenshellSdkError, match="not installed"):
+        sdk.ensure_openshell_sdk("/usr/bin/python3")
+
+
+def test_externally_managed_refuses_an_in_range_sdk_that_cannot_import(monkeypatch):
+    from plaibook import openshell_sdk as sdk
+
+    monkeypatch.setattr(sdk, "interpreter_supports_sdk", lambda _exe: True)
+    monkeypatch.setattr(sdk, "_interpreter_satisfies", lambda _exe: False)
+    monkeypatch.setattr(sdk, "interpreter_is_externally_managed", lambda _exe: True)
+    monkeypatch.setattr(sdk, "_installed_version", lambda _exe: "0.1.4")
+    monkeypatch.setattr(sdk, "_sdk_importable", lambda _exe: False)
     with pytest.raises(sdk.OpenshellSdkError, match="not installed"):
         sdk.ensure_openshell_sdk("/usr/bin/python3")
