@@ -186,6 +186,10 @@ openai_api_key: >-
        | default(lookup('ansible.builtin.env', 'GROK_API_KEY'), true)
      ) | default(omit, true) }}
 openai_timeout: "{{ lookup('ansible.builtin.env', 'ANSIBLE_OPENAI_TIMEOUT') | default(300, true) | float }}"
+# How long the async OpenAI lens job may run. The SDK makes up to three
+# attempts (max_retries 2), each up to openai_timeout, so a fixed limit
+# would kill a raised timeout or a retried request.
+openai_lens_async_seconds: "{{ ((openai_timeout | float) * 3 + 60) | int }}"
 # agent_family=xai calls aknochow.xai.chat (xai-sdk chat.stream), not the
 # OpenAI-compatible endpoint. The collection reads GROK_API_KEY, XAI_API_KEY,
 # or ANSIBLE_GROK_API_KEY. 1800s is the long-eval floor. A high-effort lens

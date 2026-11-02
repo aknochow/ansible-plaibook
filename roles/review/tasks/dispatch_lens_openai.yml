@@ -37,7 +37,7 @@
         name: security_review_findings
         strict: true
         schema: "{{ security_findings_schema }}"
-  async: 600
+  async: "{{ openai_lens_async_seconds }}"
   poll: 0
   register: _openai_security_job
 
@@ -73,7 +73,7 @@
         name: code_review_findings
         strict: true
         schema: "{{ review_findings_schema }}"
-  async: 600
+  async: "{{ openai_lens_async_seconds }}"
   poll: 0
   register: _openai_review_job
 
@@ -85,7 +85,7 @@
     - "{{ _openai_review_job }}"
   register: _openai_lens_jobs
   until: _openai_lens_jobs.finished
-  retries: 120
+  retries: "{{ ((openai_lens_async_seconds | int) / 5) | round(0, 'ceil') | int }}"
   delay: 5
 
 - name: "OpenAI: collect both lens results"
