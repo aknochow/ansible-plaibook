@@ -465,14 +465,7 @@
     # print one complete summary after PLAYBOOK RECAP, including why a
     # commit-mode regression gate failed.
     - name: Determine whether the review failed its regression gate
-      ansible.builtin.set_fact:
-        review_regression_gate_failed: >-
-          {{
-            (not (review_pipeline_failed | default(false) | bool))
-            and (fail_on_regressions | bool)
-            and (review_verdict | default('')) == 'NEEDS_CHANGES'
-            and ((findings_critical | default([]) | length) + (findings_major | default([]) | length)) > 0
-          }}
+      ansible.builtin.include_tasks: roles/review/tasks/regression_gate.yml
 
     - name: Build the final review summary for the after-recap callback
       ansible.builtin.set_fact:
@@ -496,5 +489,6 @@
         msg: >-
           {{ review_org_repo }}#{{ review_number }} scored {{ score_overall }}/100 with
           {{ findings_critical | default([]) | length }} Critical and
-          {{ findings_major | default([]) | length }} Major finding(s). See
+          {{ findings_major | default([]) | length }} Major finding(s){{
+          ' and a blocking secret' if guardian_forced_needs_changes | default(false) | bool else '' }}. See
           {{ review_findings_path }} for details.

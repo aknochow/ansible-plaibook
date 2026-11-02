@@ -55,6 +55,7 @@ PLAYBOOKS=(
   "tests/test_pipeline_stats.yml"
   "tests/test_pr_ci_preflight.yml"
   "tests/test_pr_merge_base_diff.yml"
+  "tests/test_regression_gate.yml"
   "tests/test_resolve_target_pr_parsing.yml"
   "tests/test_sandbox_unreachable_teardown.yml"
   "tests/test_screen_diff_comments.yml"

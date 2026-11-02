@@ -12,3 +12,13 @@ reason = "Python 3.10 lock is filelock 3.20.3. The fix, 4.2.1, requires Python 3
 id = "GHSA-8mx5-7m5m-r77g"
 ignoreUntil = 2027-01-28
 reason = "Windows filelock advisory. The fix requires Python 3.11. 3.10 stays on 3.20.3; 3.11 and newer are locked to 4.2.4."
+
+# The pip-legacy-setuptools CI job installs setuptools 68 on purpose: it
+# proves Homebrew Python 3.10's in-process backend can still build
+# plaibook. Nothing ships with it. Every other file pins a fixed release.
+[[PackageOverrides]]
+name = "setuptools"
+version = "68.0.0"
+ecosystem = "PyPI"
+ignore = true
+reason = "CI-only build-backend compatibility check, not installed by plai or the image."
