@@ -32,6 +32,15 @@ uv run ./scripts/run_playbook_tests.sh             # Offline Ansible playbook te
 uv run ansible-playbook review.yml --syntax-check  # Playbook syntax check
 ```
 
+### Tests for new behavior
+
+A pull request that adds or changes behavior adds or updates a test
+that fails without the change. Put Python logic under `pytest`, next to
+the code it covers, and playbook behavior in an offline test under
+`tests/` that `scripts/run_playbook_tests.sh` runs. A bug fix includes
+a test that reproduces the bug. CI runs both suites on every pull
+request, and a pull request with failing tests is not merged.
+
 ## Runtime SDK pins
 
 Provider SDKs, the OpenShell SDK, the Python 3.11 sandbox-runtime's
