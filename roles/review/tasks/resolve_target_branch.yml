@@ -74,6 +74,11 @@
   # clone of a potentially large, foreign repo.
   async: 120
   poll: 2
+  until: >-
+    branch_review_clone_result is succeeded or
+    (((branch_review_clone_result.msg | default('')) ~ ' ' ~ (branch_review_clone_result.stderr | default(''))) is not search(review_clone_transient_pattern))
+  retries: "{{ review_clone_retries | int }}"
+  delay: "{{ review_clone_retry_delay | int }}"
 
 - name: Fail loudly if the sandbox connection was unreachable
   ansible.builtin.include_tasks: fail_if_sandbox_unreachable.yml
