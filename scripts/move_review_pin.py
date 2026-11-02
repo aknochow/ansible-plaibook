@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -22,6 +23,7 @@ _FIND = {
     "caller": (CALLER, re.compile(r"plai-review-run\.yml@([0-9a-f]{40})")),
 }
 _SHA = re.compile(r"[0-9a-f]{40}")
+TRUSTED_REPO = "https://github.com/aknochow/ansible-plaibook.git"
 
 
 def current_pin(pin: str, root: Path = ROOT) -> str:
@@ -47,12 +49,35 @@ def move_pin(pin: str, commit: str, root: Path = ROOT) -> list[str]:
     return changed
 
 
+def require_on_main(commit: str, root: Path = ROOT) -> None:
+    """Refuse a commit that is not on this repository's main, such as one from a fork."""
+    if not _SHA.fullmatch(commit):
+        raise ValueError("the commit must be a full 40-character SHA")
+    try:
+        subprocess.run(
+            ["git", "-C", str(root), "fetch", "-q", TRUSTED_REPO, "main"],
+            check=True,
+            timeout=120,
+        )
+        on_main = subprocess.run(
+            ["git", "-C", str(root), "merge-base", "--is-ancestor", commit, "FETCH_HEAD"],
+            check=False,
+            timeout=30,
+            capture_output=True,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError(f"could not check {commit} against main: {exc}") from exc
+    if on_main.returncode != 0:
+        raise ValueError(f"{commit} is not on main of {TRUSTED_REPO}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("pin", choices=sorted(_FIND))
     parser.add_argument("commit", help="full SHA of the merge commit on main")
     args = parser.parse_args(argv)
     try:
+        require_on_main(args.commit)
         for name in move_pin(args.pin, args.commit):
             print(name)
     except (OSError, ValueError) as exc:

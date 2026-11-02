@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import subprocess
+
 import move_review_pin as move
 import pytest
 
@@ -44,3 +46,20 @@ def test_refuses_mixed_pins(tmp_path):
 def test_the_real_tree_has_one_of_each_pin():
     assert move.current_pin("checkout")
     assert move.current_pin("caller")
+
+
+def test_main_refuses_a_commit_not_on_main(monkeypatch):
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 1 if "merge-base" in command else 0)
+
+    monkeypatch.setattr(move.subprocess, "run", fake_run)
+    monkeypatch.setattr(move, "move_pin", lambda *a: pytest.fail("moved"))
+    assert move.main(["checkout", NEW]) == 1
+
+
+def test_main_moves_a_commit_on_main(monkeypatch, capsys):
+    monkeypatch.setattr(move.subprocess, "run", lambda command, **k: subprocess.CompletedProcess(command, 0))
+    monkeypatch.setattr(move, "move_pin", lambda pin, commit: ["changed"])
+    assert move.main(["checkout", NEW]) == 0
+    assert "changed" in capsys.readouterr().out
+
