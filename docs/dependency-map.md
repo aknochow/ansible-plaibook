@@ -162,13 +162,13 @@ are not plaibook dependencies.
 | Id | What | SHA | Where |
 |---|---|---|---|
 | `review.caller` | `plai-review.yml` calls the reusable workflow | `20a302a208c48067af70b5d01b1385d4af966dff` | `.github/workflows/plai-review.yml` `uses:` |
-| `review.checkout` | Both checkouts inside the reusable workflow | `7c431b1feddba0dcdd327b28ebf392b3d48266ba` | `.github/workflows/plai-review-run.yml` `ref:` |
+| `review.checkout` | Both checkouts inside the reusable workflow | `484375ca02bae2252e52ea9eff9259b1042fc135` | `.github/workflows/plai-review-run.yml` `ref:` |
 
 Move `review.checkout` first. Then set `review.caller` to the commit
 that contains those checkout refs. The caller file on the default
 branch is the one `pull_request_target` runs. Do not point the caller
 at a commit whose workflow still checks out the previous tree.
-`7c431b1feddba0dcdd327b28ebf392b3d48266ba` is `main` with the provider, collection, and effort in review results.
+`484375ca02bae2252e52ea9eff9259b1042fc135` is `main` with the per-sandbox no-network policy and the clone retry.
 `review.caller` is `20a302a208c48067af70b5d01b1385d4af966dff`.
 That commit contains these checkout refs, so the called workflow
 checks out `dea10b4`. It is not `dea10b4` itself: that tree's
