@@ -111,7 +111,8 @@
   ansible.builtin.copy:
     content: "{{ _frontmatter_result.frontmatter + review_final_report }}"
     dest: "{{ review_findings_path }}"
-    mode: "0644"
+    # Same material as summary.json below, so the same mode.
+    mode: "0600"
 
 # review_findings_path is a shared path: two runs reviewing the same
 # target/branch/commit (a genuine intentional re-review, or an
@@ -125,7 +126,7 @@
   ansible.builtin.copy:
     content: "{{ _frontmatter_result.frontmatter + review_final_report }}"
     dest: "{{ review_findings_path | dirname }}/findings.{{ review_persist_run_id }}.md"
-    mode: "0644"
+    mode: "0600"
 
 # A small, stable, structured artifact alongside findings.md, for an
 # agent (or any tooling) that wants verdict/scores/findings without
