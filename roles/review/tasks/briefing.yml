@@ -303,5 +303,5 @@
         and _latest_prior_review.found
         and prior_review_sha != ''
         and prior_review_sha == review_short_sha
-        and (review_prior_summary.verdict | default('')) != ''
+        and (review_prior_summary.verdict | default('', true) | string) != ''
       }}
