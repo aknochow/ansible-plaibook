@@ -12,7 +12,7 @@ def _defaults() -> dict:
     return yaml.safe_load((ROLE / "defaults" / "main.yml").read_text(encoding="utf-8"))
 
 
-def _render(expr: str, **values) -> str:
+def _render(expr: str, **values: object) -> str:
     return jinja2.Environment().from_string(expr).render(**values)
 
 
