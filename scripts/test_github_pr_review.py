@@ -1202,3 +1202,27 @@ def test_gate_still_fails_on_a_client_error(monkeypatch):
 
     monkeypatch.setattr(github_pr_review, "_request", lambda *_a, **_k: (404, "not found", ""))
     assert github_pr_review.main(["gate", "--repo", "org/repo", "--sha", "a" * 40]) == 1
+
+
+def test_gate_keeps_waiting_when_a_response_body_is_cut_short(monkeypatch, capsys):
+    import http.client
+
+    import github_pr_review
+
+    class Short:
+        status = 200
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def read(self):
+            raise http.client.IncompleteRead(b"{", 10)
+
+    monkeypatch.setattr(github_pr_review.urllib.request, "urlopen", lambda *_a, **_k: Short())
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    assert github_pr_review.main(["gate", "--repo", "org/repo", "--sha", "a" * 40]) == 10
+    assert capsys.readouterr().out.strip() == "waiting"

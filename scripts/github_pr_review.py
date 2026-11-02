@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -523,10 +524,14 @@ def _request(method: str, url: str, payload: dict[str, Any] | None = None) -> tu
             link = response.headers.get("Link") or ""
             status = response.status
     except urllib.error.HTTPError as exc:
-        raw = exc.read().decode("utf-8", errors="replace")
+        try:
+            raw = exc.read().decode("utf-8", errors="replace")
+        except (OSError, http.client.HTTPException) as read_exc:
+            raise TransientApiError(f"GitHub API {method} {url.split('?', 1)[0]}: {read_exc}") from read_exc
         return exc.code, raw, ""
-    except OSError as exc:
-        # URLError, RemoteDisconnected, and timeouts are all OSError.
+    except (OSError, http.client.HTTPException) as exc:
+        # URLError, RemoteDisconnected and timeouts are OSError. A body cut
+        # short mid-read is http.client.IncompleteRead, an HTTPException.
         raise TransientApiError(f"GitHub API {method} {url.split('?', 1)[0]}: {exc}") from exc
     if not raw:
         return status, None, link
