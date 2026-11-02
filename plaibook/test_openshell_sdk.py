@@ -711,3 +711,66 @@ def test_sdk_satisfies_unexpected_error_propagates(monkeypatch):
     monkeypatch.setattr("importlib.metadata.version", boom)
     with pytest.raises(RuntimeError, match="metadata exploded"):
         sdk_satisfies()
+
+
+def _fake_installed_sdk(monkeypatch, installed: str) -> None:
+    import sys
+    from types import ModuleType
+
+    fake = ModuleType("openshell")
+    fake.SandboxClient = object
+    monkeypatch.setitem(sys.modules, "openshell", fake)
+    monkeypatch.setattr("importlib.metadata.version", lambda _name: installed)
+
+
+def test_pinned_sdk_version_reads_the_hashed_file():
+    from plaibook.openshell_sdk import pinned_sdk_version
+    from plaibook.pip_hashed import pinned_versions
+
+    assert pinned_sdk_version() == tuple(int(x) for x in pinned_versions(HASHED_REQUIREMENTS)["openshell"].split("."))
+
+
+def test_sdk_older_than_the_pin_is_upgraded(monkeypatch):
+    monkeypatch.setattr("plaibook.openshell_sdk.pinned_sdk_version", lambda: (0, 1, 6))
+    _fake_installed_sdk(monkeypatch, "0.1.4")
+    assert sdk_satisfies() is False
+
+
+def test_sdk_at_or_above_the_pin_is_kept(monkeypatch):
+    monkeypatch.setattr("plaibook.openshell_sdk.pinned_sdk_version", lambda: (0, 1, 6))
+    for installed in ("0.1.6", "0.1.7"):
+        _fake_installed_sdk(monkeypatch, installed)
+        assert sdk_satisfies() is True
+
+
+def test_sdk_outside_the_range_is_refused_even_without_a_pin(monkeypatch):
+    monkeypatch.setattr("plaibook.openshell_sdk.pinned_sdk_version", lambda: None)
+    _fake_installed_sdk(monkeypatch, "0.2.0")
+    assert sdk_satisfies() is False
+    _fake_installed_sdk(monkeypatch, "0.1.4")
+    assert sdk_satisfies() is True
+
+
+def test_externally_managed_keeps_an_older_in_range_sdk(monkeypatch, capsys):
+    import io
+
+    from plaibook import openshell_sdk as sdk
+
+    monkeypatch.setattr(sdk, "interpreter_supports_sdk", lambda _exe: True)
+    monkeypatch.setattr(sdk, "_interpreter_satisfies", lambda _exe: False)
+    monkeypatch.setattr(sdk, "interpreter_is_externally_managed", lambda _exe: True)
+    monkeypatch.setattr(sdk, "_installed_version", lambda _exe: "0.1.4")
+    err = io.StringIO()
+    sdk.ensure_openshell_sdk("/usr/bin/python3", stderr=err)
+    assert "0.1.4" in err.getvalue() and "kept" in err.getvalue()
+
+
+def test_externally_managed_without_an_sdk_still_refuses(monkeypatch):
+    from plaibook import openshell_sdk as sdk
+
+    monkeypatch.setattr(sdk, "interpreter_supports_sdk", lambda _exe: True)
+    monkeypatch.setattr(sdk, "_interpreter_satisfies", lambda _exe: False)
+    monkeypatch.setattr(sdk, "interpreter_is_externally_managed", lambda _exe: True)
+    monkeypatch.setattr(sdk, "_installed_version", lambda _exe: None)
+    with pytest.raises(sdk.OpenshellSdkError, match="not installed"):
+        sdk.ensure_openshell_sdk("/usr/bin/python3")
