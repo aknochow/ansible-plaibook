@@ -106,7 +106,7 @@ review_xai_lens_reasoning_effort: high
 
 | Call | Model | Effort |
 |---|---|---|
-| Lenses, explore, verify | `review_cursor_model`, `review_explore_cursor_model`, `review_verify_cursor_model` | `review_cursor_effort`, default `high`, for all three. `aknochow.cursor` sends it as the model's `effort`. |
+| Lenses, explore, verify | `review_cursor_model`, `review_explore_cursor_model`, `review_verify_cursor_model` | `review_cursor_effort`, default `high`, for all three and the continuity audit. `aknochow.cursor` sends it as the model's `effort`. |
 
 ```yaml
 agent_family: cursor
@@ -138,11 +138,11 @@ review_gemini_thinking_level: high
 | Call | Model | Effort |
 |---|---|---|
 | Lenses and explore | `review_agent_model`, default `claude-opus-4-6` | None. Extended thinking is not enabled on this path. |
-| Verify | `review_verify_model`, default `claude-haiku-4-5` | None. |
+| Verify and the continuity audit | `review_verify_model`, default `claude-haiku-4-5` | None. |
 
 `agent_family: claude_cli` runs the local `claude` CLI on your
 subscription instead of the API. Its effort is `review_claude_cli_effort`,
-default `high`.
+default `high`, and it applies to the continuity audit too.
 
 ## Check what a run used
 
