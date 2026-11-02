@@ -332,3 +332,9 @@ def test_sandbox_enabled_byte_for_byte_equivalent_to_baseline():
     assert "-e review_require_ci_passing=false" in run_script
     assert "-e sandbox_wait_timeout=600" in run_script
     assert '-e sandbox_image="$SANDBOX_IMAGE"' in run_script
+
+
+def test_openshell_bump_runs_only_on_the_default_branch():
+    document = _load(ROOT / ".github" / "workflows" / "bump-openshell-pins.yml")
+    assert "default_branch" in document["jobs"]["bump"]["if"]
+
