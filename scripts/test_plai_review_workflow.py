@@ -65,20 +65,34 @@ def test_reusable_workflow_permissions_and_pins():
     assert plai_steps[0]["env"]["EVENT_NAME"] == "${{ github.event_name }}"
     assert "sandbox_wait_timeout=600" in plai_steps[0]["run"]
     assert "--no-sandbox" in plai_steps[0]["run"]
-    assert "6648bd0c290efbc41ba131ee9831ee45cd431f94/install.sh" in text
-    assert "sha256sum -c -" in text
-    assert "OPENSHELL_VERSION=v0.1.2" in text
-    assert "GITHUB_PATH" in text
-    digest = "sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e"
-    image = f"ghcr.io/nvidia/openshell-community/sandboxes/base@{digest}"
-    assert image in text
+    script = (ROOT / "scripts" / "ci_openshell_up.sh").read_text(encoding="utf-8")
+    pins = (ROOT / ".github" / "openshell-pins.env").read_text(encoding="utf-8")
+    assert "${OPENSHELL_INSTALLER_COMMIT}/install.sh" in script
+    assert "sha256sum -c -" in script
+    assert "GITHUB_PATH" in script
+    assert re.search(r"^OPENSHELL_VERSION=v\d+\.\d+\.\d+$", pins, re.M)
+    assert re.search(r"^OPENSHELL_INSTALLER_COMMIT=[0-9a-f]{40}$", pins, re.M)
+    assert re.search(r"^OPENSHELL_INSTALLER_SHA256=[0-9a-f]{64}$", pins, re.M)
+    image = r"^SANDBOX_IMAGE=ghcr\.io/nvidia/openshell-community/sandboxes/base@sha256:[0-9a-f]{64}$"
+    assert re.search(image, pins, re.M)
+    assert "openshell-pins.env" in text
+    for workflow in (text, (ROOT / ".github" / "workflows" / "openshell-smoke.yml").read_text(encoding="utf-8")):
+        load = re.search(r"grep -E '([^']+)' \.github/openshell-pins\.env", workflow)
+        assert load
+        loaded = [line for line in pins.splitlines() if re.search(load.group(1), line)]
+        assert {line.partition("=")[0] for line in loaded} == {
+            "OPENSHELL_VERSION",
+            "OPENSHELL_INSTALLER_COMMIT",
+            "OPENSHELL_INSTALLER_SHA256",
+            "SANDBOX_IMAGE",
+        }
     assert "base:latest" not in text
     assert 'sha="${GITHUB_SHA}"' not in text
     assert "workflow_run" not in text
     assert "checksums.txt" in text
-    assert "plaibook-image-warm" in text
-    assert "policy set --global --yes" in text
-    assert "OPENSHELL_PROVISION_TIMEOUT" in text
+    assert "plaibook-image-warm" in script
+    assert "policy set --global --yes" in script
+    assert "OPENSHELL_PROVISION_TIMEOUT" in script
     inputs = document["on"]["workflow_call"]["inputs"]
     assert set(inputs) == {"use_sandbox"}
     assert inputs["use_sandbox"]["type"] == "boolean"
@@ -199,17 +213,11 @@ def test_caller_does_not_pin_a_floating_secret_ref():
 def test_security_event_name_guard_preserves_sandbox_for_pull_request_target_and_issue_comment():
     document = _load(RUN)
     job = document["jobs"]["review"]
-    install = next(step for step in job["steps"] if step.get("name") == "Install OpenShell")
-    policy = next(
-        step
-        for step in job["steps"]
-        if step.get("name") == "Replace the image policy and pull the review sandbox"
+    install = next(
+        step for step in job["steps"] if step.get("name") == "Start OpenShell and pull the review sandbox"
     )
-    for step in (install, policy):
-        condition = step["if"]
-        assert "inputs.use_sandbox" in condition
-        assert "github.event_name != 'workflow_dispatch'" in condition
-
+    assert "github.event_name != 'workflow_dispatch'" in install["if"]
+    assert "inputs.use_sandbox" in install["if"]
     plai_step = next(step for step in job["steps"] if step.get("id") == "plai")
     assert plai_step["env"]["USE_SANDBOX"] == "${{ inputs.use_sandbox }}"
     assert plai_step["env"]["EVENT_NAME"] == "${{ github.event_name }}"
@@ -324,3 +332,9 @@ def test_sandbox_enabled_byte_for_byte_equivalent_to_baseline():
     assert "-e review_require_ci_passing=false" in run_script
     assert "-e sandbox_wait_timeout=600" in run_script
     assert '-e sandbox_image="$SANDBOX_IMAGE"' in run_script
+
+
+def test_openshell_bump_runs_only_on_the_default_branch():
+    document = _load(ROOT / ".github" / "workflows" / "bump-openshell-pins.yml")
+    assert "default_branch" in document["jobs"]["bump"]["if"]
+

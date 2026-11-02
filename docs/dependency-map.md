@@ -117,8 +117,10 @@ the plaibook package itself.
 | Id | What it is | Current pin | Where |
 |---|---|---|---|
 | `sdk.openshell` | Python package imported by the collection and by plaibook | `openshell==0.1.3`, range `openshell>=0.1.3,<0.2` | Hashed file, `plaibook/openshell_sdk.py`, and the collection at `collection.openshell`. |
-| `openshell.gateway` | CLI and local gateway the review workflow starts | `OPENSHELL_VERSION=v0.1.2`. Installer source commit `6648bd0c290efbc41ba131ee9831ee45cd431f94`. sha256 `5c98a86a4b811c471b212219cb2a62d458244220ffa71ac8e3baf3700b17b871` | `.github/workflows/plai-review-run.yml` |
-| `openshell.sandbox-image` | Guest image the review runs inside | `ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e` | `.github/workflows/plai-review-run.yml` (`SANDBOX_IMAGE`) |
+| `openshell.gateway` | CLI and local gateway the review workflow starts | `OPENSHELL_VERSION=v0.1.6`. Installer source commit `ac7f615cd12d5cc49cb16eb1f5f10ffeb1e90f47`. sha256 `04c1a437d4a4fc11930d75a336fc4f52bf0c95251e8469c306e407e203769ae7` | `.github/openshell-pins.env` |
+| `openshell.sandbox-image` | Guest image the review runs inside | `ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e` | `.github/openshell-pins.env` |
+
+`bump-openshell-pins.yml` opens a pull request when OpenShell publishes a release or the image moves. The OpenShell smoke check starts that gateway and a sandbox, with no secrets. After a merge, `review.checkout` and `review.caller` still have to move before reviews use it.
 
 The gateway and the Python SDK share a major version (`0.1`). They do
 not share a patch number. Bumping the SDK to 0.1.3 does not by itself
