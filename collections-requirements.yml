@@ -9,16 +9,16 @@
 collections:
   - name: https://github.com/aknochow/ansible-openshell.git
     type: git
-    # SHA is ansible-openshell #38 on main (commit standards). SDK range is still openshell>=0.1.3,<0.2 from #36.
-    version: 09cd2f193a77b3d59b263c62224e23fe364fa6e8
+    # SHA is ansible-openshell #42 on main (tests SDK 0.1.6). SDK range is still openshell>=0.1.3,<0.2 from #36.
+    version: 9b0ae7ac6285d44c288a2ecacea3b6afa5c8b6fa
   - name: https://github.com/aknochow/ansible-claude.git
     type: git
-    # SHA is ansible-claude #34 on main (commit standards). SDK pins are still anthropic 1.11.0 and claude-agent-sdk 0.2.163 from #30.
-    version: dfc061b6bf0bf0c1462435ef1c1f106d830a52b0
+    # SHA is ansible-claude #37 on main (lock off advisories). SDK pins are still anthropic 1.11.0 and claude-agent-sdk 0.2.163 from #30.
+    version: e5522de6a00d26f74aa6204a8dc7d21dcb3cbbdb
   - name: https://github.com/aknochow/ansible-gemini.git
     type: git
-    # SHA is ansible-gemini #28 on main (commit standards). google-genai 2.27.0 is still the pin from #22.
-    version: 016d7e2e5eceb2052304c740ee6a4abf44ca48ce
+    # SHA is ansible-gemini #29 on main (lock off advisories). google-genai 2.27.0 is still the pin from #22.
+    version: 3242c63b1ab50f62336aeb66ae7bbd57901c76cf
   - name: https://github.com/aknochow/ansible-openai.git
     type: git
     # Pin the interface this role calls; moving main can silently change
@@ -26,8 +26,8 @@ collections:
     # Must be an ancestor of ansible-openai origin/main — galaxy clones
     # the default branch, then checks out this SHA. 60a9cc1 had the same
     # tree but is not on current main (history rewrite).
-    # SHA is ansible-openai #30 on main (commit standards). openai 3.23.0 is still the pin from #25.
-    version: 3657a671018dfda9f18328d2b0c179038f100797
+    # SHA is ansible-openai #32 on main (lock off advisories). The collection locks openai 3.29.0 since #27.
+    version: 136ca89afc96ee2a1c23bc66f649373439106b20
   - name: https://github.com/aknochow/ansible-cursor.git
     type: git
     # Pin the interface this role calls (effort mapping, structured_tool
