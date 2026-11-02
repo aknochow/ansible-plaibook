@@ -1351,9 +1351,9 @@ multidict==6.9.1 \
 oauthlib==4.0.0 \
     --hash=sha256:624c28c13a0a59cabf9747dfa52af63be3e512a7f2714df16e91b5b3a145e6cd \
     --hash=sha256:efb274799819440f95b4ab3b818869f1ce9ae26c5beacba0201d1a1b76b54f86
-openai==3.28.0 \
-    --hash=sha256:1ea40a084ffe2f9f16fd3bea6e870f757853b536b18d8e737c518ef849a2920c \
-    --hash=sha256:cf0509d32d7bd8eb6a3db02417957cb455212b6629d071826b9ea1f61659e2a4
+openai==3.29.0 \
+    --hash=sha256:860d3bad424c5d38cd9ba0a0a2050d558b58ce027596a39f9ccbc0f51a2090b7 \
+    --hash=sha256:bc70a46d97b70ba64daedfcb3227f610a395f297ec68d39f735676190a92be94
 openshell==0.1.6 \
     --hash=sha256:a0c5b0e9954ffdbdb4d34110d4a9d0d2dc57579a53e4a67372e0f8dd3b75cd81
 opentelemetry-api==1.45.2 \
