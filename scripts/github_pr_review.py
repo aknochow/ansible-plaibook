@@ -499,6 +499,10 @@ def _token() -> str:
     return token
 
 
+class TransientApiError(RuntimeError):
+    """A GitHub API call that may succeed if retried: a dropped connection, 429, or 5xx."""
+
+
 def _request(method: str, url: str, payload: dict[str, Any] | None = None) -> tuple[int, Any, str]:
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
@@ -521,6 +525,9 @@ def _request(method: str, url: str, payload: dict[str, Any] | None = None) -> tu
     except urllib.error.HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace")
         return exc.code, raw, ""
+    except OSError as exc:
+        # URLError, RemoteDisconnected, and timeouts are all OSError.
+        raise TransientApiError(f"GitHub API {method} {url.split('?', 1)[0]}: {exc}") from exc
     if not raw:
         return status, None, link
     try:
@@ -541,6 +548,8 @@ def _get_all(url: str, key: str) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     while url:
         status, payload, link = _request("GET", url)
+        if status == 429 or status >= 500:
+            raise TransientApiError(f"GitHub API {status} for {url.split('?', 1)[0]}")
         if status != 200 or not isinstance(payload, dict):
             raise RuntimeError(f"GitHub API {status} for {url.split('?', 1)[0]}")
         batch = payload.get(key) or []
@@ -1137,6 +1146,11 @@ def _cmd_gate(args: argparse.Namespace) -> int:
             state = gate_commits(args.repo, args.sha, merge, ignore_run_id=args.ignore_run_id)
         else:
             state = gate(args.repo, args.sha, ignore_run_id=args.ignore_run_id)
+    except TransientApiError as exc:
+        # The wait loop polls again. One dropped call must not skip the review.
+        print(f"waiting ({exc})", file=sys.stderr)
+        print("waiting")
+        return 10
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         return 1
