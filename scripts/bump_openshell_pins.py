@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Move .github/openshell-pins.env to the latest OpenShell release and image.
+"""Move the OpenShell gateway, sandbox image, and Python SDK to their latest releases.
 
 Each pin stays an exact version, commit, checksum, or digest, so a run always
 installs what a reviewed pull request named. Old values are also replaced in the
-docs that quote them.
+docs that quote them. The SDK has to stay on the gateway's 0.1 line.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import urllib.request
 from pathlib import Path
@@ -31,6 +32,23 @@ MANIFEST_TYPES = ", ".join(
         "application/vnd.oci.image.manifest.v1+json",
         "application/vnd.docker.distribution.manifest.v2+json",
     )
+)
+EE_IN = ROOT / "execution-environment-requirements.in"
+_SDK_PIN = re.compile(r"(?m)^openshell==(\S+)$")
+_SDK_LINE = re.compile(r"\d+\.\d+\.\d+")
+SDK_SERIES = "0.1."
+SDK_COMPILES = (
+    (
+        "uv pip compile --generate-hashes --python-version 3.11 --no-annotate"
+        " plaibook/hashed/openshell.in -o plaibook/hashed/openshell-requirements.txt"
+        " --upgrade-package openshell"
+    ),
+    (
+        "uv pip compile --generate-hashes --universal --python-version 3.12 --no-annotate --no-strip-extras"
+        " execution-environment-requirements.in -o execution-environment-requirements.txt"
+        " --upgrade-package openshell"
+    ),
+    "uv lock --upgrade-package openshell",
 )
 _TAG_RE = re.compile(r"v\d+\.\d+\.\d+")
 _SHA_RE = re.compile(r"[0-9a-f]{40}")
@@ -77,6 +95,32 @@ def latest_pins() -> dict[str, str]:
     }
 
 
+def latest_sdk() -> str:
+    with _open("https://pypi.org/pypi/openshell/json") as response:
+        version = str(json.load(response)["info"]["version"])
+    if not _SDK_LINE.fullmatch(version) or not version.startswith(SDK_SERIES):
+        raise ValueError(f"openshell {version} is not a stable release on the {SDK_SERIES}x line")
+    return version
+
+
+def move_sdk(new: str) -> str | None:
+    """Rewrite the SDK pin and recompile its locks. Returns the old version if it moved."""
+    text = EE_IN.read_text(encoding="utf-8")
+    match = _SDK_PIN.search(text)
+    if not match:
+        raise ValueError(f"no openshell pin in {EE_IN.name}")
+    old = match.group(1)
+    if old == new:
+        return None
+    EE_IN.write_text(_SDK_PIN.sub(f"openshell=={new}", text), encoding="utf-8")
+    for command in SDK_COMPILES:
+        subprocess.run(command.split(), check=True, cwd=ROOT, timeout=300)  # noqa: S603
+    docs = ROOT / "docs" / "dependency-map.md"
+    moved = docs.read_text(encoding="utf-8").replace(f"openshell=={old}", f"openshell=={new}")
+    docs.write_text(moved, encoding="utf-8")
+    return old
+
+
 def read_pins(text: str) -> dict[str, str]:
     pins = {}
     for line in text.splitlines():
@@ -119,7 +163,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"could not read the latest OpenShell pins: {exc}", file=sys.stderr)
         return 1
     replacements = changed_values(old, new)
-    if not replacements:
+    sdk_from = sdk_to = None
+    if args.write:
+        try:
+            sdk_to = latest_sdk()
+            sdk_from = move_sdk(sdk_to)
+        except (OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
+            print(f"could not move the OpenShell SDK: {exc}", file=sys.stderr)
+            return 1
+    if not replacements and not sdk_from:
         print("OpenShell pins are current.")
         return 0
     for name, value in new.items():
@@ -132,11 +184,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.pr_body:
         moved = [name for name in new if old.get(name) != new[name]]
         rows = "\n".join(f"- `{name}`: `{old.get(name)}` to `{new[name]}`" for name in moved)
+        sdk_row = f"\n- `openshell` SDK: `{sdk_from}` to `{sdk_to}`" if sdk_from else ""
         Path(args.pr_body).write_text(
-            f"Moves the OpenShell gateway and sandbox image to the latest release.\n\n{rows}\n\n"
+            f"Moves OpenShell to the latest release.\n\n{rows}{sdk_row}\n\n"
             "The OpenShell smoke check on this pull request starts the new gateway and a sandbox. "
-            "The review check keeps using its pinned workflow until `review.checkout` and "
-            "`review.caller` move.\n",
+            "Reviews keep their pinned workflow until `scripts/move_review_pin.py` moves "
+            "`review.checkout` and then `review.caller`.\n",
             encoding="utf-8",
         )
     return 0

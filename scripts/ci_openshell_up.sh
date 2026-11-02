@@ -15,8 +15,8 @@ openshell status
 
 export OPENSHELL_WORKSPACE=default OPENSHELL_PROVISION_TIMEOUT=180
 # The pinned sandbox image embeds /etc/openshell/policy.yaml. On this gateway
-# that policy stays ConfigurationInvalid until the 300s repair window expires.
-# A global policy with no network rules replaces it.
+# that policy stays ConfigurationInvalid until the 300s repair window expires,
+# so this sandbox gets a policy with no network rules, as review.yml's do.
 cat > "$RUNNER_TEMP/plaibook-sandbox-policy.yaml" <<'EOF'
 version: 1
 filesystem_policy:
@@ -36,10 +36,10 @@ filesystem_policy:
 landlock:
   compatibility: best_effort
 EOF
-openshell policy set --global --yes --policy "$RUNNER_TEMP/plaibook-sandbox-policy.yaml"
 if ! timeout 300 openshell sandbox create \
   --name plaibook-image-warm \
   --from "$SANDBOX_IMAGE" \
+  --policy "$RUNNER_TEMP/plaibook-sandbox-policy.yaml" \
   --detach \
   --no-tty; then
   openshell sandbox get plaibook-image-warm || true
