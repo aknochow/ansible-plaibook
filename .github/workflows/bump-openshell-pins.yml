@@ -66,7 +66,14 @@ jobs:
           git config user.name "plai-crew[bot]"
           git config user.email "5277323+plai-crew[bot]@users.noreply.github.com"
           git checkout -B chore/bump-openshell-pins
-          git add -u
+          git add \
+            .github/openshell-pins.env \
+            docs/dependency-map.md \
+            docs/github-review-check.md \
+            execution-environment-requirements.in \
+            execution-environment-requirements.txt \
+            plaibook/hashed/openshell-requirements.txt \
+            uv.lock
           git commit -s -m "chore(deps): bump OpenShell pins"
           gh auth setup-git
           git fetch origin '+refs/heads/*:refs/remotes/origin/*'

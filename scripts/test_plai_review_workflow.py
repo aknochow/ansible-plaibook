@@ -338,4 +338,8 @@ def test_sandbox_enabled_byte_for_byte_equivalent_to_baseline():
 def test_openshell_bump_runs_only_on_the_default_branch():
     document = _load(ROOT / ".github" / "workflows" / "bump-openshell-pins.yml")
     assert "default_branch" in document["jobs"]["bump"]["if"]
+    steps = document["jobs"]["bump"]["steps"]
+    run = next(step["run"] for step in steps if step.get("name") == "Open or update the pull request")
+    assert "git add -u" not in run
+    assert "plaibook/hashed/openshell-requirements.txt" in run
 
