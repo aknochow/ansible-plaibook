@@ -108,6 +108,11 @@
       # it here.
       async: 120
       poll: 2
+      until: >-
+        review_clone_result is succeeded or
+        (((review_clone_result.msg | default('')) ~ ' ' ~ (review_clone_result.stderr | default(''))) is not search(review_clone_transient_pattern))
+      retries: "{{ review_clone_retries | int }}"
+      delay: "{{ review_clone_retry_delay | int }}"
 
     # When the forge identifies a specific target branch (e.g., a release branch or stacked PR base),
     # fetch it explicitly into refs/remotes/origin/<target_branch> so git merge-base can compute against it.
