@@ -81,7 +81,7 @@ jobs:
           # the pull request head. Move this to a commit that contains the
           # review code, then point plai-review.yml at the commit that
           # contains this line.
-          ref: "dea10b445cfa3431c516e0b7c69ec814f570a781"
+          ref: "7c431b1feddba0dcdd327b28ebf392b3d48266ba"
           persist-credentials: false
 
       - name: Resolve the pull request
@@ -173,7 +173,7 @@ jobs:
           # the pull request head. Move this to a commit that contains the
           # review code, then point plai-review.yml at the commit that
           # contains this line.
-          ref: "dea10b445cfa3431c516e0b7c69ec814f570a781"
+          ref: "7c431b1feddba0dcdd327b28ebf392b3d48266ba"
           persist-credentials: false
 
       - name: Load the OpenShell pins
