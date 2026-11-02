@@ -1,0 +1,131 @@
+---
+# persist.yml writes findings.md before summary.json. A run stopped
+# between the two leaves a prior-review directory without summary.json.
+# Briefing must treat that as no cached result and run a full review,
+# not fail every later run on the branch. No live repo or model.
+#
+# Usage:
+#   ansible-playbook tests/test_briefing_missing_summary.yml
+
+- name: Test briefing.yml with a prior review that has no summary.json
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_delegate_host: ""
+    review_repo_path: "{{ fixture_dir.path }}"
+    review_target_ref: "target_ref"
+    review_source_ref: "HEAD"
+    review_short_sha: "abc1234"
+    review_branch: "test-briefing-missing-summary"
+    review_org_repo: "test/briefing-missing-summary"
+    review_number: "test-briefing-missing-summary"
+    review_output_base: "{{ fixture_review_output.path }}"
+    prior_dir: "{{ review_output_base }}/{{ review_org_repo }}/{{ review_branch }}/2026-01-02-{{ review_short_sha }}"
+
+  tasks:
+    - name: Create a throwaway fixture repo directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: "briefing-missing-summary-repo-"
+      register: fixture_dir
+
+    - name: Create a throwaway review_output_base directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: "briefing-missing-summary-output-"
+      register: fixture_review_output
+
+    - name: Build a fixture repo with one change after target_ref
+      ansible.builtin.shell:
+        cmd: |
+          set -e
+          git init -q
+          git config user.email test@test.com
+          git config user.name Test
+          echo base > README.md
+          git add -A
+          git commit -q -m base
+          git tag target_ref
+          echo change >> README.md
+          git commit -q -am change
+        chdir: "{{ fixture_dir.path }}"
+      changed_when: false
+      timeout: 30
+
+    - name: Create the prior review directory
+      ansible.builtin.file:
+        path: "{{ prior_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Seed a prior review for this commit with findings.md only
+      ansible.builtin.copy:
+        dest: "{{ prior_dir }}/findings.md"
+        mode: "0600"
+        content: |
+          ---
+          commit: {{ review_short_sha }}
+          verdict: READY_FOR_HUMAN_REVIEW
+          ---
+          Seeded prior review.
+
+    - name: Run briefing.yml without the prior summary.json
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: briefing
+        public: true
+
+    - name: Assert the missing summary means no cached result
+      ansible.builtin.assert:
+        that:
+          - _latest_prior_review.found
+          - prior_review_sha == review_short_sha
+          - review_prior_summary == {}
+          - not (same_commit_fast_path | bool)
+        fail_msg: "same_commit_fast_path={{ same_commit_fast_path }} review_prior_summary={{ review_prior_summary }}"
+
+    - name: Write an unreadable summary.json
+      ansible.builtin.copy:
+        dest: "{{ prior_dir }}/summary.json"
+        mode: "0600"
+        content: "{\"verdict\": "
+
+    - name: Run briefing.yml with a truncated prior summary.json
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: briefing
+        public: true
+
+    - name: Assert a truncated summary also means no cached result
+      ansible.builtin.assert:
+        that:
+          - review_prior_summary == {}
+          - not (same_commit_fast_path | bool)
+
+    - name: Write a complete summary.json
+      ansible.builtin.copy:
+        dest: "{{ prior_dir }}/summary.json"
+        mode: "0600"
+        content: '{"verdict": "READY_FOR_HUMAN_REVIEW", "score_overall": 100.0, "findings": []}'
+
+    - name: Run briefing.yml with the complete prior summary.json
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: briefing
+        public: true
+
+    - name: Assert a complete summary still takes the fast path
+      ansible.builtin.assert:
+        that:
+          - review_prior_summary.verdict == 'READY_FOR_HUMAN_REVIEW'
+          - same_commit_fast_path | bool
+
+    - name: Clean up the fixture directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ fixture_dir.path }}"
+        - "{{ fixture_review_output.path }}"

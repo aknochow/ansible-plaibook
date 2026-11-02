@@ -30,6 +30,7 @@ export GIT_COMMITTER_NAME="Test Committer"
 export GIT_COMMITTER_EMAIL="test-committer@example.com"
 
 PLAYBOOKS=(
+  "tests/test_briefing_missing_summary.yml"
   "tests/test_briefing_snapshot.yml"
   "tests/test_checklist_execution.yml"
   "tests/test_clone_transient_retry.yml"
