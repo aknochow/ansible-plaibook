@@ -1,0 +1,15 @@
+---
+- name: "Decide the gate: {{ gate_case.name }}"
+  ansible.builtin.include_tasks: ../roles/review/tasks/regression_gate.yml
+  vars:
+    fail_on_regressions: true
+    review_verdict: "{{ gate_case.verdict }}"
+    findings_critical: []
+    findings_major: "{{ gate_case.major }}"
+    guardian_forced_needs_changes: "{{ gate_case.guardian }}"
+
+- name: "Assert: {{ gate_case.name }}"
+  ansible.builtin.assert:
+    that:
+      - (review_regression_gate_failed | bool) == gate_case.expected
+    fail_msg: "{{ gate_case.name }}: got {{ review_regression_gate_failed }}"

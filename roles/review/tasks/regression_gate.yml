@@ -1,0 +1,16 @@
+---
+# Decides whether fail_on_regressions fails this run. A Critical or Major
+# finding fails it, and so does a blocking ai-guardian secret, which
+# forces NEEDS_CHANGES without adding a finding to either list.
+- name: Determine whether the review failed its regression gate
+  ansible.builtin.set_fact:
+    review_regression_gate_failed: >-
+      {{
+        (not (review_pipeline_failed | default(false) | bool))
+        and (fail_on_regressions | bool)
+        and (review_verdict | default('')) == 'NEEDS_CHANGES'
+        and (
+          ((findings_critical | default([]) | length) + (findings_major | default([]) | length)) > 0
+          or (guardian_forced_needs_changes | default(false) | bool)
+        )
+      }}
