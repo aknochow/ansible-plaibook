@@ -71,6 +71,7 @@
     # gateway_endpoint from ~/.config/openshell/gateways/<name>/metadata.json.
     sandbox_gateway: "https://host.openshell.internal:17670"
     sandbox_image: "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
+    sandbox_workspace: "{{ lookup('ansible.builtin.env', 'OPENSHELL_WORKSPACE') | default('default', true) }}"
     # Filesystem rules and no network rules, so sandbox commands have no egress.
     # An empty policy leaves the image's own, which this gateway cannot activate:
     # the sandbox then times out. Setting this replaces the whole policy.
