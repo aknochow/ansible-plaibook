@@ -104,19 +104,19 @@
           - review_prior_summary == {}
           - not (same_commit_fast_path | bool)
 
-    - name: Write a summary.json with a null verdict
+    - name: Write a summary.json with a verdict that is not a verdict
       ansible.builtin.copy:
         dest: "{{ prior_dir }}/summary.json"
         mode: "0600"
-        content: '{"verdict": null, "score_overall": 100.0, "findings": []}'
+        content: '{"verdict": false, "score_overall": 100.0, "findings": []}'
 
-    - name: Run briefing.yml with a null prior verdict
+    - name: Run briefing.yml with an invalid prior verdict
       ansible.builtin.include_role:
         name: review
         tasks_from: briefing
         public: true
 
-    - name: Assert a null verdict also means no cached result
+    - name: Assert an invalid verdict also means no cached result
       ansible.builtin.assert:
         that:
           - not (same_commit_fast_path | bool)
