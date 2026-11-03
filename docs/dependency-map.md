@@ -139,10 +139,10 @@ difference as a bump to decide, not as the same pin.
 
 | Package | Image pin | Runtime hashed install |
 |---|---|---|
-| anthropic | `anthropic[vertex]==1.13.0` | `anthropic==1.11.0` |
-| claude-agent-sdk | `claude-agent-sdk==0.2.165` | `claude-agent-sdk==0.2.163` |
-| google-genai | `google-genai==2.29.0` | `google-genai==2.27.0` |
-| openai | `openai==3.29.0` | `openai==3.29.0` |
+| anthropic | `anthropic[vertex]==2.3.0` | `anthropic==1.11.0` |
+| claude-agent-sdk | `claude-agent-sdk==0.2.176` | `claude-agent-sdk==0.2.163` |
+| google-genai | `google-genai==2.34.0` | `google-genai==2.27.0` |
+| openai | `openai==3.42.0` | `openai==3.29.0` |
 | cursor-sdk | not in the image | `cursor-sdk==1.0.35` |
 | xai-sdk | `xai-sdk==1.21.0` | `xai-sdk==1.21.0` |
 | openshell | `openshell==0.1.6` | `openshell==0.1.6` |
