@@ -26,16 +26,18 @@ Have these ready before the first review:
   no separate Ansible install is needed for the CLI.
 - **A provider API key** and network access from this machine to that
   provider's API. OpenAI is the primary provider in the examples below;
-  Anthropic and Gemini are supported alternatives.
+  Anthropic, Gemini, xAI and Cursor are supported alternatives.
 - **The selected provider's Python SDK.** The CLI checks and installs
   the pinned SDK packages for the selected provider into its own Python
-  environment when needed. The checked-in pins are:
+  environment when needed. The pin files are:
 
-  | Provider | CLI family | API key environment variable | Pinned Python SDK |
+  | Provider | CLI family | API key environment variable | SDK pin file |
   |---|---|---|---|
-  | OpenAI | `openai` | `OPENAI_API_KEY` | [`openai==3.23.0`](../plaibook/hashed/openai.in) |
-  | Anthropic | `claude` | `ANTHROPIC_API_KEY` | [`anthropic[vertex]==1.11.0` and `claude-agent-sdk==0.2.163`](../plaibook/hashed/claude.in) |
-  | Gemini | `gemini` | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | [`google-genai==2.27.0`](../plaibook/hashed/gemini.in) |
+  | OpenAI | `openai` | `OPENAI_API_KEY` | [`plaibook/hashed/openai.in`](../plaibook/hashed/openai.in) |
+  | Anthropic | `claude` | `ANTHROPIC_API_KEY` | [`plaibook/hashed/claude.in`](../plaibook/hashed/claude.in) |
+  | Gemini | `gemini` | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | [`plaibook/hashed/gemini.in`](../plaibook/hashed/gemini.in) |
+  | xAI | `xai` | `XAI_API_KEY` | [`plaibook/hashed/xai.in`](../plaibook/hashed/xai.in) |
+  | Cursor | `cursor` | `CURSOR_API_KEY` | [`plaibook/hashed/cursor.in`](../plaibook/hashed/cursor.in) |
 
 - **OpenShell CLI and a reachable gateway named `openshell`** for the
   default sandboxed PR/branch review. Install OpenShell using the
@@ -281,9 +283,9 @@ ansible-playbook review.yml -e review_targets_raw=gitlab:org/repo/34 -e post_res
 
 ### Upgrade an installed CLI
 
-`plai --version` prints `plaibook 0.1.28` for a PyPI install of this
-release. A git install of the same tree prints the revision and a short
-commit, for example `plaibook 0.1.28 (dev, main@664b8e1d39ac)`.
+`plai --version` prints the release, for example `plaibook 0.1.32`, for
+a PyPI install. A git install of the same tree prints the revision and a short
+commit, for example `plaibook 0.1.32 (dev, main@8b34023fd564)`.
 
 `plai update` upgrades the install that is running. A pipx install
 uses `pipx install --force --pip-args=--no-cache-dir plaibook==VERSION`.
