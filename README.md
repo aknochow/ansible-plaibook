@@ -81,8 +81,9 @@ podman push <your-registry>/plaibook-ee:latest
 Credentials (GitHub/GitLab tokens, OpenShell mTLS) are injected via
 AAP credentials at job-run time, never baked into the image.
 
-The image includes `aknochow.cursor`. `review.yml` loads that
-collection only when `agent_family=cursor` starts the sidecar. Rebuild
+The image includes the `aknochow.cursor` collection but not
+`cursor-sdk`, which bundles its own Node.js runtime. `agent_family=cursor`
+runs from a host install, not the image. Rebuild
 when `collections-requirements.yml` or `execution-environment.yml`
 changes. A Vertex-only parse failure is a playbook bug, not a missing
 collection.

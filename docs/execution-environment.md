@@ -45,7 +45,7 @@ plai review org/repo/123 --ee
 plai review org/repo/123 --ee --ee-image "ghcr.io/aknochow/plaibook-ee@sha256:<digest>"
 ```
 
-`--ee` is not a queue and is not needed for running reviews at the same time. Its purpose is to keep host credentials away from a review of untrusted content. A local commit review (`--commit`) is refused, because that review writes into your checkout. A local path as the branch target is refused, because it is not in the container. `--sandbox` and `claude_cli` are refused too. The `claude` binary is not in the image, and OpenShell stays a separate choice.
+`--ee` is not a queue and is not needed for running reviews at the same time. Its purpose is to keep host credentials away from a review of untrusted content. A local commit review (`--commit`) is refused, because that review writes into your checkout. A local path as the branch target is refused, because it is not in the container. `--sandbox` and `claude_cli` are refused too. The `claude` binary is not in the image, and OpenShell stays a separate choice. `agent_family=cursor` is refused with the default image: `cursor-sdk` bundles its own Node.js runtime and is left out of the image. Pass `--ee-image` for an image that adds it.
 
 ### Which image
 

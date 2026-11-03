@@ -57,8 +57,10 @@ def test_dependency_map_names_image_pins():
             continue
         name = stripped.split("==", 1)[0].split("[", 1)[0]
         pins[name] = stripped
-    missing = [pins[name] for name in _DIRECT if pins[name] not in text]
+    missing = [pins[name] for name in _DIRECT if name in pins and pins[name] not in text]
     assert missing == []
+    assert set(_DIRECT) - set(pins) == {"cursor-sdk"}
+    assert "| cursor-sdk | not in the image |" in text
 
 
 def test_dependency_map_names_hashed_sdk_pins():
