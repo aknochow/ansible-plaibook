@@ -244,6 +244,23 @@ def _assert_trivy_gate(job: dict) -> None:
     assert "trivyignores" not in report
 
 
+def test_every_ee_build_verifies_the_base_signature_first():
+    key = (ROOT / "execution-environment-redhat-key.pem").read_text(encoding="utf-8")
+    assert key.startswith("-----BEGIN PUBLIC KEY-----\n")
+    script = (ROOT / "scripts" / "ee_verify_base.sh").read_text(encoding="utf-8")
+    assert "--key \"${root}/execution-environment-redhat-key.pem\"" in script
+    for path, job in ((PR, "build"), (PUBLISH, "build"), (RESCAN, "base")):
+        names = [step["name"] for step in _load(path)["jobs"][job]["steps"]]
+        verify = names.index("Verify the base image signature")
+        assert names.index("Install cosign") < verify
+        if "Build image" in names:
+            assert verify < names.index("Build image")
+    for path in (PR, PUBLISH):
+        paths = _load(path)["on"]["pull_request" if path == PR else "push"]["paths"]
+        assert "execution-environment-redhat-key.pem" in paths
+        assert "scripts/ee_verify_base.sh" in paths
+
+
 def test_rescan_gates_the_published_image_daily():
     document = _load(RESCAN)
     assert document["permissions"] == {}

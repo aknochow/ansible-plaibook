@@ -148,6 +148,8 @@ The base digest, `user: "1000"`, `package_manager_path: /usr/bin/dnf`, and `pyth
 
 Collections come from [`collections-requirements.yml`](../collections-requirements.yml). Python dependencies come from [`execution-environment-requirements.txt`](../execution-environment-requirements.txt) and are installed with `pip install --require-hashes`. The collection `requirements.txt` ranges are listed under `dependencies.exclude.python` so the introspect step cannot install those ranges beside the lockfile. Pins are recorded in the [dependency map](dependency-map.md).
 
+Every build verifies Red Hat's signature on the pinned base digest before `ansible-builder` runs. [`scripts/ee_verify_base.sh`](../scripts/ee_verify_base.sh) runs `cosign verify` with Red Hat release key 3 ([`execution-environment-redhat-key.pem`](../execution-environment-redhat-key.pem), from `https://security.access.redhat.com/data/63405576.txt`). It passes `--insecure-ignore-tlog`: Red Hat's Rekor bundles use a log key that is not in the public Sigstore trusted root, so cosign checks the signature against the key but not log inclusion.
+
 `gh` 2.103.3 is the signed GitHub release RPM. The public key is [`execution-environment-gh-key.asc`](../execution-environment-gh-key.asc). `glab` 1.126.0 is GitLab's unsigned RPM. Both installs check a per-architecture SHA-256 before `rpm` runs. Both binaries are Go 1.27.3.
 
 ## CI
