@@ -163,17 +163,20 @@ OpenShell sandbox policy.
 | PR clone (already on the controller) | `github.com`, `api.github.com`, `gitlab.com` |
 
 **Sandbox guest.** Only if you attach an OpenShell provider, run an
-agent CLI in the guest, or a `CHECKLIST.md` command phones home. Default
-`sandbox_policy` is empty (`{}`), which means "do not override the
-gateway default." Setting `sandbox_policy` **replaces** the gateway
-policy, including `network_policies`. An override that only lists
-filesystem paths is a deny-all network policy. Re-state any needed
+agent CLI in the guest, or a `CHECKLIST.md` command phones home. The
+default `sandbox_policy` in `review.yml` lists filesystem paths and no
+network rules, so guest commands have no egress. Setting `sandbox_policy`
+**replaces** that policy, including `network_policies`. Re-state any needed
 egress in that same object (see `examples/ai_guardian_scan.yml`).
 
 If you do need guest egress to providers, start from the same host
 table. Do not assume attaching a provider injects network rights — the
 README gotcha still holds: sandbox network policy is separate from
 provider attachment.
+
+## `plai review --ee` is a different boundary
+
+`plai review --ee` is experimental. It runs the whole review in one [execution environment](execution-environment.md#run-a-local-review-in-it) container with no OpenShell sandbox. That keeps the host out of reach, but the "controller" is now the container. Model calls and the commands that read PR content run there together, so those commands can read the provider key. Only a sandbox separates them.
 
 ## What we don't do
 

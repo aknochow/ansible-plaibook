@@ -11,6 +11,14 @@
   connection: local
   gather_facts: false
 
+  # The role uses a controller ai-guardian that is already on PATH and
+  # then never reaches the pip downloads asserted below. Every task runs
+  # with a PATH that has no ai-guardian, so a developer's install does
+  # not change the result. The override variable cannot do this: only
+  # the default binary name triggers the install path under test.
+  environment:
+    PATH: "{{ guardian_free_path | default(lookup('ansible.builtin.env', 'PATH')) }}"
+
   vars:
     review_delegate_host: sandbox-must-not-be-contacted
     review_guardian_binary: ai-guardian
@@ -22,6 +30,16 @@
     review_guardian_requests_requirements: "{{ layout.path }}/requests.txt"
 
   tasks:
+    - name: Drop PATH entries that provide ai-guardian
+      ansible.builtin.set_fact:
+        guardian_free_path: >-
+          {{ lookup('ansible.builtin.env', 'PATH').split(':')
+             | reject('equalto', '')
+             | map('regex_replace', '$', '/ai-guardian')
+             | reject('is_file')
+             | map('regex_replace', '/ai-guardian$', '')
+             | join(':') }}
+
     - name: Create fixture directories
       ansible.builtin.tempfile:
         state: directory

@@ -1,0 +1,147 @@
+---
+# One xAI SDK dispatch attempt for a verification turn.
+# aknochow.xai.chat uses xai-sdk chat.stream, not Chat Completions.
+# Conversation and tool-call normalization is kept at this boundary; the
+# shared verify loop continues to execute the read-only Ansible tools.
+#
+# aknochow.xai.chat fail_json's on xAIError or ValueError with a
+# message. It does not set status: error. Rescue only that module call.
+# A msg-only return is one failed verify attempt. Do not copy the
+# Cursor empty status=error match onto this task. A parent fabrication,
+# a nested report_verdict, and an auth failure that is not this
+# msg-only shape still fail the play. xai_chat_module is an
+# allowlist so playbook tests can load verify_provider_stub.
+
+- name: Resolve the xAI verify module name
+  ansible.builtin.set_fact:
+    _xai_verify_module: "{{ xai_chat_module | default('aknochow.xai.chat') }}"
+    _xai_verify_attempt_open: "{{ not (verify_dispatch_valid | default(false) | bool) }}"
+
+- name: "xAI: translate the verification conversation and tool definitions"
+  when: _xai_verify_attempt_open | bool
+  ansible.builtin.set_fact:
+    _xai_verify_messages: >-
+      {{ [{'role': 'system', 'content': verify_system_prompt}]
+         + (verify_messages | to_openai_messages) }}
+    _xai_verify_tools: >-
+      {{ (explore_tools + [trace_reachability_tool, {
+           'name': 'report_verdict',
+           'description': 'Report your verdict on the single finding you were given.',
+           'input_schema': verify_verdict_schema
+         }]) | to_openai_tools }}
+
+- name: "xAI: choose the forced verification tool"
+  when: _xai_verify_attempt_open | bool
+  ansible.builtin.set_fact:
+    _xai_verify_tool_choice: >-
+      {{ {'type': 'function', 'function': {'name': 'report_verdict'}} if verify_last_turn
+         else ({'type': 'function', 'function': {'name': 'trace_reachability'}}
+               if (verify_first_turn and verify_is_reachability_claim) else {}) }}
+
+- name: "xAI: show the verification request configuration"
+  when: _xai_verify_attempt_open | bool
+  ansible.builtin.debug:
+    msg:
+      - "model: {{ review_verify_xai_model }}"
+      - "max_tokens: {{ review_xai_max_tokens | string }}"
+      - "tools: [read_file, search, trace_reachability, report_verdict]"
+      - "forced_tool: {{ 'report_verdict' if verify_last_turn else ('trace_reachability' if (verify_first_turn and verify_is_reachability_claim) else 'none') }}"
+
+- name: Reject an xAI verify module outside the allowlist
+  when: _xai_verify_attempt_open | bool
+  ansible.builtin.assert:
+    that:
+      - _xai_verify_module in ['aknochow.xai.chat', 'verify_provider_stub']
+    fail_msg: >-
+      xai_chat_module '{{ _xai_verify_module }}' is not allowed.
+      Verify will only load aknochow.xai.chat or the offline test stub.
+
+- name: xAI verify module call
+  when: _xai_verify_attempt_open | bool
+  block:
+    - name: Remember that this xAI verify module call has not failed yet
+      ansible.builtin.set_fact:
+        _xai_verify_module_failed: false
+
+    - name: Call xAI for this verify attempt
+      block:
+        - name: "xAI: call the verification agent, turn {{ verify_turn_count ~ ', attempt ' ~ (verify_attempt_number | default(1)) }}"
+          action:
+            module: "{{ _xai_verify_module }}"
+            model: "{{ review_verify_xai_model }}"
+            reasoning_effort: "{{ review_xai_lens_reasoning_effort }}"
+            max_tokens: "{{ review_xai_max_tokens }}"
+            timeout: "{{ xai_timeout }}"
+            conversation_id: "{{ (last_run_id | default('review')) ~ '-verify-' ~ (verify_finding_index | default(0) | string) }}"
+            messages: "{{ _xai_verify_messages }}"
+            tools: "{{ _xai_verify_tools }}"
+            tool_choice: "{{ _xai_verify_tool_choice if _xai_verify_tool_choice else omit }}"
+          register: _xai_verify_raw
+      rescue:
+        - name: Keep the failed xAI verify return
+          ansible.builtin.set_fact:
+            _xai_verify_module_failed: true
+            _xai_verify_failed_result: "{{ ansible_failed_result }}"
+
+        - name: Record the usage this failed xAI verify call billed
+          ansible.builtin.set_fact:
+            pipeline_agent_calls: >-
+              {{ pipeline_agent_calls + ([_xai_verify_failed_result]
+                 | xai_lens_usage_calls(review_org_repo ~ '#' ~ review_number, 'verify', review_verify_xai_model)) }}
+
+        - name: Classify the failed xAI verify return
+          ansible.builtin.include_tasks: classify_verify_provider_failure.yml
+          vars:
+            verify_provider_failed_result: "{{ _xai_verify_failed_result }}"
+            verify_provider_model: "{{ review_verify_xai_model }}"
+
+- name: "xAI: normalize the verification response's tool calls"
+  when:
+    - _xai_verify_attempt_open | bool
+    - not (_xai_verify_module_failed | default(false) | bool)
+  ansible.builtin.set_fact:
+    _xai_verify_tool_calls: "{{ _xai_verify_raw.tool_calls | default([]) | openai_tool_calls_with_input }}"
+
+- name: "xAI: normalize the verification result into the shared shape"
+  when:
+    - _xai_verify_attempt_open | bool
+    - not (_xai_verify_module_failed | default(false) | bool)
+  ansible.builtin.set_fact:
+    verify_turn_result:
+      message:
+        content: "{{ _xai_verify_raw.text | default('') | openai_response_to_message_content(_xai_verify_raw.tool_calls | default([])) }}"
+        model: "{{ (_xai_verify_raw.response | default({})).model | default(review_verify_xai_model, true) }}"
+        encrypted_content: "{{ _xai_verify_raw.encrypted_content | default('') }}"
+      tool_calls: "{{ _xai_verify_tool_calls }}"
+      stop_reason: >-
+        {{ 'tool_use' if (_xai_verify_tool_calls | length > 0)
+           else (_xai_verify_raw.finish_reason | default('') | xai_stop_reason(false)) }}
+      usage:
+        input_tokens: "{{ [(_xai_verify_raw.usage.prompt_tokens | default(0) | int) - (_xai_verify_raw.usage.cached_tokens | default(0) | int), 0] | max }}"
+        output_tokens: "{{ _xai_verify_raw.usage.completion_tokens | default(0) | int }}"
+        cache_creation_input_tokens: 0
+        cache_read_input_tokens: "{{ _xai_verify_raw.usage.cached_tokens | default(0) | int }}"
+
+- name: Record this xAI verification attempt's usage for the pipeline-wide stats summary
+  when:
+    - _xai_verify_attempt_open | bool
+    - not (_xai_verify_module_failed | default(false) | bool)
+  ansible.builtin.set_fact:
+    pipeline_agent_calls: >-
+      {{ pipeline_agent_calls + ([_xai_verify_raw]
+         | xai_lens_usage_calls(review_org_repo ~ '#' ~ review_number, 'verify', review_verify_xai_model)) }}
+
+- name: Check whether this xAI attempt called report_verdict
+  when:
+    - _xai_verify_attempt_open | bool
+    - not (_xai_verify_module_failed | default(false) | bool)
+  ansible.builtin.set_fact:
+    _verify_attempt_report_calls: "{{ verify_turn_result.tool_calls | selectattr('name', 'equalto', 'report_verdict') | list }}"
+
+- name: Mark this xAI attempt valid unless the forced final turn had no verdict
+  when:
+    - _xai_verify_attempt_open | bool
+    - not (_xai_verify_module_failed | default(false) | bool)
+  ansible.builtin.set_fact:
+    verify_dispatch_provider_error: false
+    verify_dispatch_valid: "{{ (not verify_last_turn) or (_verify_attempt_report_calls | length > 0) }}"

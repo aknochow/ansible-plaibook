@@ -86,7 +86,7 @@
       name: report_findings
       description: Submit the security findings and scores for this diff.
       input_schema: "{{ security_findings_schema }}"
-  async: 900
+  async: "{{ review_cursor_lens_timeout | int }}"
   poll: 0
   register: _cursor_security_job
 
@@ -108,7 +108,7 @@
       name: report_findings
       description: Submit the review findings and scores for this diff.
       input_schema: "{{ review_findings_schema }}"
-  async: 900
+  async: "{{ review_cursor_lens_timeout | int }}"
   poll: 0
   register: _cursor_review_job
 
@@ -131,8 +131,8 @@
   until: >-
     (_cursor_security_wait.finished | default(false) | bool) or
     (_cursor_security_wait.failed | default(false) | bool)
-  retries: 180
-  delay: 5
+  retries: "{{ (review_cursor_lens_timeout | int / review_cursor_lens_poll_delay | int) | round(0, 'ceil') | int }}"
+  delay: "{{ review_cursor_lens_poll_delay | int }}"
   ignore_errors: true
 
 - name: "Cursor: wait for the Review agent"
@@ -142,8 +142,8 @@
   until: >-
     (_cursor_review_wait.finished | default(false) | bool) or
     (_cursor_review_wait.failed | default(false) | bool)
-  retries: 180
-  delay: 5
+  retries: "{{ (review_cursor_lens_timeout | int / review_cursor_lens_poll_delay | int) | round(0, 'ceil') | int }}"
+  delay: "{{ review_cursor_lens_poll_delay | int }}"
   ignore_errors: true
 
 - name: "Cursor: bind the Security agent result"

@@ -15,14 +15,14 @@ _PARTS = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 
 
 def bundled_skill_path() -> Path | None:
-    """Skill shipped in this install, or the checkout copy during development."""
+    """Skill shipped in this install's package data.
+
+    A checkout's ``.agents/skills`` copy is never a source. Copying it would
+    carry an unreviewed checkout's agent instructions into the user-wide
+    skills directory, where every project's agent sessions load them.
+    """
     packaged = Path(__file__).resolve().parent / "share" / "skills" / SKILL_NAME / "SKILL.md"
-    if packaged.is_file():
-        return packaged
-    checkout = Path(__file__).resolve().parents[1] / ".agents" / "skills" / SKILL_NAME / "SKILL.md"
-    if checkout.is_file():
-        return checkout
-    return None
+    return packaged if packaged.is_file() else None
 
 
 def user_skill_path(home: Path | None = None) -> Path:

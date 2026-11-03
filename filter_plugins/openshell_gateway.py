@@ -41,25 +41,35 @@ def openshell_gateway_endpoint(name: str, fallback: str, config_home: str | None
     return endpoint
 
 
-def openshell_ssh_proxy(configured: str, home: str | None = None) -> str:
-    """Use the installed collection script when *configured* is not a file."""
+def openshell_ssh_proxy(
+    configured: str,
+    home: str | None = None,
+    collection_paths: list[str] | str | None = None,
+) -> str:
+    """Return the ssh_proxy.py the review should run.
+
+    An explicit *configured* path that exists wins. Otherwise use the
+    aknochow.openshell collection plaibook installed, then the first copy on
+    Ansible's collection search path (the execution environment's). A
+    developer checkout is used only when it is configured explicitly.
+    """
     chosen = str(configured or "").strip()
     if chosen and Path(chosen).is_file():
         return chosen
     root = Path(home) if home else Path.home()
-    installed = (
-        root
-        / ".cache"
-        / "ansible-plaibook"
-        / "collections"
-        / "ansible_collections"
-        / "aknochow"
-        / "openshell"
-        / "scripts"
-        / "ssh_proxy.py"
-    )
-    if installed.is_file():
-        return str(installed)
+    roots = [root / ".cache" / "ansible-plaibook" / "collections"]
+    if isinstance(collection_paths, str):
+        collection_paths = collection_paths.split(os.pathsep)
+    for entry in collection_paths or []:
+        if str(entry).strip():
+            roots.append(Path(str(entry)).expanduser())
+    for base in roots:
+        for candidate in (
+            base / "ansible_collections" / "aknochow" / "openshell" / "scripts" / "ssh_proxy.py",
+            base / "aknochow" / "openshell" / "scripts" / "ssh_proxy.py",
+        ):
+            if candidate.is_file():
+                return str(candidate)
     return chosen
 
 

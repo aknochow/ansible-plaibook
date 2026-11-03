@@ -46,7 +46,7 @@
     msg: >-
       Exploration pass: {{ review_explore_findings | length }}
       additional finding(s) ({{ explore_turn_count }} turn(s)){{
-        '; one or more searches did not complete cleanly' if (review_exploration_incomplete | default(false) | bool) else ''
+        '; one or more searches did not complete cleanly or limit was reached' if (review_exploration_incomplete | default(false) | bool) else ''
       }}.
 
 # Exploration findings affect verdict but don't retroactively adjust lens scores.
@@ -61,6 +61,19 @@
       filter_self_refuted_findings:
         findings: "{{ review_explore_findings }}"
       register: explore_self_refuted_filter_result
+
+    - name: Add exploration drops to the count summary.json reports
+      ansible.builtin.set_fact:
+        review_self_refuted_dropped_count: >-
+          {{ (review_self_refuted_dropped_count | default(0) | int) + (explore_self_refuted_filter_result.dropped_count | int) }}
+
+    - name: Report exploration findings dropped as self-refuted
+      when: explore_self_refuted_filter_result.dropped_count | int > 0
+      ansible.builtin.debug:
+        msg: >-
+          Dropped {{ explore_self_refuted_filter_result.dropped_count }}
+          self-refuted exploration finding(s):
+          {{ explore_self_refuted_filter_result.dropped }}
 
     - name: Append exploration findings to the deduplicated set
       ansible.builtin.set_fact:

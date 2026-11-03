@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1076,6 +1077,54 @@ def test_pretty_notes_incomplete_exploration():
     )
     assert "exploration incomplete" in pretty
     assert "READY_FOR_HUMAN_REVIEW" in pretty
+
+
+def test_pretty_notes_incomplete_exploration_from_target():
+    pretty = format_pretty(
+        {
+            "status": "ok",
+            "targets": [
+                {
+                    "target": "org/repo#1",
+                    "verdict": "READY_FOR_HUMAN_REVIEW",
+                    "score": 96.7,
+                    "exploration_incomplete": True,
+                }
+            ],
+        }
+    )
+    assert "exploration incomplete" in pretty
+    assert "READY_FOR_HUMAN_REVIEW" in pretty
+
+
+def test_enrich_attaches_exploration_incomplete_from_summary(tmp_path):
+    summary = tmp_path / "summary.json"
+    summary.write_text(
+        json.dumps(
+            {
+                "verdict": "NEEDS_CHANGES",
+                "score_overall": 90.0,
+                "exploration_incomplete": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    document = enrich_last_run(
+        {
+            "status": "ok",
+            "targets": [
+                {
+                    "target": "org/repo#1",
+                    "summary_path": str(summary),
+                }
+            ],
+        },
+        last_run_file=tmp_path / "last_run.json",
+    )
+    assert document["targets"][0]["exploration_incomplete"] is True
+    pretty = format_pretty(document)
+    assert "exploration incomplete" in pretty
+    assert "NEEDS_CHANGES" in pretty
 
 
 def test_pretty_explains_ci_preflight_skip_without_full_report():
@@ -2582,3 +2631,30 @@ def test_review_refuses_python_315_before_ansible(monkeypatch, capsys):
     assert code == 2
     assert "Python 3.15 is not supported" in err
     assert "3.10 through 3.14" in err
+
+
+def test_relative_repo_path_is_resolved_for_the_playbook(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    extras = extra_vars_from_args(_args(commit=True, repo_path="."), "runId0123456789")
+    assert extras["repo_path"] == os.getcwd()
+
+
+def test_format_pretty_names_the_provider_collection_and_model():
+    from plaibook.summary import format_pretty as render
+
+    text = render(
+        {
+            "agent_family": "openai",
+            "collection": "aknochow.openai@3657a67",
+            "models": ["gpt-6-luna"],
+            "effort": "high",
+            "targets": [],
+        }
+    )
+    assert "provider: openai · aknochow.openai@3657a67 · gpt-6-luna · effort high" in text
+
+
+def test_format_pretty_omits_an_unknown_provider():
+    from plaibook.summary import format_pretty as render
+
+    assert "provider:" not in render({"agent_family": "unknown", "targets": []})

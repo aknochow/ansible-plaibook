@@ -57,8 +57,10 @@ def test_dependency_map_names_image_pins():
             continue
         name = stripped.split("==", 1)[0].split("[", 1)[0]
         pins[name] = stripped
-    missing = [pins[name] for name in _DIRECT if pins[name] not in text]
+    missing = [pins[name] for name in _DIRECT if name in pins and pins[name] not in text]
     assert missing == []
+    assert set(_DIRECT) - set(pins) == {"cursor-sdk"}
+    assert "| cursor-sdk | not in the image |" in text
 
 
 def test_dependency_map_names_hashed_sdk_pins():
@@ -75,9 +77,10 @@ def test_dependency_map_names_review_workflow_pins():
     assert len(checkout_refs) == 1
     caller_refs = set(re.findall(r"plai-review-run\.yml@([0-9a-f]{40})", caller))
     assert len(caller_refs) == 1
-    gateway = re.search(r"OPENSHELL_VERSION=(v\d+\.\d+\.\d+)", run)
-    installer = re.search(r"NVIDIA/OpenShell/([0-9a-f]{40})/install\.sh", run)
-    image = re.search(r"SANDBOX_IMAGE:\s*(\S+)", run)
+    pins = (ROOT / ".github" / "openshell-pins.env").read_text(encoding="utf-8")
+    gateway = re.search(r"^OPENSHELL_VERSION=(\S+)", pins, re.M)
+    installer = re.search(r"^OPENSHELL_INSTALLER_COMMIT=(\S+)", pins, re.M)
+    image = re.search(r"^SANDBOX_IMAGE=(\S+)", pins, re.M)
     assert gateway and installer and image
     required = [
         checkout_refs.pop(),

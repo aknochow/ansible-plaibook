@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4.2.2
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           enable-cache: true
 
@@ -62,7 +62,9 @@ jobs:
           echo "ANSIBLE_COLLECTIONS_PATH=${dest}" >> "$GITHUB_ENV"
           uv run --python "${{ matrix.python-version }}" python scripts/ci-install-collections.py
 
+      # Lint reads files, so one job covers every Python and OS.
       - name: Run ansible-lint check
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
         env:
           ANSIBLE_COLLECTIONS_PATH: ${{ runner.temp }}/plaibook-collections
         run: uv run --python ${{ matrix.python-version }} ansible-lint --offline
@@ -84,6 +86,8 @@ jobs:
 
   # Same lockfile audit collections inherit via collection-ci.yml. OSV over
   # uv.lock so the job fails on known-vulnerable pins CI would actually install.
+  # The hashed files are what plai installs at run time and what the
+  # execution environment image is built from, so they are scanned too.
   # Inline action (not nested reusable): `upload-sarif: false` on the Google
   # reusable caused a workflow startup_failure. Docker scanner exits non-zero
   # on vulns; no SARIF / security-events write.
@@ -96,11 +100,23 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4.2.2
 
-      - name: Scan locked uv.lock with OSV-Scanner
-        uses: google/osv-scanner-action/osv-scanner-action@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
+      - name: Scan locked uv.lock and the hashed requirements with OSV-Scanner
+        uses: google/osv-scanner-action/osv-scanner-action@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
         with:
           scan-args: |-
             --lockfile=uv.lock
+            --lockfile=requirements.txt:plaibook/hashed/build-backend-requirements.txt
+            --lockfile=requirements.txt:plaibook/hashed/claude-requirements.txt
+            --lockfile=requirements.txt:plaibook/hashed/cursor-requirements.txt
+            --lockfile=requirements.txt:plaibook/hashed/gemini-requirements.txt
+            --lockfile=requirements.txt:plaibook/hashed/openai-requirements.txt
+            --lockfile=requirements.txt:plaibook/hashed/openshell-requirements.txt
+            --lockfile=requirements.txt:plaibook/hashed/sandbox-runtime-requirements.txt
+            --lockfile=requirements.txt:plaibook/hashed/xai-requirements.txt
+            --lockfile=requirements.txt:execution-environment-requirements.txt
+            --lockfile=requirements.txt:.github/ee-builder-requirements.txt
+            --lockfile=requirements.txt:roles/review/files/guardian-requests-requirements.txt
+            --lockfile=requirements.txt:scripts/legacy-setuptools-requirements.txt
             --config=osv-scanner.toml
 
   # Homebrew Python 3.10 pip often drives setuptools 68 in-process
@@ -118,7 +134,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4.2.2
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
 
       - name: Set up Python 3.10
         run: uv python install 3.10

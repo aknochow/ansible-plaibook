@@ -29,7 +29,7 @@ IMPORTS = (
     "claude_agent_sdk",
     "openai",
     "google.genai",
-    "cursor_sdk",
+    "xai_sdk",
     "openshell",
     "kubernetes",
 )

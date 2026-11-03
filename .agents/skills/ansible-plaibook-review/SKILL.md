@@ -1,7 +1,7 @@
 ---
 name: ansible-plaibook-review
 description: "Invoke plaibook's review CLI (`plai` / `plaibook`) wrapping review.yml, or ansible-playbook for AAP, and read its structured output correctly. Use whenever asked to review a PR/MR, review a local commit, or interpret a prior run's verdict/findings."
-version: "0.1.28"
+version: "0.1.32"
 ---
 
 # ansible-plaibook review pipeline
@@ -336,16 +336,16 @@ fraction.
   it during its own validation chain. In practice the model does not
   reliably do this: `roles/review/tasks/merge.yml` documents
   **seven** distinct real wordings caught live where a finding was
-  semantically retracted (in the `evidence`, `fix`, or `description`
+  semantically retracted (in the `fix` or `description`
   field) but still shipped in the findings array — e.g. "N/A —
   self-refuted, dropping materiality", "Logic is correct upon
   re-examination — dropping.", or a retraction that lives entirely in
   `description` while the `fix` field reads like a normal, actionable
-  suggestion on its own. The pipeline applies a widening regex
-  (`rejectattr` on `evidence`/`fix`/`description`) as a deterministic
-  backstop, asserts nothing matching survives, and even so this is an
-  imperfect, reactive filter — every new escape-hatch wording has
-  defeated the previous, narrower regex. **A confidence gate on
+  suggestion on its own. The pipeline applies a narrow regex to `fix` and `description` as a
+  deterministic backstop (never `evidence`, which quotes the reviewed
+  code), reports each drop in the job output and in
+  `self_refuted_dropped_count` in `summary.json`, and even so this is an
+  imperfect, reactive filter. **A confidence gate on
   findings was deliberately reverted** (merge.yml's own comment): don't
   assume a LOW-confidence finding is safe to ignore — that's exactly
   the "trust a self-reported model field" failure mode this codebase

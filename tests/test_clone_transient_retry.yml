@@ -1,0 +1,59 @@
+---
+# A clone retries a network failure and fails at once on anything else. Uses the
+# same pattern and until expression as resolve_target_pr.yml's clone.
+- name: Clone retry
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../roles/review/defaults/main.yml
+  tasks:
+    - name: Make a clone directory
+      ansible.builtin.tempfile:
+        state: directory
+      register: _dir
+
+    - name: Run the clones and remove the directory
+      block:
+        - name: Clone a host that does not resolve
+          ansible.builtin.git:
+            repo: https://clone-retry-test.invalid/org/repo.git
+            dest: "{{ _dir.path }}/transient"
+            version: HEAD
+          register: _transient
+          async: 30
+          poll: 1
+          until: >-
+            _transient is succeeded or
+            (((_transient.msg | default('')) ~ ' ' ~ (_transient.stderr | default(''))) is not search(review_clone_transient_pattern))
+          retries: 2
+          delay: 0
+          ignore_errors: true
+
+        - name: Clone a local path that does not exist
+          ansible.builtin.git:
+            repo: "{{ _dir.path }}/missing"
+            dest: "{{ _dir.path }}/permanent"
+            version: HEAD
+          register: _permanent
+          async: 30
+          poll: 1
+          until: >-
+            _permanent is succeeded or
+            (((_permanent.msg | default('')) ~ ' ' ~ (_permanent.stderr | default(''))) is not search(review_clone_transient_pattern))
+          retries: 2
+          delay: 0
+          ignore_errors: true
+
+        - name: Check the attempts
+          ansible.builtin.assert:
+            that:
+              - _transient is failed
+              - _transient.attempts | int > 1
+              - _permanent is failed
+              - _permanent.attempts | int == 1
+      always:
+        - name: Remove the clone directory
+          ansible.builtin.file:
+            path: "{{ _dir.path }}"
+            state: absent

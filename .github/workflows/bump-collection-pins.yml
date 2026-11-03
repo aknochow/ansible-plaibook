@@ -2,7 +2,7 @@ name: Bump collection git pins
 
 # Dependabot cannot update collections-requirements.yml (no Ansible ecosystem).
 # This job is the stand-in for aknochow SHA-pinned type: git collections
-# (openai / cursor / openshell / claude / gemini). ansible-collections
+# (openai / cursor / xai / openshell / claude / gemini). ansible-collections
 # release SHAs are left alone.
 #
 # A pin moves only when it is an ancestor of that repo's default-branch

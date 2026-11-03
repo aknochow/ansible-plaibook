@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 
 import pytest
 
+from plaibook import provider_sdk
 from plaibook.pip_hashed import hashed_requirements
 from plaibook.provider_sdk import (
     FAMILY_HASHED_FILE,
@@ -161,7 +163,7 @@ def test_missing_pip_installs_with_uv(monkeypatch):
     monkeypatch.setattr("plaibook.provider_sdk._requirement_satisfied", fake_satisfied)
     monkeypatch.setattr("plaibook.provider_sdk.subprocess.run", fake_run)
     ensure_provider_sdk("openai", "/opt/plaibook/bin/python", stderr=None)
-    assert recorded[0][:5] == ["/usr/bin/uv", "pip", "install", "--python", "/opt/plaibook/bin/python"]
+    assert recorded[0][:6] == ["/usr/bin/uv", "pip", "install", "--no-config", "--python", "/opt/plaibook/bin/python"]
     assert "--require-hashes" in recorded[0]
     assert recorded[0][-2:] == ["-r", str(hashed_requirements("openai-requirements.txt"))]
 
@@ -262,3 +264,13 @@ def test_hashed_files_pin_every_family_distribution():
         for _mod, dist in reqs:
             assert dist.replace("_", "-").lower() in pins
             assert pins[dist.replace("_", "-").lower()]
+
+
+def test_module_present_sees_a_package_installed_after_the_first_lookup(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(tmp_path))
+    name = "plaibook_late_install_probe"
+    assert provider_sdk._module_present(sys.executable, name) is False
+    package = tmp_path / name
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    assert provider_sdk._module_present(sys.executable, name) is True

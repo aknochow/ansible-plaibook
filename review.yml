@@ -63,22 +63,33 @@
     # it never needs isolation from itself. Override explicitly (-e
     # use_sandbox=true) if you want it anyway.
     use_sandbox: "{{ review_type != 'commit' }}"
+    # true when the execution environment supplies collections and provider
+    # SDKs (`plai review --ee`). Nothing is installed at run time.
+    review_runtime_from_image: false
     # Fallback when the openshell CLI has no gateway config on this machine.
     # A configured gateway (default name: openshell) replaces this with
     # gateway_endpoint from ~/.config/openshell/gateways/<name>/metadata.json.
     sandbox_gateway: "https://host.openshell.internal:17670"
     sandbox_image: "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
+    sandbox_workspace: "{{ lookup('ansible.builtin.env', 'OPENSHELL_WORKSPACE') | default('default', true) }}"
+    # Filesystem rules and no network rules, so sandbox commands have no egress.
+    # An empty policy leaves the image's own, which this gateway cannot activate:
+    # the sandbox then times out. Setting this replaces the whole policy.
+    sandbox_policy:
+      filesystem:
+        read_only: [/usr, /lib, /bin, /proc, /dev/urandom, /etc, /var/log]
+        read_write: [/sandbox, /tmp, /dev/null]
     # SSH ProxyCommand runs on the controller, not in the sandbox.
     # ansible_playbook_python is this process (the 3.11 sandbox-runtime
     # after plai re-execs). Do not use ansible_python_interpreter here:
     # that extra-var/set_fact leaks into delegate_to: sandbox_target and
     # the Mac venv path does not exist inside the guest.
     ssh_proxy_python: "{{ ansible_playbook_python | default('python3') }}"
-    # Local default is the checkout path below. When that file is absent,
-    # the play uses ssh_proxy.py from the plaibook-installed
-    # aknochow.openshell collection. AAP still overrides this with
-    # -e ssh_proxy_script=/opt/openshell/ssh_proxy.py.
-    ssh_proxy_script: "{{ lookup('env', 'HOME') }}/code/ansible-openshell/scripts/ssh_proxy.py"
+    # Empty uses ssh_proxy.py from the aknochow.openshell collection that
+    # plaibook installed, or the one on the collection search path. Set a
+    # path, such as a developer checkout or /opt/openshell/ssh_proxy.py on
+    # AAP, to run that file instead.
+    ssh_proxy_script: ""
 
     # 'local_mtls_dir': read certs from an openshell CLI-managed gateway dir.
     # 'k8s_secret': fetch certs live from a Kubernetes/OpenShift Secret.
@@ -282,9 +293,23 @@
     - name: Ensure collections and provider SDKs before preflight
       ansible.builtin.include_tasks: roles/review/tasks/ensure_runtime_deps.yml
 
-    - name: Use the installed OpenShell SSH proxy when the configured path is missing
+    - name: Use the installed OpenShell SSH proxy unless a path is configured
       ansible.builtin.set_fact:
-        ssh_proxy_script: "{{ ssh_proxy_script | openshell_ssh_proxy }}"
+        ssh_proxy_script: >-
+          {{ ssh_proxy_script | openshell_ssh_proxy(
+               collection_paths=lookup('ansible.builtin.config', 'COLLECTIONS_PATHS')) }}
+
+    - name: Stop when no OpenShell SSH proxy was found
+      when: use_sandbox | bool
+      ansible.builtin.assert:
+        that:
+          - ssh_proxy_script | length > 0
+          - ssh_proxy_script is file
+        fail_msg: >-
+          No ssh_proxy.py from aknochow.openshell was found, and
+          ssh_proxy_script is {{ ssh_proxy_script if ssh_proxy_script else 'unset' }}.
+          Run plai review once so it installs the collections, or pass
+          -e ssh_proxy_script=<path>.
 
     # Load the review role's provider defaults and validate provider-specific
     # controller prerequisites before creating a sandbox or cloning a target.
@@ -454,14 +479,7 @@
     # print one complete summary after PLAYBOOK RECAP, including why a
     # commit-mode regression gate failed.
     - name: Determine whether the review failed its regression gate
-      ansible.builtin.set_fact:
-        review_regression_gate_failed: >-
-          {{
-            (not (review_pipeline_failed | default(false) | bool))
-            and (fail_on_regressions | bool)
-            and (review_verdict | default('')) == 'NEEDS_CHANGES'
-            and ((findings_critical | default([]) | length) + (findings_major | default([]) | length)) > 0
-          }}
+      ansible.builtin.include_tasks: roles/review/tasks/regression_gate.yml
 
     - name: Build the final review summary for the after-recap callback
       ansible.builtin.set_fact:
@@ -485,5 +503,6 @@
         msg: >-
           {{ review_org_repo }}#{{ review_number }} scored {{ score_overall }}/100 with
           {{ findings_critical | default([]) | length }} Critical and
-          {{ findings_major | default([]) | length }} Major finding(s). See
+          {{ findings_major | default([]) | length }} Major finding(s){{
+          ' and a blocking secret' if guardian_forced_needs_changes | default(false) | bool else '' }}. See
           {{ review_findings_path }} for details.

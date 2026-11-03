@@ -116,6 +116,9 @@ options:
   llama_server_mode:
     description: Ignored.
     type: raw
+  conversation_id:
+    description: Ignored.
+    type: raw
 """
 
 
@@ -178,6 +181,7 @@ def main() -> None:
             cwd=dict(type="raw"),
             base_url=dict(type="raw"),
             llama_server_mode=dict(type="raw"),
+            conversation_id=dict(type="raw"),
         ),
         supports_check_mode=False,
     )
