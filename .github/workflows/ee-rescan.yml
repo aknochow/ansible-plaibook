@@ -4,7 +4,8 @@ name: Rescan published execution environment
 # rescan of the image users pull. This runs daily against :latest and the
 # newest release tag, uploads the full report to code scanning, and fails
 # on a fixable high or critical that .trivyignore.yaml does not cover. It
-# also fails when the Hummingbird base has a newer digest than the pin.
+# also fails when the Hummingbird base has a newer digest than the pin or
+# its Red Hat signature does not verify.
 
 on:
   schedule:
@@ -77,7 +78,7 @@ jobs:
           trivyignores: .trivyignore.yaml
 
   base:
-    name: Check the Hummingbird base digest
+    name: Check the Hummingbird base
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -86,6 +87,14 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4.2.2
         with:
           persist-credentials: false
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+        with:
+          cosign-release: v2.5.3
+
+      - name: Verify the base image signature
+        run: scripts/ee_verify_base.sh
 
       - name: Compare the pin with the registry
         run: |
