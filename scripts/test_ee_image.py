@@ -266,6 +266,7 @@ def test_trivyignore_covers_the_unfixed_vendor_highs():
         "CVE-2026-19481",
         "CVE-2026-12151",
         "CVE-2026-1526",
+        "CVE-2026-2229",
         "CVE-2026-109383",
         "CVE-2026-87018",
         "CVE-2025-47273",

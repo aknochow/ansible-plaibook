@@ -33,6 +33,13 @@ vulnerabilities:
       - pkg:npm/undici@5.29.0
     statement: upstream-vendored, no fix we can apply
     expired_at: 2026-11-30
+  - id: CVE-2026-2229
+    paths:
+      - usr/local/lib/python3.12/site-packages/cursor_sdk/_vendor/bridge/node_modules/undici/package.json
+    purls:
+      - pkg:npm/undici@5.29.0
+    statement: upstream-vendored, no fix we can apply
+    expired_at: 2026-11-30
   - id: CVE-2026-87018
     paths:
       - usr/local/lib/python3.12/site-packages/cursor_sdk/_vendor/bridge/node_modules/undici/package.json
