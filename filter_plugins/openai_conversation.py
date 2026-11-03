@@ -172,9 +172,12 @@ def openai_lens_reasoning_effort(model: str, configured: str = "") -> str:
 
     An operator value wins. gpt-5.6 Chat Completions rejects function tools
     unless the effort is ``none``. Every other model keeps the API default,
-    which is an empty string the task omits.
+    which is an empty string the task omits. ``default`` means the same
+    thing. The API rejects it as a literal value.
     """
     chosen = (configured or "").strip()
+    if chosen.lower() == "default":
+        chosen = ""
     if chosen:
         return chosen
     if _GPT56.match((model or "").strip().lower()):
