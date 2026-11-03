@@ -727,6 +727,17 @@ def test_comment_plan_updates_instead_of_stacking():
     assert "unchecked name" in prose[0]["text"]
 
 
+def test_summary_names_the_collection_after_the_family():
+    result = {
+        "agent_family": "openai",
+        "collection": "aknochow.openai@3657a67",
+        "models": ["gpt-6-luna"],
+        "effort": "lens medium, tools none",
+        "targets": [{"verdict": "READY_FOR_HUMAN_REVIEW", "score": 100.0}],
+    }
+    assert "openai · aknochow.openai@3657a67 · gpt-6-luna · effort lens medium, tools none" in summary_body(result, [])
+
+
 def test_summary_includes_models_cost_and_tokens():
     result = {
         "agent_family": "cursor",
@@ -1160,3 +1171,58 @@ def test_conclude_fails_a_run_that_did_not_finish(tmp_path, capsys):
     rc = main(["conclude", "--result", str(path), "--review-rc", "2"])
     assert rc == 1
     assert "broken line" in capsys.readouterr().err
+
+
+def test_gate_keeps_waiting_when_the_api_connection_drops(monkeypatch, capsys):
+    import http.client
+
+    import github_pr_review
+
+    def dropped(*_args, **_kwargs):
+        raise http.client.RemoteDisconnected("Remote end closed connection without response")
+
+    monkeypatch.setattr(github_pr_review.urllib.request, "urlopen", dropped)
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    rc = github_pr_review.main(["gate", "--repo", "org/repo", "--sha", "a" * 40])
+    assert rc == 10
+    assert capsys.readouterr().out.strip() == "waiting"
+
+
+def test_gate_keeps_waiting_on_a_server_error(monkeypatch, capsys):
+    import github_pr_review
+
+    monkeypatch.setattr(github_pr_review, "_request", lambda *_a, **_k: (502, "bad gateway", ""))
+    rc = github_pr_review.main(["gate", "--repo", "org/repo", "--sha", "a" * 40])
+    assert rc == 10
+    assert capsys.readouterr().out.strip() == "waiting"
+
+
+def test_gate_still_fails_on_a_client_error(monkeypatch):
+    import github_pr_review
+
+    monkeypatch.setattr(github_pr_review, "_request", lambda *_a, **_k: (404, "not found", ""))
+    assert github_pr_review.main(["gate", "--repo", "org/repo", "--sha", "a" * 40]) == 1
+
+
+def test_gate_keeps_waiting_when_a_response_body_is_cut_short(monkeypatch, capsys):
+    import http.client
+
+    import github_pr_review
+
+    class Short:
+        status = 200
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def read(self):
+            raise http.client.IncompleteRead(b"{", 10)
+
+    monkeypatch.setattr(github_pr_review.urllib.request, "urlopen", lambda *_a, **_k: Short())
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    assert github_pr_review.main(["gate", "--repo", "org/repo", "--sha", "a" * 40]) == 10
+    assert capsys.readouterr().out.strip() == "waiting"

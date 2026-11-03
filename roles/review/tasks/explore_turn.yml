@@ -40,17 +40,30 @@
         loop_var: explore_attempt_number
       when: not explore_dispatch_valid
 
+    # A provider that never answered produced no output to call invalid.
+    - name: Report a provider error when every attempt died on one
+      when:
+        - not explore_dispatch_valid
+        - (_xai_explore_provider_error | default('')) | length > 0
+      ansible.builtin.fail:
+        msg: >-
+          Explore agent ({{ review_explore_xai_model }}, agent_family=xai) provider
+          error on turn {{ explore_turn_count }} after
+          {{ review_structured_output_max_attempts }} attempt(s):
+          {{ _xai_explore_provider_error }}
+
     - name: Fail loudly if this turn's structured output was never valid after all attempts
       ansible.builtin.assert:
         that:
           - explore_dispatch_valid
         fail_msg: >-
           Explore agent
-          ({{ review_explore_model if agent_family == 'claude' else
-          ((review_explore_claude_cli_model if review_explore_claude_cli_model is string else '(CLI default)')
-          if agent_family == 'claude_cli' else
-          (review_explore_openai_model if agent_family == 'openai' else
-          (review_explore_cursor_model if agent_family == 'cursor' else review_explore_gemini_model))) }})
+          ({{ review_explore_model if agent_family == 'claude'
+          else (review_explore_claude_cli_model if review_explore_claude_cli_model is string else '(CLI default)') if agent_family == 'claude_cli'
+          else review_explore_xai_model if agent_family == 'xai'
+          else review_explore_openai_model if agent_family == 'openai'
+          else review_explore_cursor_model if agent_family == 'cursor'
+          else review_explore_gemini_model }})
           produced invalid or incomplete structured output on turn {{ explore_turn_count }}
           after {{ review_structured_output_max_attempts }} attempt(s).
           This is a confirmed, probabilistic model-generation quirk (see
@@ -66,7 +79,13 @@
 
     - name: Append the assistant's turn to the conversation
       ansible.builtin.set_fact:
-        explore_messages: "{{ explore_messages + [{'role': 'assistant', 'content': _explore_turn_sanitized_content.content}] }}"
+        explore_messages: >-
+          {{ explore_messages + [
+               {'role': 'assistant', 'content': _explore_turn_sanitized_content.content}
+               | combine({}
+                 if (explore_turn_result.message.encrypted_content | default('') | length) == 0
+                 else {'encrypted_content': explore_turn_result.message.encrypted_content})
+             ] }}
 
     - name: Check whether the agent called report_findings this turn
       ansible.builtin.set_fact:
@@ -107,36 +126,53 @@
     - name: Dispatch other tool calls and continue the loop
       when: explore_report_calls | length == 0 and explore_turn_result.stop_reason == 'tool_use'
       block:
-        - name: Enforce the exploration tool-call budget
-          ansible.builtin.assert:
-            that:
-              - >-
-                (explore_tool_calls_used | default(0) | int)
-                + (explore_turn_result.tool_calls | length)
-                <= (review_explore_max_tool_calls | int)
-            fail_msg: >-
-              Exploration stopped before dispatch: the configured limit of
-              {{ review_explore_max_tool_calls }} tool call(s) was reached.
-              Raise review_explore_max_tool_calls deliberately if this target
-              needs a broader audit.
-
-        - name: Account for this turn's exploration tool calls
+        - name: Determine whether this turn exceeds the exploration tool-call budget
           ansible.builtin.set_fact:
-            explore_tool_calls_used: >-
-              {{ (explore_tool_calls_used | default(0) | int)
-                 + (explore_turn_result.tool_calls | length) }}
+            _explore_tool_budget_exceeded: >-
+              {{ ((explore_tool_calls_used | default(0) | int)
+                  + (explore_turn_result.tool_calls | length))
+                 > (review_explore_max_tool_calls | int) }}
 
-        - name: Reset the tool-result accumulator for this turn
-          ansible.builtin.set_fact:
-            explore_tool_results: []
+        # Hitting review_explore_max_tool_calls must stop exploring but
+        # keep all findings surfaced so far (especially lens findings
+        # from merge.yml). Failing the play discarded real findings
+        # from completed lenses that were already paid for.
+        - name: Stop exploration when the tool-call budget is reached
+          when: _explore_tool_budget_exceeded | bool
+          block:
+            - name: Note that exploration stopped before dispatch
+              ansible.builtin.debug:
+                msg: >-
+                  Exploration stopped before dispatch: the configured limit of
+                  {{ review_explore_max_tool_calls }} tool call(s) was reached.
+                  Raise review_explore_max_tool_calls deliberately if this target
+                  needs a broader audit.
 
-        - name: Execute each requested tool call
-          ansible.builtin.include_tasks: dispatch_explore_tool.yml
-          loop: "{{ explore_turn_result.tool_calls }}"
-          loop_control:
-            loop_var: tool_call
-            label: "{{ tool_call.name }}({{ tool_call.input.path | default('') }})"
+            - name: Mark exploration finished and flag as incomplete
+              ansible.builtin.set_fact:
+                review_explore_done: true
+                review_exploration_incomplete: true
 
-        - name: Append the tool results as the next user turn
-          ansible.builtin.set_fact:
-            explore_messages: "{{ explore_messages + [{'role': 'user', 'content': explore_tool_results}] }}"
+        - name: Dispatch tool calls within budget
+          when: not (_explore_tool_budget_exceeded | bool)
+          block:
+            - name: Account for this turn's exploration tool calls
+              ansible.builtin.set_fact:
+                explore_tool_calls_used: >-
+                  {{ (explore_tool_calls_used | default(0) | int)
+                     + (explore_turn_result.tool_calls | length) }}
+
+            - name: Reset the tool-result accumulator for this turn
+              ansible.builtin.set_fact:
+                explore_tool_results: []
+
+            - name: Execute each requested tool call
+              ansible.builtin.include_tasks: dispatch_explore_tool.yml
+              loop: "{{ explore_turn_result.tool_calls }}"
+              loop_control:
+                loop_var: tool_call
+                label: "{{ tool_call.name }}({{ tool_call.input.path | default('') }})"
+
+            - name: Append the tool results as the next user turn
+              ansible.builtin.set_fact:
+                explore_messages: "{{ explore_messages + [{'role': 'user', 'content': explore_tool_results}] }}"

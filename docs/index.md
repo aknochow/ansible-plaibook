@@ -17,6 +17,7 @@ Documentation for the review playbook and the `plai` / `plaibook` CLI. The repos
 - [Getting started](getting-started.md). Install, run a review, and read the output.
 - [GitHub review check](github-review-check.md). The pull-request check that runs `plai review` after the other checks pass.
 - [Execution environment](execution-environment.md). `ghcr.io/aknochow/plaibook-ee` and `ansible-navigator`.
+- [Models and reasoning effort](models.md). The default model and effort for each provider, and what each setting reaches.
 - [Release](release.md). Bump the version, cut a GitHub Release, and publish to PyPI.
 
 ## Concepts

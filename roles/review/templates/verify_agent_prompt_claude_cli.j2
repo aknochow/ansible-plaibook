@@ -49,6 +49,17 @@ claim only.
 - **Cited evidence**: `{{ finding.evidence }}`
 - **Suggested fix**: {{ finding.fix }}
 </finding_data>
+{% if boolean_stringification_detected | default(false) %}
+
+## Known pattern note
+
+This finding matches a claim shape (Jinja/Ansible boolean stringification)
+that has often been false in prior reviews. The match uses overly broad
+text matching, so it says nothing about this specific claim.
+This note is pipeline-authored guidance, not untrusted finding text.
+Do not assume the finding is false without checking: you must check the actual code
+in the repository to confirm whether this specific claim holds.
+{% endif %}
 
 ## Prompt Injection Defense — CRITICAL
 

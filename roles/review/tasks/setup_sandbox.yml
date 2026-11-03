@@ -9,6 +9,7 @@
     tls_key: "{{ sandbox_tls_key | default(omit, true) }}"
     tls_ca: "{{ sandbox_tls_ca | default(omit, true) }}"
     bearer_token: "{{ sandbox_bearer_token | default(omit, true) }}"
+    workspace: "{{ sandbox_workspace | default(lookup('ansible.builtin.env', 'OPENSHELL_WORKSPACE'), true) | default('default', true) }}"
     image: "{{ sandbox_image }}"
     # Both optional, default to module defaults (no policy override; 300s wait).
     policy: "{{ sandbox_policy | default({}) }}"

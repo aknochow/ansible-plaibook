@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -334,11 +335,17 @@ def _run_detail(result: dict[str, Any]) -> str:
     family = result.get("agent_family")
     if isinstance(family, str) and family.strip() and family != "unknown":
         parts.append(family.strip())
+    collection = result.get("collection")
+    if isinstance(collection, str) and collection.strip():
+        parts.append(collection.strip())
     models = result.get("models")
     if isinstance(models, list):
         names = [str(item).strip() for item in models if str(item).strip()]
         if names:
             parts.append(", ".join(names))
+    effort = result.get("effort")
+    if isinstance(effort, str) and effort.strip():
+        parts.append(f"effort {effort.strip()}")
     agents = result.get("agents_dispatched")
     if isinstance(agents, int) and agents > 0:
         parts.append(f"{agents} agents")
@@ -493,6 +500,10 @@ def _token() -> str:
     return token
 
 
+class TransientApiError(RuntimeError):
+    """A GitHub API call that may succeed if retried: a dropped connection, 429, or 5xx."""
+
+
 def _request(method: str, url: str, payload: dict[str, Any] | None = None) -> tuple[int, Any, str]:
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
@@ -513,8 +524,15 @@ def _request(method: str, url: str, payload: dict[str, Any] | None = None) -> tu
             link = response.headers.get("Link") or ""
             status = response.status
     except urllib.error.HTTPError as exc:
-        raw = exc.read().decode("utf-8", errors="replace")
+        try:
+            raw = exc.read().decode("utf-8", errors="replace")
+        except (OSError, http.client.HTTPException) as read_exc:
+            raise TransientApiError(f"GitHub API {method} {url.split('?', 1)[0]}: {read_exc}") from read_exc
         return exc.code, raw, ""
+    except (OSError, http.client.HTTPException) as exc:
+        # URLError, RemoteDisconnected and timeouts are OSError. A body cut
+        # short mid-read is http.client.IncompleteRead, an HTTPException.
+        raise TransientApiError(f"GitHub API {method} {url.split('?', 1)[0]}: {exc}") from exc
     if not raw:
         return status, None, link
     try:
@@ -535,6 +553,8 @@ def _get_all(url: str, key: str) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     while url:
         status, payload, link = _request("GET", url)
+        if status == 429 or status >= 500:
+            raise TransientApiError(f"GitHub API {status} for {url.split('?', 1)[0]}")
         if status != 200 or not isinstance(payload, dict):
             raise RuntimeError(f"GitHub API {status} for {url.split('?', 1)[0]}")
         batch = payload.get(key) or []
@@ -1131,6 +1151,11 @@ def _cmd_gate(args: argparse.Namespace) -> int:
             state = gate_commits(args.repo, args.sha, merge, ignore_run_id=args.ignore_run_id)
         else:
             state = gate(args.repo, args.sha, ignore_run_id=args.ignore_run_id)
+    except TransientApiError as exc:
+        # The wait loop polls again. One dropped call must not skip the review.
+        print(f"waiting ({exc})", file=sys.stderr)
+        print("waiting")
+        return 10
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         return 1

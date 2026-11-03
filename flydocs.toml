@@ -18,6 +18,7 @@ tagline = "Deterministic AI code review, orchestrated in Ansible"
     { "Getting Started" = "getting-started.md" },
     { "GitHub Review Check" = "github-review-check.md" },
     { "Execution Environment" = "execution-environment.md" },
+    { "Models and Reasoning Effort" = "models.md" },
     { "Release" = "release.md" },
 ]
 

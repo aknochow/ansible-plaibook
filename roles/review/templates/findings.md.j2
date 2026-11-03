@@ -11,6 +11,9 @@
      > {{ fence }}
      > {{ f.verification_evidence | regex_replace('\r?\n', '\n     > ') }}
      > {{ fence }}
+{% if f.severity_status == 'capped' %}
+   - **Severity capped**: the verifier suggested {{ f.suggested_severity }} for this {{ f.original_severity }} finding. It stays at {{ f.severity }}; check it by hand.
+{% endif %}
 {% if f.severity_status == 'disputed' %}
    - **Severity re-assessed**: {{ f.original_severity }} → {{ f.severity }} ({{ f.worst_outcome_category }}, reachability: {{ f.reachability }}, trust boundary: {{ f.trust_boundary }}{{ ', silent failure' if f.silent_failure | bool else '' }})
 {% endif %}
@@ -25,7 +28,7 @@
 
 ### Verdict: {{ review_verdict }}
 {% if review_exploration_incomplete | default(false) %}
-**Exploration incomplete**: at least one repo search did not finish cleanly (timeout or tool error). That is not evidence the pattern is absent.
+**Exploration incomplete**: at least one repo search did not finish cleanly (timeout or tool error) or the tool-call limit was reached. That is not evidence the pattern is absent.
 {% endif %}
 {% if guardian_forced_needs_changes | default(false) %}
 **Blocked by ai-guardian**: {{ guardian_blocking_findings | length }} finding(s) in a blocking category ({{ guardian_blocking_findings | map(attribute='rule_id') | list | unique | join(', ') }}) — see Security Scan below. This applies independently of the lens/verify scores and findings above.
@@ -214,9 +217,7 @@ No findings — clean scan.
 
 ### Limitations
 This review was performed by an AI agent via a deterministic Ansible
-pipeline ({% if agent_family | default('') == 'claude_cli' %}aknochow.claude{% elif agent_family | default('') %}aknochow.{{ agent_family }}{% else %}aknochow.claude{% endif %}{% if use_sandbox | default(false) | bool %} + aknochow.openshell{% endif %}) — a port of the
-harness `code-review` skill's methodology, not the interactive Claude
-Code skill itself. It is a first pass, not a final approval. Final
+pipeline ({% if agent_family | default('') == 'claude_cli' %}aknochow.claude{% elif agent_family | default('') %}aknochow.{{ agent_family }}{% else %}aknochow.claude{% endif %}{% if use_sandbox | default(false) | bool %} + aknochow.openshell{% endif %}). It is a first pass, not a final approval. Final
 approval belongs to human maintainers.
 {% if review_lens_diff_screened | default(false) | bool %}
 

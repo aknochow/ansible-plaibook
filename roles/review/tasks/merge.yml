@@ -62,8 +62,8 @@
 # each finding and, if refuted, omit it from the findings array
 # entirely. The model does not reliably follow this. See
 # filter_self_refuted_findings.py's module docstring and test fixtures
-# for the documented wordings this catches. The same regexes run in
-# real Python instead of a Jinja rejectattr chain, so the logic is
+# for the documented wordings this catches. The regexes run in real
+# Python instead of a Jinja rejectattr chain, so the logic is
 # pytest-testable without a full ansible-playbook fixture run.
 - name: Drop self-refuted findings that leaked through despite the prompt instruction
   filter_self_refuted_findings:
@@ -73,19 +73,31 @@
 - name: Store the filtered findings
   ansible.builtin.set_fact:
     combined_findings: "{{ self_refuted_filter_result.findings }}"
+    review_self_refuted_dropped_count: "{{ self_refuted_filter_result.dropped_count }}"
 
-# Guards the filter above against its own regression (e.g. a future
-# edit narrows the pattern and stops catching what it used to).
+# A drop removes the finding from the report, so it has to be visible
+# somewhere: here in the job output, and as a count in summary.json.
+- name: Report findings dropped as self-refuted
+  when: self_refuted_filter_result.dropped_count | int > 0
+  ansible.builtin.debug:
+    msg: >-
+      Dropped {{ self_refuted_filter_result.dropped_count }} self-refuted
+      finding(s): {{ self_refuted_filter_result.dropped }}
+
+# Guards the stored list against drifting from the plugin's own answer.
+# Calls the plugin again rather than repeating its patterns here.
+- name: Check the stored findings for self-refuted findings
+  filter_self_refuted_findings:
+    findings: "{{ combined_findings }}"
+  register: self_refuted_recheck_result
+
 - name: Verify no self-refuted findings survived the filter
   ansible.builtin.assert:
     that:
-      - combined_findings | selectattr('evidence', 'search', '(?i)refut') | list | length == 0
-      - combined_findings | selectattr('fix', 'search', '(?i)refut|dropping\b|drop(?:ped|ping)? (this|the) finding|'
-             ~ '^\s*(n/?a\b|not applicable)|no\s+(?:\w+\s+){0,2}(?:fix|change|action)\w*\s*(?:is\s+|are\s+|was\s+)?(?:needed|required)|\b(?:is|are)\s+(?:actually\s+|already\s+)?correct\b') | list | length == 0
-      - combined_findings | selectattr('description', 'search', '(?i)no actual (bug|issue|vulnerability|problem)\b') | list | length == 0
+      - self_refuted_recheck_result.dropped_count | int == 0
     fail_msg: >-
-      A self-refuted finding survived the drop filter above; the
-      pattern no longer matches what the model is producing.
+      A self-refuted finding survived the drop filter above:
+      {{ self_refuted_recheck_result.dropped }}
     success_msg: "No self-refuted findings present."
 
 # Replaces an accumulator loop, sort, groupby, re-sort, and second

@@ -61,7 +61,7 @@ API access. A pin bump on `main` rebuilds the image. This playbook has
 already run as a real AAP Job Template against real MRs.
 
 Use a version tag for AAP Job Templates. `:<version>` matches a
-plaibook release (`:0.1.28` is the image for tag `v0.1.28`). `:main`
+plaibook release (`:0.1.32` is the image for tag `v0.1.32`). `:main`
 and `:latest` follow `main` and can be ahead of the newest PyPI
 release.
 
@@ -71,7 +71,7 @@ at job-run time if a review needs them.
 Verify a published tag before using it:
 
 ```bash
-cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity-regexp '^https://github.com/aknochow/ansible-plaibook/\.github/workflows/ee-publish\.yml@refs/(heads/main|tags/v.+)$' ghcr.io/aknochow/plaibook-ee:0.1.28
+cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity-regexp '^https://github.com/aknochow/ansible-plaibook/\.github/workflows/ee-publish\.yml@refs/(heads/main|tags/v.+)$' ghcr.io/aknochow/plaibook-ee:0.1.32
 ```
 
 To build and host your own, from a clean checkout. `--squash all` is the same flag CI uses. The build process, the layer count, and why `new` does not fix a local Podman mount are in [Execution environment](docs/execution-environment.md).
@@ -84,8 +84,9 @@ podman push <your-registry>/plaibook-ee:latest
 Credentials (GitHub/GitLab tokens, OpenShell mTLS) are injected via
 AAP credentials at job-run time, never baked into the image.
 
-The image includes `aknochow.cursor`. `review.yml` loads that
-collection only when `agent_family=cursor` starts the sidecar. Rebuild
+The image includes the `aknochow.cursor` collection but not
+`cursor-sdk`, which bundles its own Node.js runtime. `agent_family=cursor`
+runs from a host install, not the image. Rebuild
 when `collections-requirements.yml` or `execution-environment.yml`
 changes. A Vertex-only parse failure is a playbook bug, not a missing
 collection.
