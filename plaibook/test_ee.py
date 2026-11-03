@@ -452,6 +452,7 @@ def test_unreachable_engine_stops_before_the_review(tmp_path, monkeypatch, capsy
         (["review", "--branch", "/", "--ee"], "local path"),
         (["review", "org/repo/1", "--ee", "--sandbox"], "--ee and --sandbox"),
         (["review", "org/repo/1", "--ee", "-e", "agent_family=claude_cli"], "claude_cli"),
+        (["review", "org/repo/1", "--ee", "-e", "agent_family=cursor"], "cursor-sdk is not in it"),
         (["review", "org/repo/1", "--ee-image", "x"], "--ee-image needs --ee"),
     ],
 )

@@ -79,11 +79,11 @@ def test_execution_environment_builds_from_the_pin_file():
         "claude-agent-sdk==0.2.165",
         "google-genai==2.29.0",
         "openai==3.29.0",
-        "cursor-sdk==1.0.37",
         "xai-sdk==1.21.0",
     ):
         assert pin in locked
     assert re.search(r"(?m)^openshell==0\.1\.\d+ ", locked)
+    assert "cursor-sdk" not in locked
     assert "--hash=sha256:" in locked
     assert "gh-cli.repo" not in text
     assert "65d55875faa3281959676d91da15a9380583281586ac31bbd3d32b7924a9f4d2" in text
@@ -258,24 +258,13 @@ def test_rescan_gates_the_published_image_daily():
     assert "execution-environment.yml" in RESCAN.read_text(encoding="utf-8")
 
 
-def test_trivyignore_covers_the_unfixed_vendor_highs():
+def test_trivyignore_covers_only_the_pip_vendored_setuptools():
     document = _load(ROOT / ".trivyignore.yaml")
     findings = document["vulnerabilities"]
     ids = {item["id"] for item in findings}
-    assert ids == {
-        "CVE-2026-19481",
-        "CVE-2026-12151",
-        "CVE-2026-1526",
-        "CVE-2026-2229",
-        "CVE-2026-109383",
-        "CVE-2026-87018",
-        "CVE-2025-47273",
-    }
+    assert ids == {"CVE-2025-47273"}
     for item in findings:
-        assert item["statement"] in {
-            "upstream-vendored, no fix we can apply",
-            "vulnerable module not present in the image",
-        }
+        assert item["statement"] == "vulnerable module not present in the image"
         assert str(item["expired_at"]) == "2026-11-30"
         assert item["purls"]
 

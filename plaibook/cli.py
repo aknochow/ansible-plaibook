@@ -852,6 +852,13 @@ def _cmd_review_ee(args: argparse.Namespace, root: Path, run_id: str, extras: di
     if family == "claude_cli":
         print("--ee cannot use claude_cli. The claude binary is not in the image.", file=sys.stderr)
         return 2
+    if family == "cursor" and not getattr(args, "ee_image", None):
+        print(
+            "--ee cannot use cursor with the default image. cursor-sdk is not in it. "
+            "Run without --ee, or pass --ee-image for an image that has it.",
+            file=sys.stderr,
+        )
+        return 2
 
     reviews_root = _host_path_var(
         extras.get("review_output_base") or operator_vars.get("review_output_base"),
