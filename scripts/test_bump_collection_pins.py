@@ -271,4 +271,5 @@ def test_repo_requirements_only_bumps_aknochow_interface_pins():
         "ansible-gemini",
         "ansible-openai",
         "ansible-cursor",
+        "ansible-xai",
     }

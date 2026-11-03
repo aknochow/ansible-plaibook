@@ -30,6 +30,7 @@ SDK version, or a review-workflow pin is missing from this file.
 | aknochow.gemini | [ansible-gemini](https://github.com/aknochow/ansible-gemini) | Gemini module. Pins `google-genai`. |
 | aknochow.openai | [ansible-openai](https://github.com/aknochow/ansible-openai) | OpenAI-compatible chat module. Pins the `openai` SDK. |
 | aknochow.cursor | [ansible-cursor](https://github.com/aknochow/ansible-cursor) | Cursor agent module. Pins `cursor-sdk`. |
+| aknochow.xai | [ansible-xai](https://github.com/aknochow/ansible-xai) | xAI chat module. Pins `xai-sdk`. |
 | aknochow.openshell | [ansible-openshell](https://github.com/aknochow/ansible-openshell) | Sandbox lifecycle and the SSH proxy. Pins the `openshell` Python SDK. |
 
 The provider collections do not import each other. Plaibook composes
@@ -79,11 +80,12 @@ SHA.
 
 | Id | Collection | SHA | Which change |
 |---|---|---|---|
-| `collection.openshell` | ansible-openshell | `09cd2f193a77b3d59b263c62224e23fe364fa6e8` | ansible-openshell #38. Commit standards on main. SDK range is still `openshell>=0.1.3,<0.2` from #36. |
-| `collection.claude` | ansible-claude | `dfc061b6bf0bf0c1462435ef1c1f106d830a52b0` | ansible-claude #34. Commit standards on main. SDK pins are still `anthropic` 1.11.0 and `claude-agent-sdk` 0.2.163 from #30. |
-| `collection.gemini` | ansible-gemini | `016d7e2e5eceb2052304c740ee6a4abf44ca48ce` | ansible-gemini #28. Commit standards on main. `google-genai` 2.27.0 is still the pin from #22. |
-| `collection.openai` | ansible-openai | `3657a671018dfda9f18328d2b0c179038f100797` | ansible-openai #30. Commit standards on main. `openai` 3.23.0 is still the pin from #25. |
+| `collection.openshell` | ansible-openshell | `9b0ae7ac6285d44c288a2ecacea3b6afa5c8b6fa` | ansible-openshell #42. Its development lock tests SDK 0.1.6. SDK range is still `openshell>=0.1.3,<0.2` from #36. |
+| `collection.claude` | ansible-claude | `e5522de6a00d26f74aa6204a8dc7d21dcb3cbbdb` | ansible-claude #37. Lock off published advisories. SDK pins are still `anthropic` 1.11.0 and `claude-agent-sdk` 0.2.163 from #30. |
+| `collection.gemini` | ansible-gemini | `3242c63b1ab50f62336aeb66ae7bbd57901c76cf` | ansible-gemini #29. Lock off published advisories. `google-genai` 2.27.0 is still the pin from #22. |
+| `collection.openai` | ansible-openai | `136ca89afc96ee2a1c23bc66f649373439106b20` | ansible-openai #32. Lock off published advisories. The collection locks `openai` 3.29.0 since #27. |
 | `collection.cursor` | ansible-cursor | `b4d2672761296e7338e801cccfd7ac20b08e564d` | ansible-cursor #39. Sends reasoning_effort for grok-4.7. The #38 start retry remains. `cursor-sdk` 1.0.35 and the serialized starts from #30 are unchanged. |
+| `collection.xai` | ansible-xai | `dfbb12ef6b1b93b9f706d198d2e56d206de11e2a` | ansible-xai #3. `agent_family=xai` calls `aknochow.xai.chat`. `xai-sdk` 1.21.0 is the hashed pin. That revision sends `conversation_id` as `x-grok-conv-id`, keeps tool calls on assistant turns, reports `attempts` usage, spends one `timeout` budget across retries, and accepts a response that repeats the same JSON object. |
 | `collection.community.general` | community.general | `049524674b13ad9782849c427266935c8ec61954` | Release 13.4.0. Do not float to the default branch. |
 | `collection.kubernetes.core` | kubernetes.core | `0f472b53e2ee73e11b5f9067ab0826d76183c157` | Release 6.5.0. Do not float to the default branch. |
 | `collection.ansible.posix` | ansible.posix | `e98d9a0756458be1ac710988498000973889075c` | Release 2.2.2. Do not float to the default branch. |
@@ -101,9 +103,9 @@ head start.
 | `sdk.anthropic` | anthropic | `anthropic[vertex]>=0.84.0` | same floor, via the collection | `anthropic==1.11.0` | `plaibook/hashed/claude-requirements.txt` |
 | `sdk.claude-agent` | claude-agent-sdk | `claude-agent-sdk>=0.2.144` | same floor, via the collection | `claude-agent-sdk==0.2.163` | `plaibook/hashed/claude-requirements.txt` |
 | `sdk.gemini` | google-genai | `google-genai>=1.0.0` | same floor, via the collection | `google-genai==2.27.0` | `plaibook/hashed/gemini-requirements.txt` |
-| `sdk.openai` | openai | `openai>=1.58.0` | same floor, via the collection | `openai==3.23.0` | `plaibook/hashed/openai-requirements.txt` |
+| `sdk.openai` | openai | `openai>=1.58.0` | same floor, via the collection | `openai==3.29.0` | `plaibook/hashed/openai-requirements.txt` |
 | `sdk.cursor` | cursor-sdk | `cursor-sdk>=1.0.31,<2.0.0` | `cursor-sdk>=1.0.31,<2.0.0` in `pyproject.toml` | `cursor-sdk==1.0.35` | `plaibook/hashed/cursor-requirements.txt` and `sandbox-runtime-requirements.txt` |
-| `sdk.openshell` | openshell | `openshell>=0.1.3,<0.2` | `openshell>=0.1.3,<0.2` in `pyproject.toml` and `plaibook/openshell_sdk.py` | `openshell==0.1.3` | `plaibook/hashed/openshell-requirements.txt` |
+| `sdk.openshell` | openshell | `openshell>=0.1.3,<0.2` | `openshell>=0.1.3,<0.2` in `pyproject.toml` and `plaibook/openshell_sdk.py` | `openshell==0.1.6` | `plaibook/hashed/openshell-requirements.txt` |
 
 Direct inputs for the hashed files are `plaibook/hashed/*.in`.
 `scripts/compile-hashed-sdks.sh` writes the `*-requirements.txt`
@@ -114,15 +116,17 @@ the plaibook package itself.
 
 | Id | What it is | Current pin | Where |
 |---|---|---|---|
-| `sdk.openshell` | Python package imported by the collection and by plaibook | `openshell==0.1.3`, range `openshell>=0.1.3,<0.2` | Hashed file, `plaibook/openshell_sdk.py`, and the collection at `collection.openshell`. |
-| `openshell.gateway` | CLI and local gateway the review workflow starts | `OPENSHELL_VERSION=v0.1.2`. Installer source commit `6648bd0c290efbc41ba131ee9831ee45cd431f94`. sha256 `5c98a86a4b811c471b212219cb2a62d458244220ffa71ac8e3baf3700b17b871` | `.github/workflows/plai-review-run.yml` |
-| `openshell.sandbox-image` | Guest image the review runs inside | `ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e` | `.github/workflows/plai-review-run.yml` (`SANDBOX_IMAGE`) |
+| `sdk.openshell` | Python package imported by the collection and by plaibook | `openshell==0.1.6`, range `openshell>=0.1.3,<0.2` | Hashed file, `plaibook/openshell_sdk.py`, and the collection at `collection.openshell`. |
+| `openshell.gateway` | CLI and local gateway the review workflow starts | `OPENSHELL_VERSION=v0.1.6`. Installer source commit `ac7f615cd12d5cc49cb16eb1f5f10ffeb1e90f47`. sha256 `04c1a437d4a4fc11930d75a336fc4f52bf0c95251e8469c306e407e203769ae7` | `.github/openshell-pins.env` |
+| `openshell.sandbox-image` | Guest image the review runs inside | `ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e` | `.github/openshell-pins.env` |
+
+`bump-openshell-pins.yml` opens a pull request when OpenShell publishes a release, the SDK moves, or the image moves. The OpenShell smoke check starts that gateway and a sandbox, with no secrets. After a merge, `scripts/move_review_pin.py` moves `review.checkout` and then `review.caller`, in two pull requests. That step stays manual, because a bot that edits those pins would need permission to edit workflow files.
 
 The gateway and the Python SDK share a major version (`0.1`). They do
-not share a patch number. Bumping the SDK to 0.1.3 does not by itself
+not share a patch number. Bumping the SDK does not by itself
 move the installer or the image digest.
 
-The image lock pins `openshell==0.1.3`. That matches the plaibook
+The image lock pins `openshell==0.1.6`. That matches the plaibook
 hashed install and the collection range at `collection.openshell`.
 
 ## Execution environment pins
@@ -135,30 +139,40 @@ difference as a bump to decide, not as the same pin.
 
 | Package | Image pin | Runtime hashed install |
 |---|---|---|
-| anthropic | `anthropic[vertex]==1.13.0` | `anthropic==1.11.0` |
-| claude-agent-sdk | `claude-agent-sdk==0.2.165` | `claude-agent-sdk==0.2.163` |
-| google-genai | `google-genai==2.29.0` | `google-genai==2.27.0` |
-| openai | `openai==3.28.0` | `openai==3.23.0` |
-| cursor-sdk | `cursor-sdk==1.0.37` | `cursor-sdk==1.0.35` |
-| openshell | `openshell==0.1.3` | `openshell==0.1.3` |
+| anthropic | `anthropic[vertex]==2.3.0` | `anthropic==1.11.0` |
+| claude-agent-sdk | `claude-agent-sdk==0.2.176` | `claude-agent-sdk==0.2.163` |
+| google-genai | `google-genai==2.34.0` | `google-genai==2.27.0` |
+| openai | `openai==3.42.0` | `openai==3.29.0` |
+| cursor-sdk | not in the image | `cursor-sdk==1.0.35` |
+| xai-sdk | `xai-sdk==1.21.0` | `xai-sdk==1.21.0` |
+| openshell | `openshell==0.1.6` | `openshell==0.1.6` |
+
+`plai review --ee` adds no pin. Its default image is
+`ghcr.io/aknochow/plaibook-ee:<plaibook version>`, computed from
+`plaibook.__version__`, which is the image built from the same release.
+A release's digest does not exist until it is published, so the package
+cannot record it, so `plai` verifies the signature with `cosign` and runs
+the verified digest. `--ee-image` takes a digest. See
+[Execution environment](execution-environment.md#which-image).
+`ansible-navigator` and `cosign` are host tools the operator installs. They
+are not plaibook dependencies.
 
 ## Review workflow pins
 
 | Id | What | SHA | Where |
 |---|---|---|---|
-| `review.caller` | `plai-review.yml` calls the reusable workflow | `528b023fbecfe3737f6ab0fe46fb26731b62a36c` | `.github/workflows/plai-review.yml` `uses:` |
-| `review.checkout` | Both checkouts inside the reusable workflow | `b9fee9a904425934522a2d9f333c11f3701892bd` | `.github/workflows/plai-review-run.yml` `ref:` |
+| `review.caller` | `plai-review.yml` calls the reusable workflow | `9f3f9b109ed67bf1cb3618445c986bd09b54905d` | `.github/workflows/plai-review.yml` `uses:` |
+| `review.checkout` | Both checkouts inside the reusable workflow | `f5afa67776e555534b2f55d589e8fcf4e71d14c4` | `.github/workflows/plai-review-run.yml` `ref:` |
 
 Move `review.checkout` first. Then set `review.caller` to the commit
 that contains those checkout refs. The caller file on the default
 branch is the one `pull_request_target` runs. Do not point the caller
 at a commit whose workflow still checks out the previous tree.
-`b9fee9a904425934522a2d9f333c11f3701892bd` is `main` after #156.
-That tree includes the grok-4.7 pricing from #166.
-`review.caller` is `528b023fbecfe3737f6ab0fe46fb26731b62a36c`.
+`f5afa67776e555534b2f55d589e8fcf4e71d14c4` is `main` with the review gate retrying through GitHub API errors and a 10-minute review limit.
+`review.caller` is `9f3f9b109ed67bf1cb3618445c986bd09b54905d`.
 That commit contains these checkout refs, so the called workflow
-checks out `b9fee9a`. It is not `b9fee9a` itself: that tree's
-workflow file still checks out `73889d7`.
+checks out `f5afa67`. It is not `f5afa67` itself: that tree's
+workflow file still checks out the previous `review.checkout` tree.
 
 ## CI edges
 

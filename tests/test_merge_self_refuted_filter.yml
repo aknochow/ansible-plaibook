@@ -71,3 +71,67 @@
           functionality={{ score_functionality }} quality={{ score_quality }}
           overall={{ score_overall }} verdict={{ review_verdict }}.
         success_msg: "compute_review_scores.py correctly scored the surviving findings."
+
+    - name: Assert the single drop is reported
+      ansible.builtin.assert:
+        that:
+          - self_refuted_filter_result.dropped_count | int == 1
+          - self_refuted_filter_result.dropped[0].file == 'a.py'
+          - review_self_refuted_dropped_count | int == 1
+
+- name: Real findings that use retraction vocabulary survive the merge
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    severity_points:
+      Critical: 20
+      Major: 10
+      Minor: 5
+      Nit: 0
+    security_result:
+      structured:
+        findings:
+          - evidence: "session.get(url, allow_redirects=True)"
+            fix: "Stop dropping the auth header on redirect."
+            description: "Redirected requests lose authentication."
+            severity: "Major"
+            lens: "Security"
+            file: "client.py"
+            line: 10
+    review_result:
+      structured:
+        findings:
+          - evidence: "os.path.join(base, name)"
+            fix: "Join against the repo root so the path is correct."
+            description: "The path resolves against the working directory."
+            severity: "Major"
+            lens: "Functionality"
+            file: "paths.py"
+            line: 20
+          - evidence: "def refute(claim):"
+            fix: "Return the parsed claim status."
+            description: "The helper discards the claim status."
+            severity: "Major"
+            lens: "Functionality"
+            file: "claims.py"
+            line: 30
+
+  tasks:
+    - name: Run merge.yml through the review role context
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: merge
+
+    - name: Assert every real finding survived and still blocks
+      ansible.builtin.assert:
+        that:
+          - deduped_findings | length == 3
+          - self_refuted_filter_result.dropped_count | int == 0
+          - review_self_refuted_dropped_count | int == 0
+          - review_verdict == 'NEEDS_CHANGES'
+        fail_msg: >-
+          A real finding was dropped as self-refuted. Survivors:
+          {{ deduped_findings | map(attribute='file') | list }}
+          verdict={{ review_verdict }}.

@@ -8,7 +8,7 @@ status: stable
 
 # Execution environment
 
-`ghcr.io/aknochow/plaibook-ee` is the container Automation Controller uses to run [`review.yml`](../review.yml). `plai` and `plaibook` are not in the image. They are host commands that shell out to `ansible-playbook review.yml` and print the summary. A job template, and `ansible-navigator`, run the playbook inside this image.
+`ghcr.io/aknochow/plaibook-ee` is the container Automation Controller uses to run [`review.yml`](../review.yml). `plai` and `plaibook` are not in the image. They are host commands that shell out to `ansible-playbook review.yml` and print the summary. A job template, `ansible-navigator`, and `plai review --ee` run the playbook inside this image.
 
 ## Run it
 
@@ -33,6 +33,68 @@ ansible-navigator run review.yml \
 Pass the same extra vars you would pass to `ansible-playbook` (`-e review_type=commit`, and so on). GitHub, GitLab, and OpenShell credentials are job inputs. They are not baked into the image. `ssh_proxy.py` and OpenShell certs are not in the image either.
 
 The package starts private. Controller needs a `ghcr.io` registry credential until the package is made public. This workflow cannot change that setting.
+
+## Run a local review in it
+
+**Experimental.** Options and defaults may change. `--ee` narrows what a review can reach, but it does not keep the selected provider key or forge token away from commands that handle PR content. See [What the container can see](#what-the-container-can-see).
+
+`plai review <target> --ee` runs one PR, MR, or branch review in one container, started with `ansible-navigator`. `plai` stays on the host. It needs `ansible-navigator` (`pipx install ansible-navigator`) and Podman or Docker.
+
+```bash
+plai review org/repo/123 --ee
+plai review org/repo/123 --ee --ee-image "ghcr.io/aknochow/plaibook-ee@sha256:<digest>"
+```
+
+`--ee` is not a queue and is not needed for running reviews at the same time. Its purpose is to keep host credentials away from a review of untrusted content. A local commit review (`--commit`) is refused, because that review writes into your checkout. A local path as the branch target is refused, because it is not in the container. `--sandbox` and `claude_cli` are refused too. The `claude` binary is not in the image, and OpenShell stays a separate choice. `agent_family=cursor` is refused with the default image: `cursor-sdk` bundles its own Node.js runtime and is left out of the image. Pass `--ee-image` for an image that adds it.
+
+### Which image
+
+The default is `ghcr.io/aknochow/plaibook-ee:<plaibook version>`, the image the same release published. `PLAIBOOK_EE_IMAGE` or `--ee-image` replaces it. The image is pulled only when it is not already local.
+
+For the default image, `plai` runs `cosign verify` against this release's workflow identity and starts the verified digest, so moving the tag changes nothing. `cosign` must be on `PATH`, and the run stops if verification fails. An image from `--ee-image` or `PLAIBOOK_EE_IMAGE` is your choice and is not verified, and `plai` says so when it runs. To verify one yourself, use the `cosign verify` command in [Run it](#run-it) and pass the digest to `--ee-image`.
+
+### What the container can see
+
+Collections and provider SDKs come from the image. `review_runtime_from_image` skips the per-run installs, no collection cache is mounted, and each container has its own home, so concurrent runs with different pins cannot share a collection path.
+
+| Host path | Container path | Mode | Why |
+|---|---|---|---|
+| The playbook tree (a checkout's tracked files, or the package from a wheel) | `/plaibook/playbook` or `/plaibook/lib/plaibook` | read-only | The image does not contain the playbook or the `plaibook` package. A checkout's tracked files are copied into the run first, so `.git`, untracked files, and `host_vars/` are not visible and do not apply. |
+| `~/.cache/ansible-plaibook/ee-runs/<run_id>/home` | same path | read-write | The container's `$HOME`, its clones, and its results. Deleted when the run ends. |
+| `~/.cache/ansible-plaibook/ee-runs/<run_id>/runner` | `/runner` | read-write | `ansible-runner` metadata, including an env file with the values below. Deleted when the run ends. |
+| `~/.cache/ansible-plaibook/ee-runs/<run_id>/passwd` | `/etc/passwd` | read-only | Names the host UID with the run home as its home. The image entrypoint would otherwise replace `$HOME`. |
+| `~/reviews`, or `review_output_base` | same path | read-write | Prior rounds and this round's report. |
+| `/etc/ssh/ssh_known_hosts`, when it exists | same path | read-only | `ansible-runner` mounts it. It holds public host keys. |
+
+These are deliberately not mounted: `~/.ssh`, the SSH agent, `~/.cache/ansible-plaibook` itself, the directory you ran `plai` from, and any engine socket. A write to the host cache could change the code the next host review runs. `ansible-runner` always mounts `$HOME/.ssh`, so `plai` starts navigator with `HOME` set to an empty directory that links only the engine's own configuration.
+
+`vars.yml` is copied into the run home without settings whose names look secret, at any depth. That filter goes by name only. Do not keep a secret there.
+
+The environment is an allowlist. Navigator starts with only what it needs to find the engine, and the container gets the selected provider's variables, `ANSIBLE_REVIEW_*`, and the forge token for the target. `GH_TOKEN` comes from `gh auth token` on the host when neither GitHub variable is set. Values reach navigator through its environment and never appear on a command line. The container also runs as your UID with `--cap-drop=all` and `no-new-privileges`. SELinux labels are off, so that no host directory is relabeled, which removes SELinux from this container's confinement.
+
+### What is not isolated
+
+This step separates the review from the host. It does not separate the provider key from tool execution.
+
+| Process | Provider key and forge token |
+|---|---|
+| `plai`, `ansible-navigator`, and the engine client on the host | Visible, in their environment |
+| `ansible-playbook` in the container and the model modules | Visible |
+| `git`, `gh`, `ai-guardian`, exploration searches, and `CHECKLIST.md` commands in the container | Visible. They run as the same UID, inherit that environment, and can read `/runner/artifacts/*/env.list`. |
+
+The container has unrestricted network egress. A command that gets code execution from PR content can read the selected provider key and forge token and send them anywhere, and can edit `~/reviews`. It cannot reach the host's other keys, SSH keys, or files outside the table. `CHECKLIST.md` is read from the target ref and its commands pass an allowlist, and that is the control on this path. Use a narrowly scoped forge token. An OpenShell sandbox runs those commands away from the keys, and `--ee` does not replace that.
+
+### Where results land
+
+| Result | Host path |
+|---|---|
+| This run's summary | `~/.cache/ansible-plaibook/last_run.<run_id>.json` |
+| Report and `summary.json` | `review_output_base` (`~/reviews/...`), including the run-scoped `summary.<id>.json` and `findings.<id>.md` |
+| Ledger | One line appended to `~/.cache/ansible-plaibook/ledger/<host>.jsonl`, named for the host and not the container |
+
+`last_run.json` is not updated by `--ee`. Read the run-scoped file. `plai` treats what the container wrote as untrusted. It refuses a last-run file that links out of the run or a target path outside the reviews directory, and copies only ledger lines carrying this run's ID.
+
+A run tree left behind by a killed `plai` is removed by the next `--ee` run after 24 hours. It contains the env file until then, in a directory only you can read.
 
 ## Build command
 
@@ -86,6 +148,8 @@ The base digest, `user: "1000"`, `package_manager_path: /usr/bin/dnf`, and `pyth
 
 Collections come from [`collections-requirements.yml`](../collections-requirements.yml). Python dependencies come from [`execution-environment-requirements.txt`](../execution-environment-requirements.txt) and are installed with `pip install --require-hashes`. The collection `requirements.txt` ranges are listed under `dependencies.exclude.python` so the introspect step cannot install those ranges beside the lockfile. Pins are recorded in the [dependency map](dependency-map.md).
 
+Every build verifies Red Hat's signature on the pinned base digest before `ansible-builder` runs. [`scripts/ee_verify_base.sh`](../scripts/ee_verify_base.sh) runs `cosign verify` with Red Hat release key 3 ([`execution-environment-redhat-key.pem`](../execution-environment-redhat-key.pem), from `https://security.access.redhat.com/data/63405576.txt`). It passes `--insecure-ignore-tlog`: Red Hat's Rekor bundles use a log key that is not in the public Sigstore trusted root, so cosign checks the signature against the key but not log inclusion.
+
 `gh` 2.103.3 is the signed GitHub release RPM. The public key is [`execution-environment-gh-key.asc`](../execution-environment-gh-key.asc). `glab` 1.126.0 is GitLab's unsigned RPM. Both installs check a per-architecture SHA-256 before `rpm` runs. Both binaries are Go 1.27.3.
 
 ## CI
@@ -95,3 +159,5 @@ Collections come from [`collections-requirements.yml`](../collections-requiremen
 [`.github/workflows/ee-publish.yml`](../.github/workflows/ee-publish.yml) runs on a push to `main` that changes an image input, and on a published GitHub release. It uses the same `ansible-builder build --squash all` command, then pushes each architecture, signs it with cosign, attaches a Syft SBOM, and publishes a multi-arch manifest. A release tag `vX.Y.Z` publishes `:X.Y.Z`. A `main` push publishes `:main` and copies it to `:latest`.
 
 The SBOM is taken from the docker-archive the job already saved for Trivy. Syft's `podman:` source needs a Podman API socket, and the GitHub runner does not expose one. `cosign login` uses the same token as `podman login`. Podman's credentials are not visible to cosign.
+
+[`.github/workflows/ee-rescan.yml`](../.github/workflows/ee-rescan.yml) runs daily. It scans `:latest` and the newest release tag with the same Trivy gate and [`.trivyignore.yaml`](../.trivyignore.yaml), and uploads the full report to code scanning. A new advisory against an image users already pull fails the run. Its second job fails when `registry.access.redhat.com/hi/python:3.12-builder` has a newer digest than the pin in `execution-environment.yml`. Each ignore entry expires, so an ignore nobody rechecks also fails the run.

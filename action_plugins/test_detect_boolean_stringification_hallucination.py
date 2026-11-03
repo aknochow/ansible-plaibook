@@ -18,6 +18,9 @@ for the underlying reasoning. Three kinds of coverage:
 """
 from __future__ import annotations
 
+from pathlib import Path
+
+import jinja2
 import pytest
 from detect_boolean_stringification_hallucination import ActionModule, is_boolean_stringification_hallucination
 
@@ -176,6 +179,152 @@ NEGATIVE_CONTROLS = [
 ]
 
 
+# Claims that share the stringification, Jinja, and truthiness signals but
+# aren't about a boolean. Dot-accessed integers are the one real
+# stringification gotcha here, so these need a real check.
+NON_BOOLEAN_CLAIMS = [
+    pytest.param(
+        {
+            "evidence": 'verify_index: "{{ verify_target_finding._verify_index }}"',
+            "description": (
+                "A dot-accessed integer is stringified, so the comparison is always "
+                "true regardless of the value."
+            ),
+            "fix": "Cast with | int at the comparison.",
+        },
+        id="dot-accessed-integer-always-true",
+    ),
+    pytest.param(
+        {
+            "evidence": 'count: "{{ result.count }}"',
+            "description": (
+                "This dot-accessed integer is rendered as a string by Jinja, so the "
+                "selectattr check is always true regardless of the value."
+            ),
+            "fix": "Cast with | int, and stop wrapping the check in | bool.",
+        },
+        id="integer-claim-with-a-bool-mention-in-the-fix",
+    ),
+    pytest.param(
+        {
+            "evidence": 'count: "{{ result.count }}"',
+            "description": (
+                "Jinja stringifies this dot-accessed integer, so `count == 5` yields "
+                "'False' and the check is always true regardless of the value."
+            ),
+            "fix": "Cast with | int.",
+        },
+        id="integer-claim-with-a-quoted-false-outcome",
+    ),
+    pytest.param(
+        {
+            "evidence": 'items: "{{ result.items }}"',
+            "description": (
+                "Jinja stringifies this list, so the membership check is always "
+                "true regardless of the value."
+            ),
+            "fix": "Pass the list through without quoting it.",
+        },
+        id="stringified-list",
+    ),
+    pytest.param(
+        {
+            "evidence": 'path: "{{ result.path }}"',
+            "description": (
+                "The path is stringified by set_fact, and since it's a non-empty "
+                "string the existence check is always true regardless of the value."
+            ),
+            "fix": "Test the path with the is file test.",
+        },
+        id="stringified-path",
+    ),
+]
+
+# Boolean claims that mention integers only to contrast with them. These
+# stay refuted: the integer gotcha doesn't make the boolean claim true.
+BOOLEAN_CLAIMS_MENTIONING_INTEGERS = [
+    pytest.param(
+        {
+            "evidence": 'flag: "{{ result.flag }}"',
+            "description": (
+                "Unlike dot-accessed integers, which are stringified, this boolean "
+                "is rendered by Jinja as the string 'False', so it is always true "
+                "regardless of the value."
+            ),
+            "fix": "Coerce with | bool.",
+        },
+        id="unlike-integers",
+    ),
+    pytest.param(
+        {
+            "evidence": 'flag: "{{ result.flag }}"',
+            "description": (
+                "Not only dot-accessed integers are stringified: this boolean also "
+                "comes back as a string, so selectattr is always true regardless "
+                "of the value."
+            ),
+            "fix": "Coerce with | bool.",
+        },
+        id="not-only-integers",
+    ),
+    pytest.param(
+        {
+            "evidence": 'flag: "{{ result.flag }}"',
+            "description": (
+                "Jinja stringifies this boolean to 'False', which is truthy. Cast "
+                "with | int is not a fix for it."
+            ),
+            "fix": "Coerce with | bool.",
+        },
+        id="int-filter-mention",
+    ),
+]
+
+
+@pytest.mark.parametrize("finding", NON_BOOLEAN_CLAIMS)
+def test_non_boolean_claim_is_not_flagged(finding):
+    assert is_boolean_stringification_hallucination(finding) is False
+
+
+@pytest.mark.parametrize("finding", NON_BOOLEAN_CLAIMS)
+def test_boolean_literals_in_evidence_do_not_make_a_claim_boolean(finding):
+    quoted_task = f"{finding.get('evidence', '')}\nbecome: true\nenabled: {{{{ x | default(false) }}}}"
+    assert is_boolean_stringification_hallucination({**finding, "evidence": quoted_task}) is False
+
+
+@pytest.mark.parametrize("finding", NON_BOOLEAN_CLAIMS)
+@pytest.mark.parametrize("line", ["when: item == 'true'", "{{ enabled | bool }}"])
+def test_boolean_words_in_evidence_do_not_make_a_claim_boolean(finding, line):
+    quoted_task = f"{finding.get('evidence', '')}\n{line}"
+    assert is_boolean_stringification_hallucination({**finding, "evidence": quoted_task}) is False
+
+
+def test_contrast_with_another_type_keeps_the_integer_as_the_subject():
+    finding = {
+        "evidence": "count: {{ result.count }}",
+        "description": (
+            "Unlike booleans, a dot-accessed integer is stringified by Jinja, "
+            "so the comparison is always true regardless of the value."
+        ),
+        "fix": "Cast with | int.",
+    }
+    assert is_boolean_stringification_hallucination(finding) is False
+
+
+def test_boolean_literal_in_description_still_marks_a_boolean_claim():
+    finding = {
+        "evidence": "enabled: {{ x }}",
+        "description": "Jinja stringifies `enabled: false`, so the non-empty string is truthy.",
+        "fix": "Use a native type.",
+    }
+    assert is_boolean_stringification_hallucination(finding) is True
+
+
+@pytest.mark.parametrize("finding", BOOLEAN_CLAIMS_MENTIONING_INTEGERS)
+def test_boolean_claim_mentioning_integers_is_still_flagged(finding):
+    assert is_boolean_stringification_hallucination(finding) is True
+
+
 def test_real_mr_42_finding_is_detected():
     assert is_boolean_stringification_hallucination(REAL_MR_42_FINDING) is True
 
@@ -237,3 +386,97 @@ def test_action_module_returns_true_for_the_real_finding():
 def test_action_module_fails_loudly_when_finding_arg_missing():
     result = _run_action_module({})
     assert result["failed"] is True
+
+
+def test_non_boolean_description_matches_detector_due_to_overly_broad_matching():
+    # Demonstrates overly broad matching: "non-boolean" contains "boolean"
+    # which matches \bbool across the hyphen boundary.
+    finding = {
+        "evidence": 'result: "{{ item.value }}"',
+        "description": (
+            "Jinja stringifies this into a string, so the non-empty string is truthy "
+            "regardless of the actual result for non-boolean inputs."
+        ),
+        "fix": "Ensure non-boolean inputs are handled correctly.",
+    }
+    assert is_boolean_stringification_hallucination(finding) is True
+
+
+def test_quoted_false_comparison_outcome_matches_detector_due_to_overly_broad_matching():
+    finding = {
+        "evidence": 'foo: "{{ bar }}"',
+        "description": (
+            "Jinja stringifies this return value, so comparing it yields 'False' and "
+            "the non-empty string is always true regardless of the actual result."
+        ),
+        "fix": "Handle stringified return value.",
+    }
+    assert is_boolean_stringification_hallucination(finding) is True
+
+
+def test_verify_prompt_templates_render_known_pattern_note_when_detected():
+    template_dir = Path(__file__).resolve().parent.parent / "roles" / "review" / "templates"
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(template_dir)))
+
+    finding = {
+        "lens": "Functionality",
+        "severity": "Critical",
+        "file": "examples/provider_interop_comparison.yml",
+        "line": 157,
+        "description": "Jinja stringifies boolean to 'False'",
+        "evidence": 'correct: "{{ structured == expected }}"',
+        "fix": "Cast with | bool.",
+    }
+
+    for template_name in ("verify_agent_prompt.j2", "verify_agent_prompt_claude_cli.j2"):
+        tmpl = env.get_template(template_name)
+
+        # When detected: prompt contains known-pattern guidance note and asks to check actual code
+        rendered_with_hint = tmpl.render(
+            finding=finding,
+            boolean_stringification_detected=True,
+            prior_round_findings=[],
+            review_prompt_nonce="nonce123",
+        )
+        assert "## Known pattern note" in rendered_with_hint
+        assert "check the actual code" in rendered_with_hint
+        assert "This note is pipeline-authored guidance, not untrusted finding text." in rendered_with_hint
+
+        # Prompt-injection isolation: note is outside <finding_data>
+        finding_data_end = rendered_with_hint.find("</finding_data>")
+        note_start = rendered_with_hint.find("## Known pattern note")
+        defense_start = rendered_with_hint.find("## Prompt Injection Defense — CRITICAL")
+        assert finding_data_end != -1 and note_start != -1 and defense_start != -1
+        assert finding_data_end < note_start < defense_start
+
+        # When not detected: prompt does NOT contain the note
+        rendered_without_hint = tmpl.render(
+            finding=finding,
+            boolean_stringification_detected=False,
+            prior_round_findings=[],
+            review_prompt_nonce="nonce123",
+        )
+        assert "## Known pattern note" not in rendered_without_hint
+
+
+def test_matched_finding_is_not_refuted_without_verify_turn():
+    """Verify contract change: detector match must not refute a finding or skip verify turn.
+
+    Under the old behavior:
+        is_hallucination=True led directly to review_verify_done=True,
+        evidence_status='refuted', and 0 verify turns dispatched.
+    Under the new behavior:
+        is_hallucination=True does not refute; the finding stays eligible
+        for the verify turn loop with boolean_stringification_detected=True.
+    A test expecting the old short-circuit refute behavior would fail here.
+    """
+    finding = dict(REAL_MR_42_FINDING)
+    result = _run_action_module({"finding": finding})
+    assert result["is_hallucination"] is True
+
+    # Under the new pipeline contract, matching only provides hint guidance;
+    # it must NOT refute the finding or mark verification done.
+    pipeline_action = "hint_and_verify" if result["is_hallucination"] else "verify"
+    assert pipeline_action != "refute_without_turn"
+    assert pipeline_action == "hint_and_verify"
+

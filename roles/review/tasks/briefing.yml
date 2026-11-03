@@ -56,15 +56,31 @@
 # hit silently produces an empty last_run.json targets entry, making a
 # legitimate cache hit (including a real NEEDS_CHANGES verdict) look like
 # the pipeline did nothing.
+#
+# persist.yml writes findings.md before summary.json, so a run stopped
+# between the two leaves a directory this find still picks. Treat a
+# missing or unreadable summary as none, and the fast path below then
+# runs a full review instead of failing every later run on this branch.
 - name: Read the latest prior review's summary.json if one was found
-  ansible.builtin.slurp:
-    path: "{{ review_output_base }}/{{ review_org_repo }}/{{ review_branch }}/{{ _latest_prior_review.latest_dir }}/summary.json"
-  register: _prior_review_summary_raw
   when: _latest_prior_review.found
+  block:
+    - name: Slurp the prior review's summary.json
+      ansible.builtin.slurp:
+        path: "{{ review_output_base }}/{{ review_org_repo }}/{{ review_branch }}/{{ _latest_prior_review.latest_dir }}/summary.json"
+      register: _prior_review_summary_raw
 
-- name: Decode the prior review's summary
+    - name: Decode the prior review's summary
+      ansible.builtin.set_fact:
+        review_prior_summary: "{{ _prior_review_summary_raw.content | b64decode | from_json }}"
+  rescue:
+    - name: Treat a missing or unreadable prior summary.json as no prior summary
+      ansible.builtin.set_fact:
+        review_prior_summary: {}
+
+- name: Default the prior summary to empty when no prior review exists
+  when: not _latest_prior_review.found
   ansible.builtin.set_fact:
-    review_prior_summary: "{{ (_prior_review_summary_raw.content | b64decode | from_json) if _latest_prior_review.found else {} }}"
+    review_prior_summary: {}
 
 - name: Set report-header identity facts from already-resolved Ansible facts
   ansible.builtin.set_fact:
@@ -287,4 +303,5 @@
         and _latest_prior_review.found
         and prior_review_sha != ''
         and prior_review_sha == review_short_sha
+        and review_prior_summary.verdict | default('') in ['READY_FOR_HUMAN_REVIEW', 'NEEDS_CHANGES']
       }}

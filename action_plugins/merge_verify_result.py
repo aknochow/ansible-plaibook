@@ -67,6 +67,13 @@ checking it at all. The ORIGINAL lens-assigned severity is preserved in
 scoring-relevant field, it doesn't erase the fact that a dispute
 happened.
 
+One limit on that: the verifier's sub-answers can raise a finding to
+Major but not to Critical. Those answers come from one model call, and
+a false finding has reached Critical through them. A lens that itself
+says Critical keeps it. Major already blocks, so the cap changes the
+label and score, not whether a review blocks. The raised value stays
+in `suggested_severity` with severity_status "capped".
+
 Axis 4 extension (expand-verify-yml-reachability-check, same handoff):
 also merges in used_static_reachability_trace -- sourced by
 verify_turn.yml/verify_finding.yml from the deterministic
@@ -234,6 +241,14 @@ def merge_verify_result(
         if finding.get("_verify_index") == verify_index:
             found = True
             original_severity = finding["severity"]
+            capped = suggested_severity == "Critical" and original_severity != "Critical"
+            final_severity = "Major" if capped else suggested_severity
+            if capped:
+                severity_status = "capped"
+            elif final_severity != original_severity:
+                severity_status = "disputed"
+            else:
+                severity_status = "confirmed"
             own_finding_id = finding.get("finding_id")
             if continues_finding_id is None:
                 continuity_status = "not-claimed"
@@ -251,9 +266,10 @@ def merge_verify_result(
                     "verification_evidence": verification_evidence,
                     "verification_rationale": verification_rationale,
                     "requires_execution": requires_execution,
-                    "severity": suggested_severity,
+                    "severity": final_severity,
                     "original_severity": original_severity,
-                    "severity_status": "disputed" if suggested_severity != original_severity else "confirmed",
+                    **({"suggested_severity": suggested_severity} if capped else {}),
+                    "severity_status": severity_status,
                     "reachability": reachability,
                     "trust_boundary": trust_boundary,
                     "worst_outcome_category": worst_outcome_category,

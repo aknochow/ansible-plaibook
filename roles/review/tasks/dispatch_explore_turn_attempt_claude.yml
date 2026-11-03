@@ -2,8 +2,22 @@
 # One dispatch attempt for current explore turn (first try or retry).
 # Retries don't consume review_explore_max_turns budget (separate resource).
 # Sets explore_turn_result and explore_dispatch_valid (usable iff valid output or graceful no-tool on non-final).
+# claude_message_module is an allowlist so playbook tests can load verify_provider_stub.
+- name: Resolve the Claude explore module name
+  ansible.builtin.set_fact:
+    _claude_explore_module: "{{ claude_message_module | default('aknochow.claude.message') }}"
+
+- name: Reject a Claude explore module outside the allowlist
+  ansible.builtin.assert:
+    that:
+      - _claude_explore_module in ['aknochow.claude.message', 'verify_provider_stub']
+    fail_msg: >-
+      claude_message_module '{{ _claude_explore_module }}' is not allowed.
+      Explore will only load aknochow.claude.message or the offline test stub.
+
 - name: "Call Claude with the current conversation, explore turn {{ explore_turn_count ~ ', attempt ' ~ (explore_attempt_number | default(1)) }}"
-  aknochow.claude.message:
+  action: "{{ _claude_explore_module }}"
+  args:
     provider: "{{ claude_provider }}"
     region: "{{ claude_vertex_region if claude_provider == 'vertex' else omit }}"
     project_id: "{{ claude_vertex_project if claude_provider == 'vertex' else omit }}"

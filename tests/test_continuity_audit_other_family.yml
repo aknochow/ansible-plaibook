@@ -1,0 +1,35 @@
+---
+# The xAI continuity task names its module with a template. Ansible resolves
+# that name before it checks `when`, so every other family must get past it.
+# An unknown family reaches the last branch of the file without a model call.
+
+- name: Continuity audit on a family other than xAI
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    agent_family: not_a_family
+    last_run_id: stubrun
+    verify_target_finding: { file: a.py, line: 1, description: new, evidence: e }
+    _continuity_claim_result: { claimed_prior_finding: { file: a.py, line: 1, description: old, evidence: e } }
+    verify_result_continues_finding_id_rationale: same line
+
+  tasks:
+    - name: Run the continuity audit
+      block:
+        - name: Include the audit
+          ansible.builtin.include_role:
+            name: review
+            tasks_from: verify_continuity_audit
+      rescue:
+        - name: Keep the failure message
+          ansible.builtin.set_fact:
+            _case_failure: "{{ ansible_failed_result.msg | default('') }}"
+
+    - name: Assert the audit got past the xAI tasks
+      ansible.builtin.assert:
+        that:
+          - "'No continuity-audit branch' in _case_failure"
+          - "'_xai_continuity_module' not in _case_failure"
+        fail_msg: "{{ _case_failure }}"

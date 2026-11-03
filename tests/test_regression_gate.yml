@@ -1,0 +1,56 @@
+---
+# Deterministic regression test for roles/review/tasks/regression_gate.yml,
+# the decision behind review_type: commit's exit code.
+#
+# Usage:
+#   ansible-playbook tests/test_regression_gate.yml
+
+- name: Test the fail_on_regressions gate
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    gate_cases:
+      - name: a Major finding fails the gate
+        verdict: NEEDS_CHANGES
+        major: [{}]
+        guardian: false
+        expected: true
+      - name: a blocking secret alone fails the gate
+        verdict: NEEDS_CHANGES
+        major: []
+        guardian: true
+        expected: true
+      - name: Minor findings alone pass the gate
+        verdict: NEEDS_CHANGES
+        major: []
+        guardian: false
+        expected: false
+      - name: a ready verdict passes the gate
+        verdict: READY_FOR_HUMAN_REVIEW
+        major: []
+        guardian: false
+        expected: false
+
+  tasks:
+    - name: Run each gate case
+      ansible.builtin.include_tasks: regression_gate_case.yml
+      loop: "{{ gate_cases }}"
+      loop_control:
+        loop_var: gate_case
+        label: "{{ gate_case.name }}"
+
+    - name: A blocking secret does not fail the gate when fail_on_regressions is off
+      ansible.builtin.include_tasks: ../roles/review/tasks/regression_gate.yml
+      vars:
+        fail_on_regressions: false
+        review_verdict: NEEDS_CHANGES
+        findings_critical: []
+        findings_major: []
+        guardian_forced_needs_changes: true
+
+    - name: Assert the gate stayed open
+      ansible.builtin.assert:
+        that:
+          - not (review_regression_gate_failed | bool)

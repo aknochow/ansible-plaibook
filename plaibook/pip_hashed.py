@@ -58,7 +58,7 @@ def uv_pip_install_hashed_argv(python: str, filename: str, *, dry_run: bool = Fa
             f"{python} has no pip module, and uv is not on PATH. "
             "A pipx install that uses uv installs provider SDKs with uv pip."
         )
-    argv = [uv, "pip", "install", "--python", python]
+    argv = [uv, "pip", "install", "--no-config", "--python", python]
     if dry_run:
         argv.append("--dry-run")
     argv += ["--require-hashes", "-r", str(hashed_requirements(filename))]

@@ -1,0 +1,159 @@
+---
+# One xAI SDK dispatch attempt for the current explore turn.
+# aknochow.xai.chat uses xai-sdk chat.stream. The shared loop stays in
+# Claude's content-block shape. to_openai_messages, to_openai_tools,
+# openai_tool_calls_with_input, and openai_response_to_message_content
+# translate that shape at this boundary.
+#
+# aknochow.xai.chat fail_json's with a message. Only a failure the shared
+# classifier calls retryable uses up an attempt. Auth, invalid-request, and
+# any unknown message end the play here with that message. xai_chat_module
+# is an allowlist so playbook tests can load the offline stub.
+
+- name: Resolve the xAI explore module name
+  ansible.builtin.set_fact:
+    _xai_explore_module: "{{ xai_chat_module | default('aknochow.xai.chat') }}"
+
+- name: Reject an xAI explore module outside the allowlist
+  ansible.builtin.assert:
+    that:
+      - _xai_explore_module in ['aknochow.xai.chat', 'xai_chat_stub']
+    fail_msg: >-
+      xai_chat_module '{{ _xai_explore_module }}' is not allowed.
+      Explore will only load aknochow.xai.chat or the offline test stub.
+
+- name: "xAI: translate the explore conversation and tool definitions"
+  ansible.builtin.set_fact:
+    _xai_explore_messages: >-
+      {{ [{'role': 'system', 'content': explore_system_prompt}]
+         + (explore_messages | to_openai_messages) }}
+    _xai_explore_tools: >-
+      {{ (explore_tools + [{
+           'name': 'report_findings',
+           'description': 'Report any additional findings discovered via exploration (empty list if none).',
+           'input_schema': explore_findings_schema
+         }]) | to_openai_tools }}
+
+- name: "xAI: show the explore request configuration"
+  ansible.builtin.debug:
+    msg:
+      - "model: {{ review_explore_xai_model }}"
+      - "max_tokens: {{ review_xai_max_tokens | string }}"
+      - "tools: [read_file, search, report_findings]"
+      - "forced_tool: {{ 'report_findings' if explore_last_turn else 'none' }}"
+
+- name: "xAI: call the explore agent, turn {{ explore_turn_count ~ ', attempt ' ~ (explore_attempt_number | default(1)) }}"
+  block:
+    - name: Remember that this xAI explore module call has not failed yet
+      ansible.builtin.set_fact:
+        _xai_explore_module_failed: false
+        _xai_explore_provider_error: ""
+
+    - name: Call xAI for this explore attempt
+      action:
+        module: "{{ _xai_explore_module }}"
+        model: "{{ review_explore_xai_model }}"
+        reasoning_effort: "{{ review_xai_lens_reasoning_effort }}"
+        max_tokens: "{{ review_xai_max_tokens }}"
+        timeout: "{{ xai_timeout }}"
+        conversation_id: "{{ (last_run_id | default('review')) ~ '-explore' }}"
+        messages: "{{ _xai_explore_messages }}"
+        tools: "{{ _xai_explore_tools }}"
+        tool_choice: "{{ {'type': 'function', 'function': {'name': 'report_findings'}} if explore_last_turn else omit }}"
+      register: _xai_explore_raw
+  rescue:
+    - name: Keep this xAI explore failure's sanitized message
+      ansible.builtin.set_fact:
+        _xai_explore_module_failed: true
+        explore_dispatch_valid: false
+        _xai_explore_provider_error: >-
+          {{ ansible_failed_result.msg | default('xAI explore module failed')
+             | xai_provider_error_message([explore_system_prompt]) }}
+
+    - name: Record the usage this failed xAI explore call billed
+      ansible.builtin.set_fact:
+        pipeline_agent_calls: >-
+          {{ pipeline_agent_calls + ([ansible_failed_result]
+             | xai_lens_usage_calls(review_org_repo ~ '#' ~ review_number, 'explore', review_explore_xai_model)) }}
+
+    - name: Classify this xAI explore failure
+      classify_verify_provider_failure:
+        msg: "{{ ansible_failed_result.msg | default('') }}"
+      register: _xai_explore_failure
+
+    - name: Re-raise authentication, invalid-request, and unknown provider failures
+      when: not (_xai_explore_failure.retryable | bool)
+      ansible.builtin.fail:
+        msg: >-
+          Explore agent ({{ review_explore_xai_model }}, agent_family=xai) provider
+          error on turn {{ explore_turn_count }}: {{ _xai_explore_provider_error }}
+
+- name: "xAI: normalize the explore response's tool calls"
+  when: not (_xai_explore_module_failed | default(false) | bool)
+  ansible.builtin.set_fact:
+    _xai_explore_tool_calls: "{{ _xai_explore_raw.tool_calls | default([]) | openai_tool_calls_with_input }}"
+
+- name: "xAI: normalize the explore result into the shared shape"
+  when: not (_xai_explore_module_failed | default(false) | bool)
+  ansible.builtin.set_fact:
+    explore_turn_result:
+      message:
+        content: "{{ _xai_explore_raw.text | default('') | openai_response_to_message_content(_xai_explore_raw.tool_calls | default([])) }}"
+        model: "{{ (_xai_explore_raw.response | default({})).model | default(review_explore_xai_model, true) }}"
+        encrypted_content: "{{ _xai_explore_raw.encrypted_content | default('') }}"
+      tool_calls: "{{ _xai_explore_tool_calls }}"
+      stop_reason: >-
+        {{ _xai_explore_raw.finish_reason | default('')
+           | xai_stop_reason(_xai_explore_tool_calls | length > 0) }}
+      usage:
+        input_tokens: "{{ [(_xai_explore_raw.usage.prompt_tokens | default(0) | int) - (_xai_explore_raw.usage.cached_tokens | default(0) | int), 0] | max }}"
+        output_tokens: "{{ _xai_explore_raw.usage.completion_tokens | default(0) | int }}"
+        cache_creation_input_tokens: 0
+        cache_read_input_tokens: "{{ _xai_explore_raw.usage.cached_tokens | default(0) | int }}"
+
+- name: Record this xAI explore attempt's usage for the pipeline-wide stats summary
+  when: not (_xai_explore_module_failed | default(false) | bool)
+  ansible.builtin.set_fact:
+    pipeline_agent_calls: >-
+      {{ pipeline_agent_calls + ([_xai_explore_raw]
+         | xai_lens_usage_calls(review_org_repo ~ '#' ~ review_number, 'explore', review_explore_xai_model)) }}
+
+- name: Check whether this xAI attempt called report_findings
+  when: not (_xai_explore_module_failed | default(false) | bool)
+  ansible.builtin.set_fact:
+    _explore_attempt_report_calls: "{{ explore_turn_result.tool_calls | selectattr('name', 'equalto', 'report_findings') | list }}"
+
+- name: Validate this xAI attempt's report_findings call, if it made one
+  when:
+    - not (_xai_explore_module_failed | default(false) | bool)
+    - _explore_attempt_report_calls | length > 0
+  block:
+    - name: Coerce this xAI attempt's findings, tolerating a JSON-encoded string
+      coerce_findings_encoding:
+        value: "{{ _explore_attempt_report_calls[0].input.findings }}"
+        label: "Explore agent"
+      register: _explore_attempt_coerce_result
+
+    - name: Mark this xAI attempt valid
+      ansible.builtin.set_fact:
+        explore_dispatch_valid: true
+  rescue:
+    - name: Mark this xAI attempt invalid (malformed report_findings call)
+      ansible.builtin.set_fact:
+        explore_dispatch_valid: false
+
+- name: Mark this xAI attempt invalid if the forced last turn did not call report_findings
+  when:
+    - not (_xai_explore_module_failed | default(false) | bool)
+    - explore_last_turn | bool
+    - _explore_attempt_report_calls | length == 0
+  ansible.builtin.set_fact:
+    explore_dispatch_valid: false
+
+- name: Mark this xAI attempt valid for a non-final turn that did not report
+  when:
+    - not (_xai_explore_module_failed | default(false) | bool)
+    - not (explore_last_turn | bool)
+    - _explore_attempt_report_calls | length == 0
+  ansible.builtin.set_fact:
+    explore_dispatch_valid: true

@@ -43,7 +43,7 @@ def test_pip_install_hashed_argv_require_hashes():
 def test_missing_pip_uses_uv_pip(monkeypatch):
     monkeypatch.setattr("plaibook.pip_hashed.shutil.which", lambda name: "/usr/bin/uv" if name == "uv" else None)
     argv = hashed_install_argv("/opt/plaibook/bin/python", "openai-requirements.txt", has_pip=False)
-    assert argv[:5] == ["/usr/bin/uv", "pip", "install", "--python", "/opt/plaibook/bin/python"]
+    assert argv[:6] == ["/usr/bin/uv", "pip", "install", "--no-config", "--python", "/opt/plaibook/bin/python"]
     assert "--require-hashes" in argv
     assert "--dry-run" not in argv
     dry = hashed_install_argv(
@@ -70,7 +70,7 @@ def test_missing_pip_without_uv_does_not_ask_for_pip(monkeypatch):
 
 def test_pinned_versions_reads_top_level_dists():
     pins = pinned_versions("openshell-requirements.txt")
-    assert pins["openshell"] == "0.1.3"
+    assert pins["openshell"].startswith("0.1.")
     openai = pinned_versions("openai-requirements.txt")
     assert "openai" in openai
     runtime = pinned_versions("sandbox-runtime-requirements.txt")

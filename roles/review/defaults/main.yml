@@ -70,7 +70,7 @@ review_agent_model: "claude-opus-4-6"
 # 'claude' stays the fallback rather than becoming a considered choice --
 # changing it is a separate decision, not a side effect of making the
 # var overridable.
-# claude | gemini | openai | claude_cli | cursor | qwen
+# claude | gemini | openai | claude_cli | cursor | xai | qwen
 agent_family: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_AGENT_FAMILY') | default('claude', true) }}"
 
 # aknochow.claude auth: no provider or project baked in on purpose --
@@ -186,9 +186,24 @@ openai_api_key: >-
        | default(lookup('ansible.builtin.env', 'GROK_API_KEY'), true)
      ) | default(omit, true) }}
 openai_timeout: "{{ lookup('ansible.builtin.env', 'ANSIBLE_OPENAI_TIMEOUT') | default(300, true) | float }}"
-# GPT-5.6 is an intentional alias: OpenAI documents that it routes to the
-# flagship gpt-5.6-sol model. Operators can select gpt-5.6-terra or
-# gpt-5.6-luna with ANSIBLE_REVIEW_OPENAI_MODEL on api.openai.com.
+# How long the async OpenAI lens job may run. The SDK makes up to three
+# attempts (max_retries 2), each up to openai_timeout, so a fixed limit
+# would kill a raised timeout or a retried request.
+openai_lens_async_seconds: "{{ ((openai_timeout | float) * 3 + 60) | int }}"
+# agent_family=xai calls aknochow.xai.chat (xai-sdk chat.stream), not the
+# OpenAI-compatible endpoint. The collection reads GROK_API_KEY, XAI_API_KEY,
+# or ANSIBLE_GROK_API_KEY. 1800s is the long-eval floor. A high-effort lens
+# on a provider-sized diff has already outlived 900s and 1200s.
+xai_timeout: "{{ lookup('ansible.builtin.env', 'ANSIBLE_XAI_TIMEOUT') | default(1800, true) | float }}"
+review_xai_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_XAI_MODEL') | default('grok-4.7', true) }}"
+review_xai_lens_reasoning_effort: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_XAI_LENS_REASONING_EFFORT') | default('high', true) }}"
+review_xai_continuity_reasoning_effort: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_XAI_CONTINUITY_REASONING_EFFORT') | default(review_xai_lens_reasoning_effort, true) }}"
+review_xai_max_tokens: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_XAI_MAX_TOKENS') | default(16384, true) | int }}"
+review_explore_xai_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_EXPLORE_XAI_MODEL') | default(review_xai_model, true) }}"
+review_verify_xai_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_VERIFY_XAI_MODEL') | default(review_xai_model, true) }}"
+# gpt-6-luna is the default because it costs a small fraction of gpt-5.6,
+# which routes to the flagship gpt-5.6-sol. Operators can select another
+# model with ANSIBLE_REVIEW_OPENAI_MODEL on api.openai.com.
 # An xAI key and no OpenAI key replaces that Claude-default fallback with
 # grok-4.7. If review_agent_model was explicitly overridden, preserve that
 # choice for the OpenAI family. ANSIBLE_REVIEW_OPENAI_MODEL and
@@ -208,7 +223,7 @@ review_openai_model: >-
              )
            )
            else (
-             'gpt-5.6'
+             'gpt-6-luna'
              if (review_agent_model | default('')) == 'claude-opus-4-6'
              else review_agent_model
            )
@@ -289,6 +304,16 @@ review_cursor_bridge_rundir: "{{ lookup('ansible.builtin.env', 'HOME') }}/.cache
 review_cursor_bridge_timeout: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_CURSOR_BRIDGE_TIMEOUT') | default(120, true) }}"
 review_cursor_sidecar_started: false
 
+# Wall-clock limit, in seconds, for each Cursor Security/Review lens
+# (the async limit on aknochow.cursor.agent). The wait for each lens
+# polls for at least this long, so the poll budget never ends before the
+# async limit does. 900 killed a grok-4.7 high lens with "Timeout
+# exceeded" in CI. A lens retry (attempt 2 and later) runs in the
+# foreground and is not bounded by this value.
+review_cursor_lens_timeout: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_CURSOR_LENS_TIMEOUT') | default(1800, true) | int }}"
+# Seconds between polls of a running Cursor lens.
+review_cursor_lens_poll_delay: 5
+
 # high by default, same "review quality is the point of this pipeline"
 # reasoning as review_gemini_thinking_level above. Unlike Gemini's
 # thinking_level, this rides on subscription usage rather than
@@ -357,7 +382,7 @@ review_run_ledger_enabled: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_RUN
 # stores have no append operation -- a read-modify-write from two
 # machines silently loses entries.
 review_run_ledger_dir: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_RUN_LEDGER_DIR') | default(lookup('env', 'HOME') ~ '/.cache/ansible-plaibook/ledger', true) }}"
-review_run_ledger_host: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_RUN_LEDGER_HOST') | default(lookup('pipe', 'hostname -s'), true) | lower | regex_replace('[^a-z0-9_.-]', '-') }}"
+review_run_ledger_host: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_RUN_LEDGER_HOST') | default(lookup('pipe', 'hostname -s 2>/dev/null || uname -n'), true) | lower | regex_replace('[^a-z0-9_.-]', '-') }}"
 review_run_ledger_path: "{{ review_run_ledger_dir }}/{{ review_run_ledger_host }}.jsonl"
 
 # Kill switch for briefing.yml's same-commit fast path: set false to
@@ -462,7 +487,9 @@ review_explore_max_turns: 3
 review_explore_tool_timeout_seconds: 120
 # Total number of read-only exploration tool calls in one target. This keeps a
 # model that repeatedly asks for searches from consuming an unbounded wall
-# clock even when each individual command stays within its timeout.
+# clock even when each individual command stays within its timeout. Reaching
+# this limit stops exploration without failing the review, flags
+# review_exploration_incomplete, and preserves lens findings.
 review_explore_max_tool_calls: 12
 # Separate from review_agent_model: explore's job (decide whether
 # something needs checking, do a simple read/grep, report) is a much
@@ -723,13 +750,10 @@ review_neutralization_org_patterns: []
 # pipeline_stats.yml. gemini-3.5-flash's rate was confirmed live
 # 2026-08-19 from an external pricing table, since this repo has no
 # rate of its own yet.
-# gemini-3.7-flash (the model actually used for free-tier dogfooding,
-# see review_gemini_model) has NO sourced rate here -- it was not
-# reliably found on a pricing page during this pass, so it's
-# deliberately absent rather than guessed; a model missing from this
-# table is excluded from the cost total and flagged in the final
-# summary (compute_pipeline_cost.py's unpriced_models), not silently
-# costed as $0. Add a real rate here once sourced.
+# A model missing from this table is excluded from the cost total and
+# flagged in the final summary (compute_pipeline_cost.py's
+# unpriced_models), not silently costed as $0. thinking_per_million is
+# for a provider that reports thinking apart from output.
 #
 # claude_pricing is kept as an alias to this same table so anything
 # still reading the old name (grepped repo-wide; nothing in this repo
@@ -765,6 +789,29 @@ agent_pricing: &agent_pricing
     input_per_million: 0.20
     output_per_million: 1.20
     cache_read_per_million: 0.02
+  # https://developers.openai.com/api/docs/pricing, read 2026-10-31.
+  # Standard tier under 272K input tokens. A single call above that is
+  # billed at about double and is not modeled here.
+  gpt-6-luna:
+    input_per_million: 0.10
+    output_per_million: 0.50
+    cache_read_per_million: 0.01
+  gpt-6-sol:
+    input_per_million: 2.00
+    output_per_million: 10.00
+    cache_read_per_million: 0.20
+  gpt-6.1-sol:
+    input_per_million: 2.00
+    output_per_million: 10.00
+    cache_read_per_million: 0.10
+  gpt-6.1-terra:
+    input_per_million: 1.00
+    output_per_million: 5.00
+    cache_read_per_million: 0.05
+  gpt-6-astra:
+    input_per_million: 10.00
+    output_per_million: 50.00
+    cache_read_per_million: 1.00
   # xAI API pricing for grok-4.7, the Cursor default and the
   # OpenAI-compatible default. Same shape as the GPT rows: one tier,
   # cached input on cache_read, no guessed cache-write rate. Short
@@ -786,6 +833,7 @@ agent_pricing: &agent_pricing
   gemini-3.5-flash:
     input_per_million: 1.50
     output_per_million: 9.00
+    thinking_per_million: 9.00
   # gemini-3.6-flash and 3.7-flash are on PROMOTIONAL pricing through
   # 2026-12-31 ($0.75/$3.75); both double to $1.50/$7.50 on 2027-01-01.
   # Recorded at the promotional rate because agent_pricing drives what a
@@ -803,9 +851,18 @@ agent_pricing: &agent_pricing
   gemini-3.6-flash:
     input_per_million: 0.75
     output_per_million: 3.75
+    thinking_per_million: 3.75
   gemini-3.7-flash:
     input_per_million: 0.75
     output_per_million: 3.75
+    thinking_per_million: 3.75
+  # https://ai.google.dev/gemini-api/docs/pricing, read 2026-10-31. Same
+  # promotional rule: $1.50/$7.50/$0.15 from 2027-01-01.
+  gemini-3.8-flash:
+    input_per_million: 0.75
+    output_per_million: 3.75
+    thinking_per_million: 3.75
+    cache_read_per_million: 0.075
 
 claude_pricing: *agent_pricing
 
@@ -816,3 +873,10 @@ claude_pricing: *agent_pricing
 # and resolve_target_commit.yml can't drift out of sync with each
 # other.
 git_empty_tree_sha: "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+# A clone is retried only when git reports a network failure, because a missing
+# repo or a bad credential fails the same way every time.
+review_clone_transient_pattern: >-
+  Could not resolve host|Could not resolve proxy|Couldn't connect to server|Temporary failure in name resolution|Failed to connect|Connection timed out|Connection reset|The requested URL returned error: 50[234]|early EOF|TLS connection was non-properly terminated
+review_clone_retries: 3
+review_clone_retry_delay: 10

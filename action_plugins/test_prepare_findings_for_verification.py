@@ -319,3 +319,23 @@ def test_action_module_fails_clearly_on_invalid_security_sensitive_pattern():
     )
     assert result["failed"] is True
     assert "(unbalanced" in result["msg"]
+
+
+@pytest.mark.parametrize(
+    "finding",
+    [
+        pytest.param({"severity": "Critical", "lens": "Quality"}, id="critical"),
+        pytest.param({"severity": "Major", "lens": "Quality"}, id="major"),
+        pytest.param({"severity": "Minor", "lens": "Security"}, id="minor-security-lens"),
+    ],
+)
+def test_already_refuted_finding_is_not_verify_eligible(finding):
+    refuted = {
+        "file": "a.py", "line": 1, "evidence": "e", "evidence_status": "refuted",
+        "verification_rationale": "provenance rationale", **finding,
+    }
+    prepared = prepare_findings_for_verification([refuted], VERIFY_SEVERITIES, SECURITY_PATTERN)[0]
+    assert prepared["_verify_eligible"] is False
+    assert prepared["finding_id"] is None
+    assert prepared["evidence_status"] == "refuted"
+    assert prepared["verification_rationale"] == "provenance rationale"

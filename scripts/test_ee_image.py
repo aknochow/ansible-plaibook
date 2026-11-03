@@ -26,10 +26,11 @@ EE = ROOT / "execution-environment.yml"
 README = ROOT / "README.md"
 PR = ROOT / ".github" / "workflows" / "ee.yml"
 PUBLISH = ROOT / ".github" / "workflows" / "ee-publish.yml"
+RESCAN = ROOT / ".github" / "workflows" / "ee-rescan.yml"
 CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 BASE = (
     "registry.access.redhat.com/hi/python:3.12-builder"
-    "@sha256:aa64794afb234eac11f21e2ca7c8430753f268a1a755d16f7f9c88ca5975bc33"
+    "@sha256:d0c20fb11396ef2486bb80ee94fb82fd0a4c989d51ccb04d65754be5dbd6044b"
 )
 
 
@@ -74,14 +75,15 @@ def test_execution_environment_builds_from_the_pin_file():
     for pin in (
         "ansible-core==2.19.14",
         "ansible-runner==2.4.3",
-        "anthropic[vertex]==1.13.0",
-        "claude-agent-sdk==0.2.165",
-        "google-genai==2.29.0",
-        "openai==3.28.0",
-        "cursor-sdk==1.0.37",
-        "openshell==0.1.3",
+        "anthropic[vertex]==2.3.0",
+        "claude-agent-sdk==0.2.176",
+        "google-genai==2.34.0",
+        "openai==3.42.0",
+        "xai-sdk==1.21.0",
     ):
         assert pin in locked
+    assert re.search(r"(?m)^openshell==0\.1\.\d+ ", locked)
+    assert "cursor-sdk" not in locked
     assert "--hash=sha256:" in locked
     assert "gh-cli.repo" not in text
     assert "65d55875faa3281959676d91da15a9380583281586ac31bbd3d32b7924a9f4d2" in text
@@ -242,30 +244,45 @@ def _assert_trivy_gate(job: dict) -> None:
     assert "trivyignores" not in report
 
 
-def test_trivyignore_covers_the_unfixed_vendor_highs():
+def test_every_ee_build_verifies_the_base_signature_first():
+    key = (ROOT / "execution-environment-redhat-key.pem").read_text(encoding="utf-8")
+    assert key.startswith("-----BEGIN PUBLIC KEY-----\n")
+    script = (ROOT / "scripts" / "ee_verify_base.sh").read_text(encoding="utf-8")
+    assert "--key \"${root}/execution-environment-redhat-key.pem\"" in script
+    for path, job in ((PR, "build"), (PUBLISH, "build"), (RESCAN, "base")):
+        names = [step["name"] for step in _load(path)["jobs"][job]["steps"]]
+        verify = names.index("Verify the base image signature")
+        assert names.index("Install cosign") < verify
+        if "Build image" in names:
+            assert verify < names.index("Build image")
+    for path in (PR, PUBLISH):
+        paths = _load(path)["on"]["pull_request" if path == PR else "push"]["paths"]
+        assert "execution-environment-redhat-key.pem" in paths
+        assert "scripts/ee_verify_base.sh" in paths
+
+
+def test_rescan_gates_the_published_image_daily():
+    document = _load(RESCAN)
+    assert document["permissions"] == {}
+    assert "schedule" in document["on"]
+    assert "pull_request" not in document["on"]
+    scan = document["jobs"]["scan"]
+    assert scan["permissions"] == {"contents": "read", "security-events": "write"}
+    assert scan["strategy"]["matrix"]["tag"] == ["latest", "release"]
+    _assert_trivy_gate(scan)
+    base = document["jobs"]["base"]
+    assert base["permissions"] == {"contents": "read"}
+    assert "execution-environment.yml" in RESCAN.read_text(encoding="utf-8")
+
+
+def test_trivyignore_covers_only_the_pip_vendored_setuptools():
     document = _load(ROOT / ".trivyignore.yaml")
     findings = document["vulnerabilities"]
     ids = {item["id"] for item in findings}
-    assert ids == {
-        "CVE-2026-19481",
-        "CVE-2026-12151",
-        "CVE-2026-1526",
-        "CVE-2026-2229",
-        "CVE-2026-109383",
-        "CVE-2026-87018",
-        "CVE-2023-54404",
-        "GHSA-6v7p-g79w-8964",
-        "CVE-2026-114613",
-        "CVE-2025-47273",
-        "CVE-2026-97687",
-        "CVE-2026-97689",
-        "CVE-2026-78669",
-        "CVE-2026-78667",
-        "CVE-2026-97031",
-    }
+    assert ids == {"CVE-2025-47273"}
     for item in findings:
-        assert item["statement"] == "upstream-vendored, no fix we can apply"
-        assert str(item["expired_at"]) == "2026-11-09"
+        assert item["statement"] == "vulnerable module not present in the image"
+        assert str(item["expired_at"]) == "2026-11-30"
         assert item["purls"]
 
 
@@ -303,6 +320,7 @@ def test_git_pins_reads_collection_requirements():
     urls = [url for url, _sha in pins]
     assert "https://github.com/aknochow/ansible-cursor.git" in urls
     assert "https://github.com/aknochow/ansible-gemini.git" in urls
+    assert "https://github.com/aknochow/ansible-xai.git" in urls
     assert all(len(sha) >= 7 for _url, sha in pins)
     assert len(pins) >= 8
 

@@ -99,6 +99,26 @@
           - review_summary_path == run1_canonical_summary_path
         fail_msg: "Test setup bug: run 1 and run 2 didn't collide on the same canonical path as intended"
 
+    - name: Stat every findings and summary file both runs wrote
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ review_findings_path }}"
+        - "{{ run1_findings_run_scoped_path }}"
+        - "{{ review_findings_run_scoped_path }}"
+        - "{{ review_summary_path }}"
+        - "{{ run1_summary_run_scoped_path }}"
+        - "{{ review_summary_run_scoped_path }}"
+      register: _persisted_stats
+
+    - name: Assert only the owner can read the persisted findings
+      ansible.builtin.assert:
+        that:
+          - _persisted_stats.results | map(attribute='stat.mode') | unique | list == ['0600']
+        fail_msg: >-
+          Every persisted findings.md and summary.json should be 0600, got
+          {{ _persisted_stats.results | map(attribute='stat.mode') | list }}
+
     - name: Read the canonical (shared, last-write-wins) summary.json
       ansible.builtin.slurp:
         path: "{{ review_summary_path }}"

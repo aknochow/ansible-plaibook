@@ -38,18 +38,21 @@ FAMILY_REQUIREMENTS: dict[str, tuple[tuple[str, str], ...]] = {
     ),
     "gemini": (("google.genai", "google-genai"),),
     "cursor": (("cursor_sdk", "cursor-sdk"),),
+    "xai": (("xai_sdk", "xai-sdk"),),
 }
 FAMILY_HASHED_FILE: dict[str, str] = {
     "openai": "openai-requirements.txt",
     "claude": "claude-requirements.txt",
     "gemini": "gemini-requirements.txt",
     "cursor": "cursor-requirements.txt",
+    "xai": "xai-requirements.txt",
 }
 _FAMILY_IN: dict[str, str] = {
     "openai": "openai.in",
     "claude": "claude.in",
     "gemini": "gemini.in",
     "cursor": "cursor.in",
+    "xai": "xai.in",
 }
 
 
@@ -223,8 +226,11 @@ def _module_present(python: str, name: str) -> bool:
         f"sys.exit(0 if importlib.util.find_spec({name!r}) else 1)\n"
     )
     if _same_executable(python):
+        import importlib
         import importlib.util
 
+        # A pip install in this process leaves the import finders' caches stale.
+        importlib.invalidate_caches()
         return importlib.util.find_spec(name) is not None
     completed = _run([python, "-c", probe], timeout=60)
     return completed.returncode == 0

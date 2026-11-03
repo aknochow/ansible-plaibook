@@ -28,7 +28,7 @@ from plaibook.collections import (
     require_commit_sha,
     requirement_collection_keys,
 )
-from plaibook.playbook import run_ansible_playbook
+from plaibook.playbook import async_dir_override, run_ansible_playbook
 
 GIT_TEST_TIMEOUT = 30
 # ai-guardian credentials-in-git-url ignores this placeholder; a literal
@@ -815,6 +815,29 @@ def test_run_ansible_playbook_sets_isolated_collections_path(tmp_path, monkeypat
     assert info.st_uid == os.geteuid()
     assert (info.st_mode & 0o777) == 0o700
     assert Path(env["ANSIBLE_CONFIG"]) == tmp_path / "ansible.cfg"
+
+
+def test_async_dir_override_only_when_home_is_not_the_account_home(tmp_path, monkeypatch):
+    account = tmp_path / "account"
+    other = tmp_path / "other"
+    account.mkdir()
+    other.mkdir()
+    monkeypatch.setattr(
+        "plaibook.playbook.pwd.getpwuid",
+        lambda _uid: SimpleNamespace(pw_dir=str(account)),
+    )
+    assert async_dir_override({"HOME": str(account)}) is None
+    assert async_dir_override({"HOME": str(other)}) == str(other / ".ansible_async")
+    assert async_dir_override({"HOME": str(other), "ANSIBLE_ASYNC_DIR": "/set"}) is None
+    assert async_dir_override({}) is None
+
+
+def test_async_dir_override_when_uid_has_no_account(tmp_path, monkeypatch):
+    def missing(_uid):
+        raise KeyError(_uid)
+
+    monkeypatch.setattr("plaibook.playbook.pwd.getpwuid", missing)
+    assert async_dir_override({"HOME": str(tmp_path)}) == str(tmp_path / ".ansible_async")
 
 
 def test_run_ansible_playbook_does_not_keep_slash_tmp(tmp_path, monkeypatch):

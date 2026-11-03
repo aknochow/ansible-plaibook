@@ -2,7 +2,7 @@ name: plai
 
 # Runs plai review on this runner after the other checks on the pull
 # request have passed, then posts one pull request review. Does not call
-# a controller. post_results stays false. The provider is cursor. Sibling
+# a controller. post_results stays false. The provider is openai. Sibling
 # repositories must call this file at a full commit SHA. Checkout is a
 # fixed commit of this repository, written
 # in this file. Callers do not pass a ref. Values that reach the shell
@@ -14,12 +14,17 @@ name: plai
 # the GitHub App installation token, and only in the publish step, after
 # the agent has finished. That step runs a copy of the publisher taken
 # before the agent starts. The review step installs OpenShell from the
-# pinned v0.1.2 installer, which starts a local gateway. The community
+# installer pinned in .github/openshell-pins.env, which starts a local gateway. The community
 # sandbox image is pinned by digest. It embeds a policy this gateway
-# cannot activate, so the job sets a global filesystem policy with no
-# network rules, then runs plai review with that image.
-# CURSOR_API_KEY stays in that step because the
-# Cursor SDK call runs on the controller. The job token is read-only and
+# cannot activate, so the job and review.yml give the sandbox a filesystem policy with
+# no network rules. A boolean
+# workflow_call input, use_sandbox (default true), lets an owner-started
+# CI review test the pipeline without OpenShell to measure duration.
+# When false on workflow_dispatch, the job skips OpenShell and passes
+# --no-sandbox to plai review. Trigger events other than workflow_dispatch
+# always retain the sandbox.
+# OPENAI_API_KEY stays in that step because the
+# OpenAI call runs on the controller. The job token is read-only and
 # is used to fetch the pull request. Tool execution runs in the sandbox.
 # The review job sets environment plaibook-review. A caller job cannot:
 # GitHub rejects environment on a job that uses a reusable workflow.
@@ -36,8 +41,14 @@ name: plai
 
 on:
   workflow_call:
+    inputs:
+      use_sandbox:
+        description: Run review tool calls inside an OpenShell sandbox
+        type: boolean
+        default: true
+        required: false
     secrets:
-      CURSOR_API_KEY:
+      OPENAI_API_KEY:
         required: true
       PLAI_GITHUB_APP_ID:
         required: true
@@ -70,7 +81,7 @@ jobs:
           # the pull request head. Move this to a commit that contains the
           # review code, then point plai-review.yml at the commit that
           # contains this line.
-          ref: "b9fee9a904425934522a2d9f333c11f3701892bd"
+          ref: "f5afa67776e555534b2f55d589e8fcf4e71d14c4"
           persist-credentials: false
 
       - name: Resolve the pull request
@@ -134,7 +145,9 @@ jobs:
     needs: wait
     if: always() && needs.wait.result != 'cancelled'
     runs-on: ubuntu-26.04-arm
-    timeout-minutes: 90
+    # A review job takes about 3 minutes, sandbox included. A hung one
+    # fails here instead of holding the check.
+    timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: read
@@ -144,8 +157,6 @@ jobs:
     environment:
       name: plaibook-review
       deployment: false
-    env:
-      SANDBOX_IMAGE: ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e
     steps:
       - name: Fail when this run is not a review of passed checks
         if: >-
@@ -164,20 +175,23 @@ jobs:
           # the pull request head. Move this to a commit that contains the
           # review code, then point plai-review.yml at the commit that
           # contains this line.
-          ref: "b9fee9a904425934522a2d9f333c11f3701892bd"
+          ref: "f5afa67776e555534b2f55d589e8fcf4e71d14c4"
           persist-credentials: false
 
-      - name: Require CURSOR_API_KEY
+      - name: Load the OpenShell pins
+        run: grep -E '^[A-Z0-9_]+=' .github/openshell-pins.env >> "$GITHUB_ENV"
+
+      - name: Require OPENAI_API_KEY
         id: provider
         env:
-          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -euo pipefail
-          if [ -z "${CURSOR_API_KEY}" ]; then
-            echo "CURSOR_API_KEY is unset. No review ran."
+          if [ -z "${OPENAI_API_KEY}" ]; then
+            echo "OPENAI_API_KEY is unset. No review ran."
             exit 1
           fi
-          echo "CURSOR_API_KEY is present"
+          echo "OPENAI_API_KEY is present"
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - name: Install uv
@@ -208,61 +222,11 @@ jobs:
             sha256sum scripts/github_app_token.py scripts/github_pr_review.py plaibook/__init__.py plaibook/finding_suggestions.py > checksums.txt
           )
 
-      - name: Install OpenShell
-        if: steps.provider.outputs.ready == 'true'
-        run: |
-          set -euo pipefail
-          installer="$RUNNER_TEMP/openshell-install.sh"
-          curl -fsSL "https://raw.githubusercontent.com/NVIDIA/OpenShell/6648bd0c290efbc41ba131ee9831ee45cd431f94/install.sh" -o "$installer"
-          echo "5c98a86a4b811c471b212219cb2a62d458244220ffa71ac8e3baf3700b17b871  $installer" | sha256sum -c -
-          OPENSHELL_VERSION=v0.1.2 sh "$installer"
-          if [ -x "$HOME/.local/bin/openshell" ]; then
-            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-            export PATH="$HOME/.local/bin:$PATH"
-          fi
-          openshell status
-
-      - name: Replace the image policy and pull the review sandbox
-        if: steps.provider.outputs.ready == 'true'
-        env:
-          OPENSHELL_WORKSPACE: default
-          OPENSHELL_PROVISION_TIMEOUT: "180"
-        run: |
-          set -euo pipefail
-          # The pinned sandbox image embeds /etc/openshell/policy.yaml. On
-          # this gateway that policy stays ConfigurationInvalid until the
-          # 300s repair window expires. A global policy with no network
-          # rules replaces it. Model calls stay on the controller.
-          cat > "$RUNNER_TEMP/plaibook-sandbox-policy.yaml" <<'EOF'
-          version: 1
-          filesystem_policy:
-            include_workdir: true
-            read_only:
-              - /usr
-              - /lib
-              - /bin
-              - /proc
-              - /dev/urandom
-              - /etc
-              - /var/log
-            read_write:
-              - /sandbox
-              - /tmp
-              - /dev/null
-          landlock:
-            compatibility: best_effort
-          EOF
-          openshell policy set --global --yes --policy "$RUNNER_TEMP/plaibook-sandbox-policy.yaml"
-          if ! timeout 300 openshell sandbox create \
-            --name plaibook-image-warm \
-            --from "$SANDBOX_IMAGE" \
-            --detach \
-            --no-tty; then
-            openshell sandbox get plaibook-image-warm || true
-            journalctl --user -u openshell-gateway --no-pager -n 40 || true
-            exit 1
-          fi
-          openshell sandbox delete plaibook-image-warm
+      - name: Start OpenShell and pull the review sandbox
+        if: >-
+          steps.provider.outputs.ready == 'true' &&
+          (inputs.use_sandbox || github.event_name != 'workflow_dispatch')
+        run: bash scripts/ci_openshell_up.sh
 
       - name: Run plai review
         id: plai
@@ -271,8 +235,9 @@ jobs:
           # This job's token cannot write the pull request.
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
-          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
-          ANSIBLE_REVIEW_AGENT_FAMILY: cursor
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANSIBLE_REVIEW_AGENT_FAMILY: openai
+          ANSIBLE_REVIEW_OPENAI_MODEL: gpt-6-luna
           # OpenShell 0.1 rejects an empty workspace. The CLI default is "default".
           OPENSHELL_WORKSPACE: default
           # Ansible's log is Python stderr. Without this the step stays blank
@@ -280,6 +245,8 @@ jobs:
           PYTHONUNBUFFERED: "1"
           REVIEW_REPO: ${{ needs.wait.outputs.repo }}
           REVIEW_PR: ${{ needs.wait.outputs.pr }}
+          USE_SANDBOX: ${{ inputs.use_sandbox }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           case "$REVIEW_REPO" in
@@ -289,6 +256,13 @@ jobs:
           case "$REVIEW_PR" in
             *[!0-9]*|"") echo "pull request number must be digits" >&2; exit 1 ;;
           esac
+          sandbox_args=(
+            -e sandbox_wait_timeout=600
+            -e sandbox_image="$SANDBOX_IMAGE"
+          )
+          if [ "${USE_SANDBOX:-true}" = "false" ] && [ "${EVENT_NAME:-}" = "workflow_dispatch" ]; then
+            sandbox_args=(--no-sandbox)
+          fi
           set +e
           "$RUNNER_TEMP/plai-venv/bin/plai" review \
             "$REVIEW_REPO/$REVIEW_PR" \
@@ -296,8 +270,7 @@ jobs:
             --force \
             -v \
             -e review_require_ci_passing=false \
-            -e sandbox_wait_timeout=600 \
-            -e sandbox_image="$SANDBOX_IMAGE" \
+            "${sandbox_args[@]}" \
             > "${RUNNER_TEMP}/plai-review.json"
           rc=$?
           set -e

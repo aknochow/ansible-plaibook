@@ -37,7 +37,7 @@ from plaibook.runtime import interpreter_is_externally_managed
 
 # Matches aknochow.openshell (OPENSHELL_SDK_SPEC) and the 0.1 gateway
 # started by the upstream installer. 0.0.116 encodes CreateSandboxRequest
-# fields that gateway rejects. 0.1.3 is current PyPI; <0.2 is the ceiling.
+# fields that gateway rejects. <0.2 is the ceiling.
 SDK_SPEC = "openshell>=0.1.3,<0.2"
 HASHED_REQUIREMENTS = "openshell-requirements.txt"
 RUNTIME_HASHED_REQUIREMENTS = "sandbox-runtime-requirements.txt"
@@ -102,10 +102,34 @@ def protobuf_runtime_message(exc: BaseException) -> str:
     )
 
 
-def sdk_satisfies() -> bool:
-    """True when this process can import SandboxClient from an in-range SDK.
+def pinned_sdk_version() -> tuple[int, int, int] | None:
+    """The openshell release in ``HASHED_REQUIREMENTS``, or None if absent."""
+    from plaibook.pip_hashed import pinned_versions
 
-    A protobuf gencode/runtime mismatch raises OpenshellSdkError. It is
+    try:
+        pinned = pinned_versions(HASHED_REQUIREMENTS).get("openshell")
+    except OSError:
+        return None
+    return release_tuple(pinned) if pinned else None
+
+
+def installed_version_current(version: str) -> bool:
+    """True when *version* is in range and not older than the hashed pin.
+
+    An in-range copy older than the pin, such as 0.1.4 after plaibook
+    moved to 0.1.6, is upgraded rather than kept.
+    """
+    if not version_satisfies(version):
+        return False
+    pinned = pinned_sdk_version()
+    return pinned is None or release_tuple(version) >= pinned
+
+
+def sdk_satisfies() -> bool:
+    """True when this process can import SandboxClient from a current SDK.
+
+    Current means in range and not older than the hashed pin. A
+    protobuf gencode/runtime mismatch raises OpenshellSdkError. It is
     not reported as a missing install.
     """
     try:
@@ -124,7 +148,7 @@ def sdk_satisfies() -> bool:
         installed = version("openshell")
     except PackageNotFoundError:
         return False
-    return version_satisfies(installed)
+    return installed_version_current(installed)
 
 
 def interpreter_version(python: str) -> tuple[int, int, int]:
@@ -362,6 +386,16 @@ def ensure_openshell_sdk(
     if _interpreter_satisfies(exe):
         return
     if interpreter_is_externally_managed(exe):
+        installed = _installed_version(exe)
+        if installed and version_satisfies(installed) and _sdk_importable(exe):
+            # pip cannot replace it here. An in-range copy still works.
+            out = stderr if stderr is not None else sys.stderr
+            out.write(
+                f"OpenShell SDK {installed} for {exe} is older than plaibook's pin and "
+                "this interpreter is externally managed, so it was kept.\n"
+            )
+            out.flush()
+            return
         raise OpenshellSdkError(
             f"OpenShell SDK ({SDK_SPEC}) is not installed for {exe}. "
             "Reinstall plaibook with pipx (or into a virtualenv). "
@@ -550,6 +584,39 @@ def _interpreter_satisfies(python: str) -> bool:
         )
         raise OpenshellSdkError(detail)
     return completed.returncode == 0
+
+
+def _sdk_importable(python: str) -> bool:
+    """True when *python* can import openshell.SandboxClient."""
+    if _same_executable(python):
+        try:
+            from openshell import SandboxClient
+        except Exception:
+            return False
+        return SandboxClient is not None
+    completed = _run(
+        [python, "-c", "from openshell import SandboxClient; raise SystemExit(SandboxClient is None)"],
+        timeout=60,
+    )
+    return completed.returncode == 0
+
+
+def _installed_version(python: str) -> str | None:
+    """The installed openshell version for *python*, or None."""
+    if _same_executable(python):
+        from importlib.metadata import PackageNotFoundError, version
+
+        try:
+            return version("openshell")
+        except PackageNotFoundError:
+            return None
+    completed = _run(
+        [python, "-c", "import importlib.metadata as m; print(m.version('openshell'))"],
+        timeout=60,
+    )
+    if completed.returncode != 0:
+        return None
+    return completed.stdout.strip() or None
 
 
 def _package_present(python: str) -> bool:

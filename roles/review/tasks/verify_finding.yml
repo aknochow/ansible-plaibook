@@ -13,6 +13,14 @@
 - name: Generate a per-run prompt nonce for the dispatch canary
   ansible.builtin.include_tasks: generate_prompt_nonce.yml
 
+# Check for recurring boolean-stringification claim pattern. Overly broad matching
+# must not refute findings without a check; a match provides a prompt note
+# for the normal verify turn.
+- name: Check whether this finding matches the recurring boolean-stringification hallucination shape
+  detect_boolean_stringification_hallucination:
+    finding: "{{ verify_target_finding }}"
+  register: _boolean_stringification_check
+
 - name: Render the verify agent system prompt for this finding
   ansible.builtin.set_fact:
     verify_system_prompt: >-
@@ -20,6 +28,7 @@
          + ('_claude_cli' if agent_family in ['claude_cli', 'cursor'] else '') + '.j2') }}
   vars:
     finding: "{{ verify_target_finding }}"
+    boolean_stringification_detected: "{{ _boolean_stringification_check.is_hallucination | default(false) }}"
 
 - name: Dump this finding's rendered verify prompt (debug mode only)
   when: review_debug_dump_prompts | bool
@@ -41,37 +50,6 @@
     verify_turn_count: 0
     # Deterministic, not model self-report; set only on successful trace execution.
     verify_reachability_tool_used: false
-
-# Deterministic short-circuit for recurring boolean-stringification hallucination pattern.
-# Empirically disproven multiple times. Skip LLM call when matched; see detect_boolean_stringification_hallucination.py.
-- name: Check whether this finding matches the recurring boolean-stringification hallucination shape
-  detect_boolean_stringification_hallucination:
-    finding: "{{ verify_target_finding }}"
-  register: _boolean_stringification_check
-
-- name: Deterministically refute a matched boolean-stringification hallucination claim
-  when: _boolean_stringification_check.is_hallucination
-  ansible.builtin.set_fact:
-    review_verify_done: true
-    verify_result_status: "refuted"
-    verify_result_evidence: "{{ verify_target_finding.evidence | default('') }}"
-    verify_result_rationale: >-
-      Deterministically refuted: boolean-stringification hallucination.
-      Single-expression Jinja templates and bare YAML booleans keep native Python type;
-      only dot-accessed integers are stringified. Empirically disproven multiple times.
-    verify_result_requires_execution: false
-    # No real severity assessment; finding's own severity passes through unchanged.
-    verify_result_severity_assessed: false
-    verify_result_reachability: "theoretical-only"
-    verify_result_trust_boundary: "unclear"
-    verify_result_worst_outcome_category: "cosmetic-style"
-    verify_result_silent_failure: false
-    verify_result_used_static_reachability_trace: false
-    # No continuity claim; short-circuit skips turn loop. Plain YAML literal for safe None preservation.
-    verify_result_continues_finding_id_rationale: >-
-      N/A -- deterministically refuted without a model call.
-    verify_result_claim_input:
-      continues_finding_id: null
 
 # Cheap keyword gate for reachability claims. False negatives: agent can still call tool voluntarily.
 # False positives: cost one extra harmless tool call. Only gates FORCED trace_reachability.
