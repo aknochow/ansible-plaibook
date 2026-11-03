@@ -36,7 +36,7 @@ version: 3
 
 images:
   base_image:
-    name: registry.access.redhat.com/hi/python:3.12-builder@sha256:aa64794afb234eac11f21e2ca7c8430753f268a1a755d16f7f9c88ca5975bc33
+    name: registry.access.redhat.com/hi/python:3.12-builder@sha256:d0c20fb11396ef2486bb80ee94fb82fd0a4c989d51ccb04d65754be5dbd6044b
 
 options:
   package_manager_path: /usr/bin/dnf

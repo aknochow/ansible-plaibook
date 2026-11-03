@@ -26,10 +26,11 @@ EE = ROOT / "execution-environment.yml"
 README = ROOT / "README.md"
 PR = ROOT / ".github" / "workflows" / "ee.yml"
 PUBLISH = ROOT / ".github" / "workflows" / "ee-publish.yml"
+RESCAN = ROOT / ".github" / "workflows" / "ee-rescan.yml"
 CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 BASE = (
     "registry.access.redhat.com/hi/python:3.12-builder"
-    "@sha256:aa64794afb234eac11f21e2ca7c8430753f268a1a755d16f7f9c88ca5975bc33"
+    "@sha256:d0c20fb11396ef2486bb80ee94fb82fd0a4c989d51ccb04d65754be5dbd6044b"
 )
 
 
@@ -243,6 +244,20 @@ def _assert_trivy_gate(job: dict) -> None:
     assert "trivyignores" not in report
 
 
+def test_rescan_gates_the_published_image_daily():
+    document = _load(RESCAN)
+    assert document["permissions"] == {}
+    assert "schedule" in document["on"]
+    assert "pull_request" not in document["on"]
+    scan = document["jobs"]["scan"]
+    assert scan["permissions"] == {"contents": "read", "security-events": "write"}
+    assert scan["strategy"]["matrix"]["tag"] == ["latest", "release"]
+    _assert_trivy_gate(scan)
+    base = document["jobs"]["base"]
+    assert base["permissions"] == {"contents": "read"}
+    assert "execution-environment.yml" in RESCAN.read_text(encoding="utf-8")
+
+
 def test_trivyignore_covers_the_unfixed_vendor_highs():
     document = _load(ROOT / ".trivyignore.yaml")
     findings = document["vulnerabilities"]
@@ -251,22 +266,16 @@ def test_trivyignore_covers_the_unfixed_vendor_highs():
         "CVE-2026-19481",
         "CVE-2026-12151",
         "CVE-2026-1526",
-        "CVE-2026-2229",
         "CVE-2026-109383",
         "CVE-2026-87018",
-        "CVE-2023-54404",
-        "GHSA-6v7p-g79w-8964",
-        "CVE-2026-114613",
         "CVE-2025-47273",
-        "CVE-2026-97687",
-        "CVE-2026-97689",
-        "CVE-2026-78669",
-        "CVE-2026-78667",
-        "CVE-2026-97031",
     }
     for item in findings:
-        assert item["statement"] == "upstream-vendored, no fix we can apply"
-        assert str(item["expired_at"]) == "2026-11-09"
+        assert item["statement"] in {
+            "upstream-vendored, no fix we can apply",
+            "vulnerable module not present in the image",
+        }
+        assert str(item["expired_at"]) == "2026-11-30"
         assert item["purls"]
 
 

@@ -1,0 +1,110 @@
+name: Rescan published execution environment
+
+# A publish scans the image once. Advisories published after that need a
+# rescan of the image users pull. This runs daily against :latest and the
+# newest release tag, uploads the full report to code scanning, and fails
+# on a fixable high or critical that .trivyignore.yaml does not cover. It
+# also fails when the Hummingbird base has a newer digest than the pin.
+
+on:
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ee-rescan
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/aknochow/plaibook-ee
+
+jobs:
+  scan:
+    name: "Rescan EE (${{ matrix.tag }})"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: [latest, release]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Resolve image reference
+        id: ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ matrix.tag }}
+        run: |
+          set -euo pipefail
+          if [ "$TAG" = "release" ]; then
+            version="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+            TAG="${version#v}"
+          fi
+          printf 'image=%s:%s\n' "$IMAGE" "$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Report vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          image-ref: ${{ steps.ref.outputs.image }}
+          format: sarif
+          output: trivy.sarif
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          exit-code: "0"
+          ignore-unfixed: "false"
+
+      - name: Upload to code scanning
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370  # v4.39.1
+        with:
+          sarif_file: trivy.sarif
+          category: ee-${{ matrix.tag }}
+
+      - name: Fail on fixable high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          image-ref: ${{ steps.ref.outputs.image }}
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: "true"
+          trivyignores: .trivyignore.yaml
+
+  base:
+    name: Check the Hummingbird base digest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Compare the pin with the registry
+        run: |
+          set -euo pipefail
+          ref="$(sed -n 's/^ *name: \(registry\.access\.redhat\.com\/hi\/python:[^@]*\)@\(sha256:[0-9a-f]\{64\}\)$/\1 \2/p' execution-environment.yml)"
+          read -r image pinned <<< "$ref"
+          repo="${image#registry.access.redhat.com/}"
+          tag="${repo##*:}"
+          repo="${repo%:*}"
+          current="$(curl -fsSI \
+            -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+            "https://registry.access.redhat.com/v2/${repo}/manifests/${tag}" \
+            | tr -d '\r' | sed -n 's/^docker-content-digest: //Ip')"
+          if [ -z "$current" ]; then
+            echo "::error::no digest for ${image}"
+            exit 1
+          fi
+          if [ "$current" != "$pinned" ]; then
+            echo "::error::${image} is ${current}; execution-environment.yml pins ${pinned}"
+            exit 1
+          fi
+          echo "${image} is still ${pinned}"
