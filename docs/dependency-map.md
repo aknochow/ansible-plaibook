@@ -162,17 +162,17 @@ are not plaibook dependencies.
 | Id | What | SHA | Where |
 |---|---|---|---|
 | `review.caller` | `plai-review.yml` calls the reusable workflow | `831bd8693698b10fa152aaf2dc32c5e674883513` | `.github/workflows/plai-review.yml` `uses:` |
-| `review.checkout` | Both checkouts inside the reusable workflow | `484375ca02bae2252e52ea9eff9259b1042fc135` | `.github/workflows/plai-review-run.yml` `ref:` |
+| `review.checkout` | Both checkouts inside the reusable workflow | `f5afa67776e555534b2f55d589e8fcf4e71d14c4` | `.github/workflows/plai-review-run.yml` `ref:` |
 
 Move `review.checkout` first. Then set `review.caller` to the commit
 that contains those checkout refs. The caller file on the default
 branch is the one `pull_request_target` runs. Do not point the caller
 at a commit whose workflow still checks out the previous tree.
-`484375ca02bae2252e52ea9eff9259b1042fc135` is `main` with the per-sandbox no-network policy and the clone retry.
-`review.caller` is `831bd8693698b10fa152aaf2dc32c5e674883513`.
-That commit contains these checkout refs, so the called workflow
-checks out `dea10b4`. It is not `dea10b4` itself: that tree's
-workflow file still checks out `f0f7716`.
+`f5afa67776e555534b2f55d589e8fcf4e71d14c4` is `main` with the review gate retrying through GitHub API errors and a 10-minute review limit.
+`review.caller` is still `831bd8693698b10fa152aaf2dc32c5e674883513`,
+whose workflow file checks out the previous `review.checkout` tree.
+The new checkout pin takes effect only after `review.caller` moves to
+a commit that contains it.
 
 ## CI edges
 
