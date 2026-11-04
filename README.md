@@ -33,13 +33,20 @@ Pick one with `--provider`. `plai` saves it to `~/.config/ansible-plaibook/vars.
 
 The model calls and the sandbox are separate collections. Plaibook pins them and composes them. They do not import each other.
 
+Provider collections, one per model SDK:
+
 | Collection | Repository | Role |
 |---|---|---|
 | `aknochow.claude` | [ansible-claude](https://github.com/aknochow/ansible-claude) | Claude, including the Agent SDK |
+| `aknochow.cursor` | [ansible-cursor](https://github.com/aknochow/ansible-cursor) | Cursor agent |
 | `aknochow.gemini` | [ansible-gemini](https://github.com/aknochow/ansible-gemini) | Gemini |
 | `aknochow.openai` | [ansible-openai](https://github.com/aknochow/ansible-openai) | OpenAI-compatible chat |
 | `aknochow.xai` | [ansible-xai](https://github.com/aknochow/ansible-xai) | xAI (Grok) chat through `xai-sdk` |
-| `aknochow.cursor` | [ansible-cursor](https://github.com/aknochow/ansible-cursor) | Cursor agent |
+
+The sandbox collection wraps the OpenShell SDK:
+
+| Collection | Repository | Role |
+|---|---|---|
 | `aknochow.openshell` | [ansible-openshell](https://github.com/aknochow/ansible-openshell) | Sandbox lifecycle and the SSH proxy |
 
 OpenShell does not know which provider is in use. A provider collection does not know OpenShell exists. Sandbox lifecycle is `delegate_to`. The review role never imports it. How those calls are split is in [Sandboxes and LLM calls](docs/sandbox-and-agent-safety.md).
