@@ -15,6 +15,20 @@ The PyPI name is `plaibook`. `plai` was already taken, so the two commands are o
 
 A quiet run prints the verdict, the score, and each Critical or Major finding with `file:line` and a short why. Minor and nit stay as counts. The footer is the cost and this run's `last_run.<run_id>.json`. `-v` is the Ansible task list. `--json` is what another program should parse. Commit review, and how to read a run, are in [Getting started](docs/getting-started.md). The CLI's own notes are in [`plaibook/README.md`](plaibook/README.md).
 
+## Providers
+
+Pick one with `--provider`. `plai` saves it to `~/.config/ansible-plaibook/vars.yml`, and later runs use it.
+
+| `--provider` | Default model | Key |
+|---|---|---|
+| `openai` | `gpt-6-luna` | `OPENAI_API_KEY` |
+| `xai` | `grok-4.7` | `XAI_API_KEY` or `GROK_API_KEY` |
+| `cursor` | `grok-4.7` through Cursor | `CURSOR_API_KEY` |
+| `gemini` | `gemini-3.6-flash` | `GEMINI_API_KEY`, `GOOGLE_API_KEY`, or Vertex |
+| `claude` | `claude-opus-4-6` | `ANTHROPIC_API_KEY` or Vertex |
+
+`openai` also takes any OpenAI-compatible server, including a local one, through `OPENAI_BASE_URL`. The pull-request check on this repository runs `gpt-6-luna` at `high` lens effort. Effort, token caps, and what each setting reaches are in [Models and reasoning effort](docs/models.md).
+
 ## Collections
 
 The model calls and the sandbox are separate collections. Plaibook pins them and composes them. They do not import each other.
@@ -24,6 +38,7 @@ The model calls and the sandbox are separate collections. Plaibook pins them and
 | `aknochow.claude` | [ansible-claude](https://github.com/aknochow/ansible-claude) | Claude, including the Agent SDK |
 | `aknochow.gemini` | [ansible-gemini](https://github.com/aknochow/ansible-gemini) | Gemini |
 | `aknochow.openai` | [ansible-openai](https://github.com/aknochow/ansible-openai) | OpenAI-compatible chat |
+| `aknochow.xai` | [ansible-xai](https://github.com/aknochow/ansible-xai) | xAI (Grok) chat through `xai-sdk` |
 | `aknochow.cursor` | [ansible-cursor](https://github.com/aknochow/ansible-cursor) | Cursor agent |
 | `aknochow.openshell` | [ansible-openshell](https://github.com/aknochow/ansible-openshell) | Sandbox lifecycle and the SSH proxy |
 
