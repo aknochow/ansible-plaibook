@@ -242,6 +242,8 @@ review_openai_lens_reasoning_effort: "{{ lookup('ansible.builtin.env', 'ANSIBLE_
 # operators.
 review_openai_continuity_max_completion_tokens: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_OPENAI_CONTINUITY_MAX_COMPLETION_TOKENS') | default(review_openai_max_completion_tokens, true) | int }}"
 review_openai_continuity_reasoning_effort: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_OPENAI_CONTINUITY_REASONING_EFFORT') | default(review_openai_lens_reasoning_effort, true) }}"
+review_openai_system_role: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_OPENAI_SYSTEM_ROLE') | default('developer' if (openai_base_url is search('api\\.openai\\.com')) else 'system', true) }}"
+review_openai_llama_server_mode: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_OPENAI_LLAMA_SERVER_MODE') | default(false, true) | bool }}"
 
 # aknochow.claude.agent auth for agent_family=claude_cli: no
 # ANTHROPIC_API_KEY/provider config here on purpose, mirroring

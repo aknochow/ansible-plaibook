@@ -20,7 +20,7 @@
   when: _openai_verify_attempt_open | bool
   ansible.builtin.set_fact:
     _openai_verify_messages: >-
-      {{ [{'role': 'developer', 'content': verify_system_prompt}]
+      {{ [{'role': review_openai_system_role | default('system'), 'content': verify_system_prompt}]
          + (verify_messages | to_openai_messages) }}
     _openai_verify_tools: >-
       {{ (explore_tools + [trace_reachability_tool, {
@@ -73,7 +73,7 @@
             reasoning_effort: "{{ review_verify_openai_model | openai_tool_reasoning_effort | default(omit, true) }}"
             max_completion_tokens: "{{ review_openai_max_completion_tokens }}"
             timeout: "{{ openai_timeout }}"
-            llama_server_mode: false
+            llama_server_mode: "{{ review_openai_llama_server_mode | default(false) }}"
             messages: "{{ _openai_verify_messages }}"
             tools: "{{ _openai_verify_tools }}"
             tool_choice: "{{ _openai_verify_tool_choice if _openai_verify_tool_choice else omit }}"

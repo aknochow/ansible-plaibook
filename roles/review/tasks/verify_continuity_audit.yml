@@ -119,9 +119,9 @@
     max_completion_tokens: "{{ review_openai_continuity_max_completion_tokens }}"
     reasoning_effort: "{{ review_verify_openai_model | openai_lens_reasoning_effort(review_openai_continuity_reasoning_effort | default('', true)) | default(omit, true) }}"
     timeout: "{{ openai_timeout }}"
-    llama_server_mode: false
+    llama_server_mode: "{{ review_openai_llama_server_mode | default(false) }}"
     messages:
-      - role: developer
+      - role: "{{ review_openai_system_role | default('system') }}"
         content: "{{ _continuity_audit_prompt }}"
       - role: user
         content: "Assess the continuity claim described in your developer instructions."
