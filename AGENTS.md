@@ -23,7 +23,7 @@ output, check these first:
 
 ansible-plaibook is an **Ansible-native AI code-review pipeline**,
 deterministic Ansible orchestration around
-`aknochow.claude`/`aknochow.gemini`/`aknochow.openai`/`aknochow.cursor`
+`aknochow.claude`/`aknochow.gemini`/`aknochow.openai`/`aknochow.xai`/`aknochow.cursor`
 provider modules, not an interactive agent loop. The human entry point
 is `plai review` / `plaibook review` (same program). AAP keeps
 `ansible-playbook review.yml`. `bug_pipeline.yml` is not on `main`.

@@ -27,9 +27,9 @@ SDK version, or a review-workflow pin is missing from this file.
 |---|---|---|
 | plaibook | [ansible-plaibook](https://github.com/aknochow/ansible-plaibook) | The review playbook and the `plai` / `plaibook` package. It consumes the collections below. They do not depend on it. |
 | aknochow.claude | [ansible-claude](https://github.com/aknochow/ansible-claude) | Claude module. Pins the Anthropic and Claude Agent SDKs. |
+| aknochow.cursor | [ansible-cursor](https://github.com/aknochow/ansible-cursor) | Cursor agent module. Pins `cursor-sdk`. |
 | aknochow.gemini | [ansible-gemini](https://github.com/aknochow/ansible-gemini) | Gemini module. Pins `google-genai`. |
 | aknochow.openai | [ansible-openai](https://github.com/aknochow/ansible-openai) | OpenAI-compatible chat module. Pins the `openai` SDK. |
-| aknochow.cursor | [ansible-cursor](https://github.com/aknochow/ansible-cursor) | Cursor agent module. Pins `cursor-sdk`. |
 | aknochow.xai | [ansible-xai](https://github.com/aknochow/ansible-xai) | xAI chat module. Pins `xai-sdk`. |
 | aknochow.openshell | [ansible-openshell](https://github.com/aknochow/ansible-openshell) | Sandbox lifecycle and the SSH proxy. Pins the `openshell` Python SDK. |
 
