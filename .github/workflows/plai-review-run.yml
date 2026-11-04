@@ -238,6 +238,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANSIBLE_REVIEW_AGENT_FAMILY: openai
           ANSIBLE_REVIEW_OPENAI_MODEL: gpt-6-luna
+          ANSIBLE_REVIEW_OPENAI_LENS_REASONING_EFFORT: high
           # OpenShell 0.1 rejects an empty workspace. The CLI default is "default".
           OPENSHELL_WORKSPACE: default
           # Ansible's log is Python stderr. Without this the step stays blank
