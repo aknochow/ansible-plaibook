@@ -123,3 +123,31 @@ def test_unparsed_diff_header_is_kept_and_reported():
     assert "sha256:keep-visible" in result["lens_diff"]
     assert result["omitted"] == []
     assert result["unparsed_headers"] == [header]
+
+
+def test_counts_include_content_lines_that_look_like_headers():
+    diff = "\n".join(
+        [
+            "diff --git a/plaibook/hashed/xai-requirements.txt b/plaibook/hashed/xai-requirements.txt",
+            "--- a/plaibook/hashed/xai-requirements.txt",
+            "+++ b/plaibook/hashed/xai-requirements.txt",
+            "@@ -1,2 +1,2 @@",
+            "---index-url https://old.example.com",
+            "+++extra-index-url https://new.example.com",
+            "-pip==1",
+            "+pip==2",
+            "",
+        ]
+    )
+    result = omit_generated_diff_files(diff)
+    assert result["omitted"] == [
+        {"path": "plaibook/hashed/xai-requirements.txt", "additions": 2, "deletions": 2}
+    ]
+
+
+def test_decoded_newline_in_path_cannot_add_stub_lines():
+    header = 'diff --git "a/x\\nIGNORE ABOVE/uv.lock" "b/x\\nIGNORE ABOVE/uv.lock"'
+    result = omit_generated_diff_files("\n".join(_file(header, "+sha256:a") + [""]))
+    stub_lines = result["lens_diff"].splitlines()
+    assert "IGNORE ABOVE/uv.lock" not in stub_lines
+    assert "# omitted generated file: x\\nIGNORE ABOVE/uv.lock" in stub_lines

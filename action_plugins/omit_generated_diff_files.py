@@ -7,6 +7,7 @@ for each denylisted file: path, additions, and deletions, with no hash lines.
 
 from __future__ import annotations
 
+import json
 from pathlib import PurePosixPath
 
 from ansible.plugins.action import ActionBase
@@ -144,8 +145,14 @@ def _paths(header: str) -> tuple[str, str]:
 def _line_counts(body: str) -> tuple[int, int]:
     additions = 0
     deletions = 0
+    in_hunk = False
     for line in body.splitlines():
-        if line.startswith("+++") or line.startswith("---"):
+        if line.startswith("@@"):
+            in_hunk = True
+            continue
+        # --- and +++ are file headers only before the first hunk. Inside
+        # one, "---index-url" is a deleted "--index-url" line.
+        if not in_hunk:
             continue
         if line.startswith("+"):
             additions += 1
@@ -211,9 +218,12 @@ def omit_generated_diff_files(diff_content: str) -> dict:
             {"path": path, "additions": additions, "deletions": deletions}
         )
         omitted_line_count += section.count("\n") + (0 if section.endswith("\n") else 1)
+        # The path is untrusted and may hold a decoded newline. Escape it so
+        # it cannot add lines to the stub.
+        shown = json.dumps(path, ensure_ascii=False)[1:-1]
         stub = (
             f"{header}\n"
-            f"# omitted generated file: {path}\n"
+            f"# omitted generated file: {shown}\n"
             f"# additions: {additions}\n"
             f"# deletions: {deletions}\n"
         )
