@@ -130,6 +130,7 @@ def test_reusable_workflow_permissions_and_pins():
     assert "OPENAI_API_KEY" in text
     assert "ANSIBLE_REVIEW_AGENT_FAMILY: openai" in text
     assert "ANSIBLE_REVIEW_OPENAI_MODEL: gpt-6-luna" in text
+    assert "ANSIBLE_REVIEW_OPENAI_LENS_REASONING_EFFORT: high" in text
     assert "PLAIBOOK_PROVIDER_TOKEN" not in text
     assert "checks: write" not in text
     assert "actions: write" not in text
