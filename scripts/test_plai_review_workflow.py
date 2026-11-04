@@ -102,7 +102,7 @@ def test_reusable_workflow_permissions_and_pins():
     wait_checkout = next(step for step in wait["steps"] if step.get("name") == "Check out this workflow commit")
     assert checkout["with"]["repository"] == "aknochow/ansible-plaibook"
     assert wait_checkout["with"]["repository"] == "aknochow/ansible-plaibook"
-    assert checkout["with"]["ref"] == "f5afa67776e555534b2f55d589e8fcf4e71d14c4"
+    assert checkout["with"]["ref"] == "807cf08e93f4e621bd99dad1b7126f739827c1ad"
     assert checkout["with"]["ref"] == wait_checkout["with"]["ref"]
     for step in job["steps"]:
         assert "${{" not in step.get("run", ""), step.get("name")
@@ -298,7 +298,7 @@ def test_security_secrets_environment_permissions_and_pins_unchanged():
 
     wait_checkout = next(step for step in wait["steps"] if step.get("name") == "Check out this workflow commit")
     review_checkout = next(step for step in job["steps"] if step.get("name") == "Check out this workflow commit")
-    fixed_commit = "f5afa67776e555534b2f55d589e8fcf4e71d14c4"
+    fixed_commit = "807cf08e93f4e621bd99dad1b7126f739827c1ad"
     assert wait_checkout["with"]["ref"] == fixed_commit
     assert review_checkout["with"]["ref"] == fixed_commit
     assert wait_checkout["with"]["repository"] == "aknochow/ansible-plaibook"
