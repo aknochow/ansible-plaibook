@@ -249,6 +249,8 @@ def test_gpt56_lens_uses_none_only_when_unset():
     assert openai_lens_reasoning_effort("gpt-5.6", "") == "none"
     assert openai_lens_reasoning_effort("GPT-5.6-sol", "") == "none"
     assert openai_lens_reasoning_effort("gpt-4o", "") == ""
+    assert openai_lens_reasoning_effort("gpt-6-luna", "default") == ""
+    assert openai_lens_reasoning_effort("gpt-5.6", " Default ") == "none"
     assert openai_lens_reasoning_effort("gpt-5.6", "high") == "high"
     assert openai_lens_reasoning_effort("gpt-4o", "low") == "low"
 

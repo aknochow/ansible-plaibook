@@ -161,17 +161,17 @@ are not plaibook dependencies.
 
 | Id | What | SHA | Where |
 |---|---|---|---|
-| `review.caller` | `plai-review.yml` calls the reusable workflow | `9f3f9b109ed67bf1cb3618445c986bd09b54905d` | `.github/workflows/plai-review.yml` `uses:` |
-| `review.checkout` | Both checkouts inside the reusable workflow | `f5afa67776e555534b2f55d589e8fcf4e71d14c4` | `.github/workflows/plai-review-run.yml` `ref:` |
+| `review.caller` | `plai-review.yml` calls the reusable workflow | `7726f48b756c2800f7cff1269c4bcf9bda015540` | `.github/workflows/plai-review.yml` `uses:` |
+| `review.checkout` | Both checkouts inside the reusable workflow | `807cf08e93f4e621bd99dad1b7126f739827c1ad` | `.github/workflows/plai-review-run.yml` `ref:` |
 
 Move `review.checkout` first. Then set `review.caller` to the commit
 that contains those checkout refs. The caller file on the default
 branch is the one `pull_request_target` runs. Do not point the caller
 at a commit whose workflow still checks out the previous tree.
-`f5afa67776e555534b2f55d589e8fcf4e71d14c4` is `main` with the review gate retrying through GitHub API errors and a 10-minute review limit.
-`review.caller` is `9f3f9b109ed67bf1cb3618445c986bd09b54905d`.
+`807cf08e93f4e621bd99dad1b7126f739827c1ad` is `main` with the `gpt-6-luna` review at `high` lens effort and a 32768-token completion cap.
+`review.caller` is `7726f48b756c2800f7cff1269c4bcf9bda015540`.
 That commit contains these checkout refs, so the called workflow
-checks out `f5afa67`. It is not `f5afa67` itself: that tree's
+checks out `807cf08`. It is not `807cf08` itself: that tree's
 workflow file still checks out the previous `review.checkout` tree.
 
 ## CI edges
