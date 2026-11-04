@@ -102,7 +102,7 @@ def test_reusable_workflow_permissions_and_pins():
     wait_checkout = next(step for step in wait["steps"] if step.get("name") == "Check out this workflow commit")
     assert checkout["with"]["repository"] == "aknochow/ansible-plaibook"
     assert wait_checkout["with"]["repository"] == "aknochow/ansible-plaibook"
-    assert checkout["with"]["ref"] == "f5afa67776e555534b2f55d589e8fcf4e71d14c4"
+    assert checkout["with"]["ref"] == "807cf08e93f4e621bd99dad1b7126f739827c1ad"
     assert checkout["with"]["ref"] == wait_checkout["with"]["ref"]
     for step in job["steps"]:
         assert "${{" not in step.get("run", ""), step.get("name")
@@ -130,6 +130,7 @@ def test_reusable_workflow_permissions_and_pins():
     assert "OPENAI_API_KEY" in text
     assert "ANSIBLE_REVIEW_AGENT_FAMILY: openai" in text
     assert "ANSIBLE_REVIEW_OPENAI_MODEL: gpt-6-luna" in text
+    assert "ANSIBLE_REVIEW_OPENAI_LENS_REASONING_EFFORT: high" in text
     assert "PLAIBOOK_PROVIDER_TOKEN" not in text
     assert "checks: write" not in text
     assert "actions: write" not in text
@@ -173,7 +174,7 @@ def test_caller_does_not_pin_a_floating_secret_ref():
     assert "environment" not in job
     pinned = (
         "aknochow/ansible-plaibook/.github/workflows/plai-review-run.yml"
-        "@9f3f9b109ed67bf1cb3618445c986bd09b54905d"
+        "@7726f48b756c2800f7cff1269c4bcf9bda015540"
     )
     assert job["uses"] == pinned
     assert job["with"] == {"use_sandbox": "${{ github.event_name != 'workflow_dispatch' || inputs.use_sandbox }}"}
@@ -297,7 +298,7 @@ def test_security_secrets_environment_permissions_and_pins_unchanged():
 
     wait_checkout = next(step for step in wait["steps"] if step.get("name") == "Check out this workflow commit")
     review_checkout = next(step for step in job["steps"] if step.get("name") == "Check out this workflow commit")
-    fixed_commit = "f5afa67776e555534b2f55d589e8fcf4e71d14c4"
+    fixed_commit = "807cf08e93f4e621bd99dad1b7126f739827c1ad"
     assert wait_checkout["with"]["ref"] == fixed_commit
     assert review_checkout["with"]["ref"] == fixed_commit
     assert wait_checkout["with"]["repository"] == "aknochow/ansible-plaibook"

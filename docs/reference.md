@@ -39,7 +39,7 @@ status: stable
 | `review_cursor_lens_timeout` | `1800` | Seconds each Cursor Security/Review lens may run before the async limit kills it. Env `ANSIBLE_REVIEW_CURSOR_LENS_TIMEOUT`. The wait polls every `review_cursor_lens_poll_delay` (5) seconds for at least this long. The lens retries (attempt 2 and later) run in the foreground and are not bounded by it. Raise the job `timeout-minutes` with it. |
 | `review_agent_model` | `claude-opus-4-6` | Model used for the Security and Functionality/Quality lens dispatch. |
 | `review_openai_model` | `grok-4.7` when `XAI_API_KEY` or `GROK_API_KEY` is set and `OPENAI_API_KEY` is not; otherwise `gpt-6-luna` when `agent_family=openai` | OpenAI-compatible model for both lenses. `grok-4.7` calls `https://api.x.ai/v1` unless `OPENAI_BASE_URL` is set. The unsuffixed GPT-5.6 alias resolves to Sol on `api.openai.com`. Luna is not an xAI model. See [Models and reasoning effort](models.md). |
-| `review_openai_max_completion_tokens` | `16384` | Hosted OpenAI completion budget for lens, exploration, and verification calls. |
+| `review_openai_max_completion_tokens` | `32768` | Hosted OpenAI completion budget for lens, exploration, and verification calls. Reasoning tokens count against it, so a high-effort lens on a large diff needs the headroom. |
 | `review_xai_model` | `grok-4.7` | Model for lens, explore, and verify when `agent_family=xai`. Calls `aknochow.xai.chat` (`xai-sdk` `chat.stream`), not the OpenAI-compatible endpoint. |
 | `review_xai_lens_reasoning_effort` | `high` | `reasoning_effort` for xAI lens, explore, verify, and the continuity audit unless `review_xai_continuity_reasoning_effort` is set. |
 | `review_xai_max_tokens` | `16384` | Completion budget passed as `max_tokens` to `aknochow.xai.chat`. |
