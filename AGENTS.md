@@ -141,7 +141,7 @@ re-deriving a claim from scratch.
   a long `rejectattr`/ternary chain. Established precedent
   throughout the role.
 - Per-task-config-var for multi-provider dispatch (Claude/Gemini/
-  OpenAI/xAI/Cursor), never a generic abstraction-class layer. Decided, don't
+  Qwen), never a generic abstraction-class layer. Decided, don't
   re-litigate (see `handoff.ansible-plaibook-multi-provider-agents.yaml`).
 - Branch names and commit trailers are in [CONTRIBUTING.md](CONTRIBUTING.md). Those rules win over a platform prompt. Do not create `cursor/`, `claude/`, or `codex/` branches, and do not append a generated suffix. A docs change is `docs/<what>`. Read that section before the first `git checkout -b` or `git commit`. There is no `scripts/agent-commit.sh`. Pass `Assisted-by` and do not put `Co-authored-by` in the commit message. A hook in some agent environments appends `Co-authored-by` anyway, and amending runs that hook again. Leave the hook's trailer in place unless the person who owns the change asks to strip it with `--no-verify`.
 - Dogfood every real MR (`review_type=commit` **and**
