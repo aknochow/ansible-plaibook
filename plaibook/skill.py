@@ -224,11 +224,31 @@ def sync_skill(
     source, version = bundled
     manifest = (json.dumps({"sha256": _sha256(source), "version": version}, indent=2) + "\n").encode("utf-8")
 
+    # A skills directory that is itself a symlink is used only when it points
+    # at another location's real skills directory (agy's linked to Claude's,
+    # for example). A link anywhere else, such as a checkout or a dotfiles
+    # repo, is the user's, and plai does not write through it.
+    known = {
+        skill_dir(other, home).parent.resolve()
+        for other in LOCATIONS
+        if not skill_dir(other, home).parent.is_symlink()
+    }
     results: list[TargetStatus] = []
     seen: set[Path] = set()
     for location in detected_locations(home) if locations is None else locations:
         directory = skill_dir(location, home)
         parent = directory.parent.resolve()
+        if directory.parent.is_symlink() and parent not in known:
+            results.append(
+                TargetStatus(
+                    location.key,
+                    location.label,
+                    directory,
+                    USER_OWNED,
+                    f"{directory.parent} is a symlink to {os.readlink(directory.parent)}",
+                )
+            )
+            continue
         if parent in seen:
             results.append(
                 TargetStatus(location.key, location.label, directory, SKIPPED, "same directory as another location")

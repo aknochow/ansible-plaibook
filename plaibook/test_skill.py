@@ -132,6 +132,26 @@ def test_skips_a_skills_dir_that_links_to_another_location(home):
     assert _states(sync_skill(home)) == {"claude-code": INSTALLED, "antigravity": SKIPPED}
 
 
+def test_never_writes_through_a_skills_dir_linked_outside_the_known_locations(home, tmp_path):
+    dotfiles = tmp_path / "dotfiles" / "skills"
+    dotfiles.mkdir(parents=True)
+    (home / ".claude").mkdir()
+    (home / ".claude" / "skills").symlink_to(dotfiles, target_is_directory=True)
+    result = sync_skill(home)[0]
+    assert result.state == USER_OWNED
+    assert "symlink" in result.detail
+    assert list(dotfiles.iterdir()) == []
+
+
+def test_writes_through_a_skills_dir_linked_to_another_location(home):
+    (home / ".claude" / "skills").mkdir(parents=True)
+    (home / ".gemini" / "config").mkdir(parents=True)
+    (home / ".gemini" / "config" / "skills").symlink_to(home / ".claude" / "skills", target_is_directory=True)
+    location = _BY_KEY["antigravity"]
+    assert _states(sync_skill(home, locations=[location])) == {"antigravity": INSTALLED}
+    assert (home / ".claude" / "skills" / skill.SKILL_NAME / "SKILL.md").read_bytes() == BODY
+
+
 def test_missing_bundled_skill_is_an_error_and_writes_nothing(home, monkeypatch):
     (home / ".claude").mkdir()
     monkeypatch.setattr(skill, "bundled_skill_path", lambda: None)
@@ -185,6 +205,15 @@ def test_update_skill_enabled_saves_and_installs(cli_home, tmp_path, monkeypatch
     assert cmd_update(_update_args(skill="enabled")) == 0
     assert _vars(tmp_path)["plai_skill"] == "enabled"
     assert (skill_dir(_BY_KEY["claude-code"], cli_home) / "SKILL.md").read_bytes() == BODY
+
+
+@pytest.mark.parametrize("kind", ["editable", "unknown"])
+def test_update_skill_works_for_installs_update_refuses(cli_home, tmp_path, monkeypatch, kind):
+    from plaibook.cli import cmd_update
+
+    monkeypatch.setattr("plaibook.cli.running_install_kind", lambda: kind)
+    assert cmd_update(_update_args(skill="disabled")) == 0
+    assert _vars(tmp_path)["plai_skill"] == "disabled"
 
 
 def test_update_skill_disabled_saves_and_leaves_copies(cli_home, tmp_path, monkeypatch):

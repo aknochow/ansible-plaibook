@@ -325,7 +325,9 @@ a successful upgrade, and `plai update --check` lists each location's
 state without writing. plai writes a `.plaibook-managed.json` next to
 each copy and replaces only a copy that still matches it. A hand-edited
 copy, a copy with no manifest, and a symlink are reported and left
-alone. Remove one to let plai manage that location. Cursor and OpenCode
+alone. So is a skills directory that is itself a symlink, unless it
+points at another location in the table. Remove one to let plai manage
+that location. Cursor and OpenCode
 read both `~/.claude/skills` and `~/.agents/skills`; OpenCode logs a
 duplicate-name warning and loads one copy.
 

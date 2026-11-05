@@ -1112,13 +1112,13 @@ def _sync_review_skill_from_install() -> None:
 
 def cmd_update(args: argparse.Namespace) -> int:
     """Upgrade the install that is running, or install a GitHub ref into it."""
+    if getattr(args, "skill", None):
+        return _cmd_update_skill(args.skill)
     kind = running_install_kind()
     if kind == "editable" and not args.check:
         return _editable_refusal()
     if kind == "unknown" and not args.check:
         return _unknown_install_refusal()
-    if getattr(args, "skill", None):
-        return _cmd_update_skill(args.skill)
     skill_setting = _skill_precheck(args)
     if kind == "uv":
         rc = _cmd_update_uv(args)
