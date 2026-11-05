@@ -232,7 +232,7 @@ review_openai_model: >-
        ) }}
 review_explore_openai_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_EXPLORE_OPENAI_MODEL') | default(review_openai_model, true) }}"
 review_verify_openai_model: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_VERIFY_OPENAI_MODEL') | default(review_openai_model, true) }}"
-review_openai_max_completion_tokens: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_OPENAI_MAX_COMPLETION_TOKENS') | default(16384, true) | int }}"
+review_openai_max_completion_tokens: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_OPENAI_MAX_COMPLETION_TOKENS') | default(32768, true) | int }}"
 # Optional explicit reasoning effort for the structured lens calls. Leave
 # this empty for the API default. gpt-5.6 is the exception: Chat Completions
 # rejects its function tools unless the effort is none, and the lens task
@@ -407,6 +407,12 @@ review_screen_diff_comments: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_S
 # even when comment screening is on: a docstring is frequently the only
 # statement of intended contract.
 review_screen_diff_docstrings: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_SCREEN_DIFF_DOCSTRINGS') | default(false, true) | bool }}"
+
+# Drop generated lockfile hunks from the lens prompt. review_full_diff
+# stays the real git diff. Default on: an unset
+# ANSIBLE_REVIEW_OMIT_GENERATED_DIFF_FILES (empty string) still omits.
+review_omit_generated_diff_files: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_OMIT_GENERATED_DIFF_FILES') | default(true, true) | bool }}"
+review_lens_diff_omitted_files: []
 
 # Eval-only knob for the comment-screener ablation (Arm C): omit the
 # PR/MR description from review_context while keeping metadata. Default

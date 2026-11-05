@@ -81,7 +81,7 @@ jobs:
           # the pull request head. Move this to a commit that contains the
           # review code, then point plai-review.yml at the commit that
           # contains this line.
-          ref: "f5afa67776e555534b2f55d589e8fcf4e71d14c4"
+          ref: "807cf08e93f4e621bd99dad1b7126f739827c1ad"
           persist-credentials: false
 
       - name: Resolve the pull request
@@ -175,7 +175,7 @@ jobs:
           # the pull request head. Move this to a commit that contains the
           # review code, then point plai-review.yml at the commit that
           # contains this line.
-          ref: "f5afa67776e555534b2f55d589e8fcf4e71d14c4"
+          ref: "807cf08e93f4e621bd99dad1b7126f739827c1ad"
           persist-credentials: false
 
       - name: Load the OpenShell pins
@@ -238,6 +238,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANSIBLE_REVIEW_AGENT_FAMILY: openai
           ANSIBLE_REVIEW_OPENAI_MODEL: gpt-6-luna
+          ANSIBLE_REVIEW_OPENAI_LENS_REASONING_EFFORT: high
           # OpenShell 0.1 rejects an empty workspace. The CLI default is "default".
           OPENSHELL_WORKSPACE: default
           # Ansible's log is Python stderr. Without this the step stays blank

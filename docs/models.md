@@ -30,7 +30,7 @@ to the lenses. The tables below say which.
 
 | Provider (`agent_family`) | Model | Effort | Start here when |
 |---|---|---|---|
-| `openai` | `gpt-6-luna` | API default for the lenses | You want the cheapest reliable review. The GitHub review check uses this. |
+| `openai` | `gpt-6-luna` | API default for the lenses | You want the cheapest reliable review. The GitHub review check uses it with `high` lens effort. |
 | `xai` | `grok-4.7` | `high` | You want a deeper review and accept a higher cost per run. |
 | `cursor` | `grok-4.7` | `high` | You already pay for Cursor. |
 | `gemini` | `gemini-3.6-flash` | thinking `high` | You use the AI Studio free tier or Vertex. |

@@ -1,0 +1,36 @@
+---
+# Replace generated lockfile hunks in the lens diff only.
+# review_full_diff stays the real git diff for verify, findings.md,
+# and summary line citations. Lenses already read review_lens_diff.
+
+- name: Leave the lens diff unchanged when generated-file omission is off
+  when: not (review_omit_generated_diff_files | bool)
+  ansible.builtin.set_fact:
+    review_lens_diff_omitted_files: []
+
+- name: Omit generated lockfiles from the lens diff
+  when: review_omit_generated_diff_files | bool
+  block:
+    - name: Snapshot the prepared diff before omission
+      ansible.builtin.set_fact:
+        _omit_original_full_diff: "{{ review_full_diff }}"
+
+    - name: Replace generated lockfile hunks with stubs
+      omit_generated_diff_files:
+        diff_content: "{{ review_lens_diff | default(review_full_diff, true) }}"
+      register: _omit_generated_result
+
+    - name: Refuse a lens diff that lost the original prepared diff
+      ansible.builtin.assert:
+        that:
+          - _omit_generated_result.failed is not defined or not (_omit_generated_result.failed | bool)
+          - review_full_diff == _omit_original_full_diff
+          - _omit_generated_result.lens_diff is defined
+        fail_msg: >-
+          omit_generated_diff_files failed or changed review_full_diff.
+          {{ _omit_generated_result.msg | default('') }}
+
+    - name: Publish the omitted lens diff
+      ansible.builtin.set_fact:
+        review_lens_diff: "{{ _omit_generated_result.lens_diff }}"
+        review_lens_diff_omitted_files: "{{ _omit_generated_result.omitted | default([]) }}"
