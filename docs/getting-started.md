@@ -59,8 +59,11 @@ Install the CLI in an isolated environment:
 pipx install plaibook
 ```
 
-Upgrade that install later with `plai update`. Version output and the
-upgrade rules are in [Upgrade an installed CLI](#upgrade-an-installed-cli).
+Run `plai --help` to see the commands. Upgrade that install later with
+`plai update`. The first `plai update` or interactive `plai review` also
+asks whether to install the review skill for the agent CLIs it finds.
+Version output, the upgrade rules, and the skill setting are in
+[Upgrade an installed CLI](#upgrade-an-installed-cli).
 
 Set the OpenAI key, then replace `OWNER`, `REPO`, and `123` with the
 GitHub repository and pull request number:
@@ -300,6 +303,31 @@ PyPI release. `--branch` checks the recorded spec after install.
 `plai update --check` compares versions and does not install. A
 non-interactive run must pass `-y` or `--yes`. Without a terminal, the
 command cancels.
+
+`plai` can install its review skill for the agent CLIs on the machine.
+The first interactive `plai review` or `plai update` lists the CLIs it
+finds and asks once. The answer is saved as `plai_skill: enabled` or
+`plai_skill: disabled` in `~/.config/ansible-plaibook/vars.yml`, and
+`plai update` shows it before upgrading. A run without a terminal never
+asks and never writes a skill. Change the setting with
+`plai update --skill enabled` or `plai update --skill disabled`.
+Disabling stops updates and leaves existing copies in place.
+
+| Location | Agent CLIs that read it |
+| --- | --- |
+| `~/.claude/skills` | Claude Code (also Cursor and OpenCode) |
+| `~/.gemini/config/skills` | Antigravity (`agy`) |
+| `~/.agents/skills` | Codex, Cursor, OpenCode, pi |
+
+A location is used only when one of its CLIs is on `PATH` or has its
+config directory. When enabled, `plai update` refreshes each copy after
+a successful upgrade, and `plai update --check` lists each location's
+state without writing. plai writes a `.plaibook-managed.json` next to
+each copy and replaces only a copy that still matches it. A hand-edited
+copy, a copy with no manifest, and a symlink are reported and left
+alone. Remove one to let plai manage that location. Cursor and OpenCode
+read both `~/.claude/skills` and `~/.agents/skills`; OpenCode logs a
+duplicate-name warning and loads one copy.
 
 ### Install from a checkout or another isolated environment
 

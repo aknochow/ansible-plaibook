@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from plaibook import ee, version_text
+from plaibook import skill as review_skill
 from plaibook.collections import CollectionInstallError, ensure_collections
 from plaibook.config import (
     FAMILIES,
@@ -19,6 +20,7 @@ from plaibook.config import (
     openshell_available,
     resolve_family,
     running_inside_openshell,
+    save_vars,
 )
 from plaibook.openshell_sdk import OpenshellSdkError, reexec_sandbox_runtime
 from plaibook.playbook import (
@@ -39,7 +41,6 @@ from plaibook.playbook import (
 from plaibook.progress import create_progress_file
 from plaibook.provider_sdk import ProviderSdkError, ensure_provider_sdk
 from plaibook.runtime import UnsupportedPythonError, require_supported_python
-from plaibook.skill import sync_user_skill_to_stderr
 from plaibook.summary import (
     SummaryError,
     dump_json,
@@ -144,6 +145,7 @@ Examples:
   plai update --check
   plai update --branch main
   plai update --branch v0.1.26
+  plai update --skill enabled
 """
 
 
@@ -360,6 +362,15 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
         "--yes",
         action="store_true",
         help="Skip confirmation prompt.",
+    )
+    update.add_argument(
+        "--skill",
+        choices=(review_skill.ENABLED, review_skill.DISABLED),
+        help=(
+            "Turn the review skill for agent CLIs on or off (saved as plai_skill "
+            "in vars.yml), then stop. When enabled, plai update keeps a copy "
+            "current for each agent CLI it finds."
+        ),
     )
 
     return parser
@@ -1004,17 +1015,85 @@ def _unknown_install_refusal() -> int:
     return 2
 
 
-def _sync_review_skill() -> None:
-    """Copy this install's review skill into ~/.agents/skills when it is older."""
-    sync_user_skill_to_stderr()
+def _skill_setting(*, ask: bool) -> str | None:
+    """plai_skill from vars.yml. Asks once and saves when unset and ``ask``."""
+    try:
+        current = review_skill.setting(load_vars())
+    except ConfigError:
+        return None
+    if current is not None or not ask:
+        return current
+    locations = review_skill.detected_locations()
+    if not locations:
+        return None
+    chosen = (
+        review_skill.ENABLED
+        if review_skill.ask_to_enable(locations, stdin=sys.stdin, stderr=sys.stderr)
+        else review_skill.DISABLED
+    )
+    try:
+        path = save_vars({review_skill.SETTING: chosen})
+    except ConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return None
+    print(
+        f"Saved plai_skill: {chosen} to {path}. Change it with plai update --skill enabled|disabled.",
+        file=sys.stderr,
+    )
+    if chosen == review_skill.ENABLED:
+        review_skill.sync_to_stderr()
+    return chosen
+
+
+def _interactive() -> bool:
+    return sys.stdin.isatty() and sys.stderr.isatty()
+
+
+def _skill_before_review() -> None:
+    """The first interactive run asks once. When enabled, flag stale copies; only plai update rewrites them."""
+    if _skill_setting(ask=_interactive()) != review_skill.ENABLED:
+        return
+    stale = review_skill.stale_copies()
+    if stale:
+        print(
+            "The review skill for agent CLIs is out of date. Run plai update to refresh it.",
+            file=sys.stderr,
+        )
+
+
+def _skill_precheck(args: argparse.Namespace) -> str | None:
+    """Print plai_skill before an update. Asks once when unset on a terminal."""
+    chosen = _skill_setting(ask=_interactive() and not args.check)
+    if chosen == review_skill.ENABLED:
+        labels = ", ".join(location.label for location in review_skill.detected_locations())
+        print(f"Review skill: enabled ({labels or 'no agent CLIs found'})", file=sys.stderr)
+        if args.check:
+            review_skill.print_results(review_skill.sync_skill(write=False), stderr=sys.stderr)
+    elif chosen == review_skill.DISABLED:
+        print("Review skill: disabled (plai update --skill enabled turns it on)", file=sys.stderr)
+    else:
+        print("Review skill: not set (plai update --skill enabled turns it on)", file=sys.stderr)
+    return chosen
+
+
+def _cmd_update_skill(choice: str) -> int:
+    try:
+        path = save_vars({review_skill.SETTING: choice})
+    except ConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(f"Saved plai_skill: {choice} to {path}", file=sys.stderr)
+    if choice == review_skill.ENABLED:
+        return review_skill.sync_to_stderr()
+    print("plai no longer updates the review skill. Existing copies are left in place.", file=sys.stderr)
+    return 0
 
 
 def _sync_review_skill_from_install() -> None:
     """Load the skill from the install on disk after pipx or uv replaces it."""
     code = (
-        "from plaibook.skill import sync_user_skill_to_stderr\n"
-        "import sys\n"
-        "raise SystemExit(sync_user_skill_to_stderr())\n"
+        "from plaibook.skill import sync_to_stderr\n"
+        "raise SystemExit(sync_to_stderr())\n"
     )
     try:
         result = subprocess.run(
@@ -1038,13 +1117,16 @@ def cmd_update(args: argparse.Namespace) -> int:
         return _editable_refusal()
     if kind == "unknown" and not args.check:
         return _unknown_install_refusal()
+    if getattr(args, "skill", None):
+        return _cmd_update_skill(args.skill)
+    skill_setting = _skill_precheck(args)
     if kind == "uv":
         rc = _cmd_update_uv(args)
     elif kind == "venv":
         rc = _cmd_update_venv(args)
     else:
         rc = _cmd_update_pipx(args)
-    if rc == 0 and not args.check:
+    if rc == 0 and not args.check and skill_setting == review_skill.ENABLED:
         _sync_review_skill_from_install()
     return rc
 
@@ -1304,7 +1386,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser = build_parser()
         args = parser.parse_args(list(argv) if argv is not None else None)
         if args.command == "review":
-            _sync_review_skill()
+            _skill_before_review()
             return cmd_review(args)
         elif args.command == "update":
             return cmd_update(args)

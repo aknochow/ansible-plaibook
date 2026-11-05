@@ -37,6 +37,13 @@ def _running_install_is_pipx(monkeypatch):
     monkeypatch.setattr("plaibook.cli.running_install_kind", lambda: "pipx")
 
 
+@pytest.fixture(autouse=True)
+def _isolated_home(monkeypatch, tmp_path):
+    """The review skill precheck reads vars.yml and agent CLI dirs under HOME."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+
+
 def test_update_lock_path_default():
     """Test update_lock_path returns correct path."""
     lock_path = update_lock_path()
