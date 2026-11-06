@@ -238,7 +238,7 @@ def test_cmd_review_quiet_reprints_task_failure_log(tmp_path, monkeypatch, capsy
 
     seen: dict[str, str] = {}
 
-    def fake_run(command, *, playbook_root, verbose, env=None):
+    def fake_run(command, *, playbook_root, verbose, env=None, tmp_dir=None):
         assert env and env.get("PLAIBOOK_TASK_FAILURES_LOG")
         seen["log"] = env["PLAIBOOK_TASK_FAILURES_LOG"]
         Path(env["PLAIBOOK_TASK_FAILURES_LOG"]).write_text(
@@ -280,7 +280,7 @@ def test_cmd_review_json_verbose_prints_the_failure_log_once(tmp_path, monkeypat
     (home / ".cache" / "ansible-plaibook").mkdir(parents=True)
     line = "planned failure for the error log"
 
-    def fake_run(command, *, playbook_root, verbose, env=None):
+    def fake_run(command, *, playbook_root, verbose, env=None, tmp_dir=None):
         assert env and env.get("PLAIBOOK_TASK_FAILURES_LOG")
         Path(env["PLAIBOOK_TASK_FAILURES_LOG"]).write_text(f"Task failures (1):\n- {line}\n")
         extras = json.loads(command[command.index("-e") + 1])
@@ -324,7 +324,7 @@ def test_cmd_review_verbose_does_not_reprint_task_failure_log(tmp_path, monkeypa
 
     seen: dict[str, str] = {}
 
-    def fake_run(command, *, playbook_root, verbose, env=None):
+    def fake_run(command, *, playbook_root, verbose, env=None, tmp_dir=None):
         assert verbose is True
         assert env and env.get("PLAIBOOK_TASK_FAILURES_LOG")
         seen["log"] = env["PLAIBOOK_TASK_FAILURES_LOG"]
@@ -434,7 +434,7 @@ def test_quiet_review_warns_when_failure_log_creation_fails(tmp_path, monkeypatc
     def broken_log(*, directory=None):
         raise OSError("temp unavailable")
 
-    def fake_run(command, *, playbook_root, verbose, env=None):
+    def fake_run(command, *, playbook_root, verbose, env=None, tmp_dir=None):
         _summary_for(command, home)
         return SimpleNamespace(returncode=0, stdout="TASK [noisy]\n", stderr="")
 
@@ -449,7 +449,7 @@ def test_quiet_review_warns_when_failure_log_creation_fails(tmp_path, monkeypatc
 
 
 def test_quiet_review_warns_when_a_failed_play_leaves_an_empty_log(tmp_path, monkeypatch, capsys):
-    def fake_run(command, *, playbook_root, verbose, env=None):
+    def fake_run(command, *, playbook_root, verbose, env=None, tmp_dir=None):
         assert env and env.get("PLAIBOOK_TASK_FAILURES_LOG")
         _summary_for(command, home)
         return SimpleNamespace(returncode=2, stdout="TASK [noisy]\n", stderr="")
@@ -476,7 +476,7 @@ def test_cmd_review_does_not_pass_controller_interpreter_as_extra_var(tmp_path, 
     (home / ".cache" / "ansible-plaibook").mkdir(parents=True)
     seen = {}
 
-    def fake_run(command, *, playbook_root, verbose, env=None):
+    def fake_run(command, *, playbook_root, verbose, env=None, tmp_dir=None):
         extras = json.loads(command[command.index("-e") + 1])
         seen["extras"] = extras
         path = last_run_path(extras["last_run_id"], home=home)
@@ -508,7 +508,7 @@ def test_cmd_review_skips_resolve_family_when_agent_family_extra(tmp_path, monke
     (home / ".cache" / "ansible-plaibook").mkdir(parents=True)
     called = []
 
-    def fake_run(command, *, playbook_root, verbose, env=None):
+    def fake_run(command, *, playbook_root, verbose, env=None, tmp_dir=None):
         extras = json.loads(command[command.index("-e") + 1])
         path = last_run_path(extras["last_run_id"], home=home)
         path.write_text(json.dumps({"run_id": extras["last_run_id"], "status": "ok", "targets": []}))
@@ -1228,7 +1228,7 @@ def test_cmd_review_empty_commit_range_names_the_range(tmp_path, monkeypatch, ca
     sha = "abc1234..abc1234"
     reason = f"Commit range {sha} is empty; nothing to review."
 
-    def fake_run(command, *, playbook_root, verbose, env=None):
+    def fake_run(command, *, playbook_root, verbose, env=None, tmp_dir=None):
         extras = json.loads(command[command.index("-e") + 1])
         path = last_run_path(extras["last_run_id"], home=home)
         path.write_text(
@@ -1444,7 +1444,7 @@ def test_cmd_review_quiet_json_yaml_and_exit(tmp_path, monkeypatch, capsys):
 
     captured = {}
 
-    def fake_run(command, *, playbook_root, verbose, env=None):
+    def fake_run(command, *, playbook_root, verbose, env=None, tmp_dir=None):
         captured["command"] = command
         captured["verbose"] = verbose
         extras = json.loads(command[command.index("-e") + 1])
@@ -1532,7 +1532,7 @@ def test_main_plai_and_plaibook_commit_match(tmp_path, monkeypatch, capsys):
     home = tmp_path / "home"
     (home / ".cache" / "ansible-plaibook").mkdir(parents=True)
 
-    def fake_run(command, *, playbook_root, verbose, env=None):
+    def fake_run(command, *, playbook_root, verbose, env=None, tmp_dir=None):
         extras = json.loads(command[command.index("-e") + 1])
         path = last_run_path(extras["last_run_id"], home=home)
         path.write_text(
@@ -1572,7 +1572,7 @@ def test_quiet_dumps_ansible_output_when_last_run_missing(tmp_path, monkeypatch,
     home = tmp_path / "home"
     (home / ".cache" / "ansible-plaibook").mkdir(parents=True)
 
-    def fake_run(command, *, playbook_root, verbose, env=None):
+    def fake_run(command, *, playbook_root, verbose, env=None, tmp_dir=None):
         return SimpleNamespace(returncode=1, stdout="PLAY [boom]\n", stderr="ERROR: nope\n")
 
     monkeypatch.setattr("plaibook.cli.run_ansible_playbook", fake_run)
@@ -1598,7 +1598,7 @@ def test_cmd_review_cache_hit_reads_run_scoped_last_run(tmp_path, monkeypatch, c
     cache = home / ".cache" / "ansible-plaibook"
     cache.mkdir(parents=True)
 
-    def fake_run(command, *, playbook_root, verbose, env=None):
+    def fake_run(command, *, playbook_root, verbose, env=None, tmp_dir=None):
         extras = json.loads(command[command.index("-e") + 1])
         run_id = extras["last_run_id"]
         payload = {
@@ -1646,7 +1646,7 @@ def test_cmd_review_does_not_fall_back_to_canonical_last_run(tmp_path, monkeypat
     cache = home / ".cache" / "ansible-plaibook"
     cache.mkdir(parents=True)
 
-    def fake_run(command, *, playbook_root, verbose, env=None):
+    def fake_run(command, *, playbook_root, verbose, env=None, tmp_dir=None):
         last_run_canonical_path(home=home).write_text(
             json.dumps(
                 {
@@ -2008,7 +2008,7 @@ def test_cmd_review_reexecs_before_collections_when_sandboxed(tmp_path, monkeypa
     (home / ".cache" / "ansible-plaibook").mkdir(parents=True)
     order = []
 
-    def fake_run(command, *, playbook_root, verbose, env=None):
+    def fake_run(command, *, playbook_root, verbose, env=None, tmp_dir=None):
         extras = json.loads(command[command.index("-e") + 1])
         path = last_run_path(extras["last_run_id"], home=home)
         path.write_text(json.dumps({"run_id": extras["last_run_id"], "status": "ok", "targets": []}))
@@ -2041,7 +2041,7 @@ def test_cmd_review_installs_openai_provider_sdk(tmp_path, monkeypatch):
     (home / ".cache" / "ansible-plaibook").mkdir(parents=True)
     families = []
 
-    def fake_run(command, *, playbook_root, verbose, env=None):
+    def fake_run(command, *, playbook_root, verbose, env=None, tmp_dir=None):
         extras = json.loads(command[command.index("-e") + 1])
         path = last_run_path(extras["last_run_id"], home=home)
         path.write_text(json.dumps({"run_id": extras["last_run_id"], "status": "ok", "targets": []}))
@@ -2599,7 +2599,7 @@ def test_cmd_review_corrupt_last_run(tmp_path, monkeypatch, capsys):
     home = tmp_path / "home"
     (home / ".cache" / "ansible-plaibook").mkdir(parents=True)
 
-    def fake_run(command, *, playbook_root, verbose, env=None):
+    def fake_run(command, *, playbook_root, verbose, env=None, tmp_dir=None):
         extras = json.loads(command[command.index("-e") + 1])
         path = last_run_path(extras["last_run_id"], home=home)
         path.write_text("{truncated", encoding="utf-8")
