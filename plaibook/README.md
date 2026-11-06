@@ -130,4 +130,4 @@ execution-environment jobs keep calling `ansible-playbook review.yml`.
 
 - Repo overview: [../README.md](../README.md)
 - First review: [../docs/getting-started.md](../docs/getting-started.md)
-- Skill: [../.claude/skills/ansible-plaibook-review/SKILL.md](../.claude/skills/ansible-plaibook-review/SKILL.md)
+- Skill (project skills in a checkout; `plai` installs a user copy for each agent CLI it finds when `plai_skill` is enabled, see [Getting Started](../docs/getting-started.md#upgrade-an-installed-cli)): [../.agents/skills/ansible-plaibook-review/SKILL.md](../.agents/skills/ansible-plaibook-review/SKILL.md)
