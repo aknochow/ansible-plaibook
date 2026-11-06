@@ -880,3 +880,7 @@ review_clone_transient_pattern: >-
   Could not resolve host|Could not resolve proxy|Couldn't connect to server|Temporary failure in name resolution|Failed to connect|Connection timed out|Connection reset|The requested URL returned error: 50[234]|early EOF|TLS connection was non-properly terminated
 review_clone_retries: 3
 review_clone_retry_delay: 10
+
+# Delete the PR or branch review clone when the review ends, including a
+# failed run. false keeps it and prints its path, for debugging.
+review_cleanup_clone: true
