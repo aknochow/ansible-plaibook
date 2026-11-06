@@ -308,10 +308,13 @@ def ask_to_enable(
     )
     stderr.flush()
     try:
-        answer = stdin.readline().strip().lower()
+        line = stdin.readline()
     except EOFError:
-        answer = "n"
-    return answer in ("", "y", "yes")
+        return False
+    if not line:
+        # End of input (Ctrl-D or a closed stdin) is not consent.
+        return False
+    return line.strip().lower() in ("", "y", "yes")
 
 
 def sync_to_stderr(home: Path | None = None, *, stderr: TextIO = sys.stderr) -> int:
@@ -331,5 +334,6 @@ def stale_copies(home: Path | None = None) -> list[TargetStatus]:
     """plai's own copies that differ from this install. Never writes."""
     try:
         return [item for item in sync_skill(home, write=False) if item.state == STALE]
-    except OSError:
+    except OSError as exc:
+        print(f"Could not check the plaibook review skill copies: {exc}", file=sys.stderr)
         return []

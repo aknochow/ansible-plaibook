@@ -164,6 +164,29 @@ def test_ask_defaults_to_yes_and_accepts_no(home):
     locations = [_BY_KEY["claude-code"]]
     assert skill.ask_to_enable(locations, home=home, stdin=io.StringIO("\n"), stderr=io.StringIO())
     assert not skill.ask_to_enable(locations, home=home, stdin=io.StringIO("n\n"), stderr=io.StringIO())
+    assert not skill.ask_to_enable(locations, home=home, stdin=io.StringIO(""), stderr=io.StringIO())
+
+
+def test_update_runs_the_sync_helper_isolated_from_the_working_directory(monkeypatch):
+    from plaibook import cli
+
+    seen = []
+
+    class Done:
+        returncode = 0
+
+    monkeypatch.setattr(cli.subprocess, "run", lambda argv, **kwargs: seen.append(argv) or Done())
+    cli._sync_review_skill_from_install()
+    assert seen[0][1:3] == ["-I", "-c"]
+
+
+def test_stale_check_reports_a_read_error(home, monkeypatch, capsys):
+    def boom(*args, **kwargs):
+        raise OSError("denied")
+
+    monkeypatch.setattr(skill, "sync_skill", boom)
+    assert skill.stale_copies(home) == []
+    assert "denied" in capsys.readouterr().err
 
 
 def test_setting_reads_enabled_disabled_or_unset():

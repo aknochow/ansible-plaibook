@@ -1097,7 +1097,7 @@ def _sync_review_skill_from_install() -> None:
     )
     try:
         result = subprocess.run(
-            [sys.executable, "-c", code],
+            [sys.executable, "-I", "-c", code],
             timeout=30,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
