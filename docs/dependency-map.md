@@ -105,7 +105,7 @@ head start.
 | `sdk.gemini` | google-genai | `google-genai>=1.0.0` | same floor, via the collection | `google-genai==2.27.0` | `plaibook/hashed/gemini-requirements.txt` |
 | `sdk.openai` | openai | `openai>=1.58.0` | same floor, via the collection | `openai==3.29.0` | `plaibook/hashed/openai-requirements.txt` |
 | `sdk.cursor` | cursor-sdk | `cursor-sdk>=1.0.31,<2.0.0` | `cursor-sdk>=1.0.31,<2.0.0` in `pyproject.toml` | `cursor-sdk==1.0.35` | `plaibook/hashed/cursor-requirements.txt` and `sandbox-runtime-requirements.txt` |
-| `sdk.openshell` | openshell | `openshell>=0.1.3,<0.2` | `openshell>=0.1.3,<0.2` in `pyproject.toml` and `plaibook/openshell_sdk.py` | `openshell==0.1.6` | `plaibook/hashed/openshell-requirements.txt` |
+| `sdk.openshell` | openshell | `openshell>=0.1.3,<0.2` | `openshell>=0.1.3,<0.2` in `pyproject.toml` and `plaibook/openshell_sdk.py` | `openshell==0.1.7` | `plaibook/hashed/openshell-requirements.txt` |
 
 Direct inputs for the hashed files are `plaibook/hashed/*.in`.
 `scripts/compile-hashed-sdks.sh` writes the `*-requirements.txt`
@@ -116,8 +116,8 @@ the plaibook package itself.
 
 | Id | What it is | Current pin | Where |
 |---|---|---|---|
-| `sdk.openshell` | Python package imported by the collection and by plaibook | `openshell==0.1.6`, range `openshell>=0.1.3,<0.2` | Hashed file, `plaibook/openshell_sdk.py`, and the collection at `collection.openshell`. |
-| `openshell.gateway` | CLI and local gateway the review workflow starts | `OPENSHELL_VERSION=v0.1.6`. Installer source commit `ac7f615cd12d5cc49cb16eb1f5f10ffeb1e90f47`. sha256 `04c1a437d4a4fc11930d75a336fc4f52bf0c95251e8469c306e407e203769ae7` | `.github/openshell-pins.env` |
+| `sdk.openshell` | Python package imported by the collection and by plaibook | `openshell==0.1.7`, range `openshell>=0.1.3,<0.2` | Hashed file, `plaibook/openshell_sdk.py`, and the collection at `collection.openshell`. |
+| `openshell.gateway` | CLI and local gateway the review workflow starts | `OPENSHELL_VERSION=v0.1.7`. Installer source commit `5d25211b25a8fc887e8d5c606d57d6ab22f1d76c`. sha256 `04c1a437d4a4fc11930d75a336fc4f52bf0c95251e8469c306e407e203769ae7` | `.github/openshell-pins.env` |
 | `openshell.sandbox-image` | Guest image the review runs inside | `ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e` | `.github/openshell-pins.env` |
 
 `bump-openshell-pins.yml` opens a pull request when OpenShell publishes a release, the SDK moves, or the image moves. The OpenShell smoke check starts that gateway and a sandbox, with no secrets. After a merge, `scripts/move_review_pin.py` moves `review.checkout` and then `review.caller`, in two pull requests. That step stays manual, because a bot that edits those pins would need permission to edit workflow files.
@@ -126,7 +126,7 @@ The gateway and the Python SDK share a major version (`0.1`). They do
 not share a patch number. Bumping the SDK does not by itself
 move the installer or the image digest.
 
-The image lock pins `openshell==0.1.6`. That matches the plaibook
+The image lock pins `openshell==0.1.7`. That matches the plaibook
 hashed install and the collection range at `collection.openshell`.
 
 ## Execution environment pins
@@ -145,7 +145,7 @@ difference as a bump to decide, not as the same pin.
 | openai | `openai==3.42.0` | `openai==3.29.0` |
 | cursor-sdk | not in the image | `cursor-sdk==1.0.35` |
 | xai-sdk | `xai-sdk==1.21.0` | `xai-sdk==1.21.0` |
-| openshell | `openshell==0.1.6` | `openshell==0.1.6` |
+| openshell | `openshell==0.1.7` | `openshell==0.1.7` |
 
 `plai review --ee` adds no pin. Its default image is
 `ghcr.io/aknochow/plaibook-ee:<plaibook version>`, computed from

@@ -1347,8 +1347,8 @@ oauthlib==4.0.1 \
 openai==3.42.0 \
     --hash=sha256:deffe27f9e20e4f1d9d471978d12f23aa119382494c0a9860795e66943d0fe42 \
     --hash=sha256:efb9d089ecf66c668289f647717389df98b40b954cd86d4fe54eddce39aabb3f
-openshell==0.1.6 \
-    --hash=sha256:a0c5b0e9954ffdbdb4d34110d4a9d0d2dc57579a53e4a67372e0f8dd3b75cd81
+openshell==0.1.7 \
+    --hash=sha256:21de1816fd3dc5627c625782c616816ddb8cf6d40ed2aaf568c8d941fffb65c1
 opentelemetry-api==1.45.2 \
     --hash=sha256:2cbd737377e710ee740d261c94e93fa0f08e6d037c18f17513cc0a2d94479a34 \
     --hash=sha256:d7b0008e21e5fd61cbe7a7f34ca3b6905a78ab677d9bc395e299359c75cda6b4
