@@ -785,7 +785,7 @@ wheels = [
 
 [[package]]
 name = "openshell"
-version = "0.1.6"
+version = "0.1.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cloudpickle" },
@@ -795,7 +795,7 @@ dependencies = [
     { name = "protobuf" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f5/04/d563f51ae4cb5c2439340b8af7e64674bdcc335f55e945b36f57221bb841/openshell-0.1.6-py3-none-any.whl", hash = "sha256:a0c5b0e9954ffdbdb4d34110d4a9d0d2dc57579a53e4a67372e0f8dd3b75cd81", size = 150773, upload-time = "2026-10-28T00:21:48.415Z" },
+    { url = "https://files.pythonhosted.org/packages/56/f1/f0689ab3a8f7227df53d8f6532aceef6330993bb5ae1ff9faeb84323476a/openshell-0.1.7-py3-none-any.whl", hash = "sha256:21de1816fd3dc5627c625782c616816ddb8cf6d40ed2aaf568c8d941fffb65c1", size = 167663, upload-time = "2026-11-03T22:09:21.296Z" },
 ]
 
 [[package]]
