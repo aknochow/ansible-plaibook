@@ -70,7 +70,7 @@ def read_version(root: Path) -> str:
     module = _one(_MODULE, (root / "plaibook" / "__init__.py").read_text(encoding="utf-8"), "plaibook/__init__.py")
     skill = _one(
         _SKILL,
-        (root / ".claude" / "skills" / "ansible-plaibook-review" / "SKILL.md").read_text(encoding="utf-8"),
+        (root / ".agents" / "skills" / "ansible-plaibook-review" / "SKILL.md").read_text(encoding="utf-8"),
         "SKILL.md",
     )
     readme = (root / "README.md").read_text(encoding="utf-8")
@@ -102,7 +102,7 @@ def write_version(root: Path, new: str) -> None:
     targets = {
         root / "pyproject.toml": _PYPROJECT,
         root / "plaibook" / "__init__.py": _MODULE,
-        root / ".claude" / "skills" / "ansible-plaibook-review" / "SKILL.md": _SKILL,
+        root / ".agents" / "skills" / "ansible-plaibook-review" / "SKILL.md": _SKILL,
         root / "README.md": _README_PROSE,
     }
     updated: dict[Path, str] = {}

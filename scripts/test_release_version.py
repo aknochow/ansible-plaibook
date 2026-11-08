@@ -16,10 +16,10 @@ SHA = "a" * 40
 
 def _tree(tmp_path: Path, version: str = "0.1.26") -> Path:
     (tmp_path / "plaibook").mkdir()
-    (tmp_path / ".claude" / "skills" / "ansible-plaibook-review").mkdir(parents=True)
+    (tmp_path / ".agents" / "skills" / "ansible-plaibook-review").mkdir(parents=True)
     (tmp_path / "pyproject.toml").write_text(f'[project]\nversion = "{version}"\n', encoding="utf-8")
     (tmp_path / "plaibook" / "__init__.py").write_text(f'__version__ = "{version}"\n', encoding="utf-8")
-    (tmp_path / ".claude" / "skills" / "ansible-plaibook-review" / "SKILL.md").write_text(
+    (tmp_path / ".agents" / "skills" / "ansible-plaibook-review" / "SKILL.md").write_text(
         f'---\nversion: "{version}"\n---\n',
         encoding="utf-8",
     )
