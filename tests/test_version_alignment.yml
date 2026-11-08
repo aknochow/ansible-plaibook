@@ -23,7 +23,7 @@
   tasks:
     - name: Read the skill frontmatter
       ansible.builtin.slurp:
-        src: "{{ repo_root }}/.claude/skills/ansible-plaibook-review/SKILL.md"
+        src: "{{ repo_root }}/.agents/skills/ansible-plaibook-review/SKILL.md"
       register: skill_file
 
     - name: Read the package version
