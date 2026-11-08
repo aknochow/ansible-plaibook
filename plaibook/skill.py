@@ -185,15 +185,14 @@ def _copy_status(directory: Path, source: bytes) -> tuple[str, str]:
         return USER_OWNED, "SKILL.md is not a regular file"
     current = skill_md.read_bytes()
     manifest = _read_manifest(directory)
-    if manifest is None:
-        if current == source:
-            return ADOPT, "matches this install, no manifest"
-        return USER_OWNED, "no plaibook manifest"
-    if manifest["sha256"] != _sha256(current):
-        return USER_OWNED, "edited since plai wrote it"
+    if manifest is not None and manifest["sha256"] == _sha256(current):
+        return (CURRENT, "") if current == source else (STALE, "differs from this install")
+    # A copy identical to this install has nothing of the user's in it, so
+    # plai takes it over and writes a fresh manifest. This also repairs a
+    # sync that wrote SKILL.md but failed before writing the manifest.
     if current == source:
-        return CURRENT, ""
-    return STALE, "differs from this install"
+        return ADOPT, "matches this install, " + ("no manifest" if manifest is None else "manifest out of date")
+    return USER_OWNED, "no plaibook manifest" if manifest is None else "edited since plai wrote it"
 
 
 def _bundled() -> tuple[bytes, str] | TargetStatus:

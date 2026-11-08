@@ -112,6 +112,27 @@ def test_adopts_an_identical_copy_with_no_manifest(home):
     assert (copy / MANIFEST_NAME).is_file()
 
 
+def test_a_failed_manifest_write_is_repaired_on_the_next_sync(home, monkeypatch):
+    (home / ".claude").mkdir()
+    copy = skill_dir(_BY_KEY["claude-code"], home)
+    _plant(copy, b'---\nversion: "0.1.0"\n---\nold\n')
+    real_write = skill._atomic_write_bytes
+
+    def fail_on_manifest(path, data):
+        if path.name == MANIFEST_NAME:
+            raise OSError("disk full")
+        real_write(path, data)
+
+    monkeypatch.setattr(skill, "_atomic_write_bytes", fail_on_manifest)
+    assert _states(sync_skill(home)) == {"claude-code": ERROR}
+    assert (copy / "SKILL.md").read_bytes() == BODY
+
+    monkeypatch.setattr(skill, "_atomic_write_bytes", real_write)
+    assert _states(sync_skill(home, write=False)) == {"claude-code": ADOPT}
+    assert _states(sync_skill(home)) == {"claude-code": INSTALLED}
+    assert _states(sync_skill(home)) == {"claude-code": CURRENT}
+
+
 def test_leaves_a_symlinked_skill_alone(home, tmp_path):
     (home / ".claude" / "skills").mkdir(parents=True)
     checkout = tmp_path / "checkout" / "skill"
