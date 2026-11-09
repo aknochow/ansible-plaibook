@@ -165,6 +165,24 @@ def test_an_unreadable_directory_is_reported_not_raised(tmp_path, cache, restore
     assert len(result.errors) == 1 and str(scratch) in result.errors[0]
 
 
+def test_a_file_written_after_the_age_check_is_kept(tmp_path, cache, monkeypatch):
+    dump = _dir(cache / "debug_prompts" / "github-org-repo-1", OLD)
+    stale = _touch(dump / "old-lens.txt", OLD)
+    os.utime(dump, (OLD, OLD))
+
+    def is_old_then_write(dir_fd, name, cutoff):
+        # A concurrent review writes a dump right after the check passes.
+        _touch(dump / "lens.txt", NEW)
+        os.utime(dump, (OLD, OLD))
+        return True
+
+    monkeypatch.setattr(retention, "_is_old", is_old_then_write)
+    result = prune_run_files(14, tmp_path, now=NOW)
+    assert result.removed == [] and result.errors == []
+    assert (dump / "lens.txt").exists()
+    assert not stale.exists()
+
+
 def test_a_tree_too_deep_to_walk_is_reported_and_skipped(tmp_path, cache, monkeypatch):
     deep = _dir(cache / "tmp" / "review-1-abc", OLD)
     removed = _touch(cache / "last_run.AAAAAAAAAAAAAAAA.json", OLD)

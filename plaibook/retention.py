@@ -89,19 +89,32 @@ def _is_old(dir_fd: int, name: str, cutoff: float) -> bool:
         os.close(fd)
 
 
-def _remove(dir_fd: int, name: str) -> None:
-    """Delete ``name`` under ``dir_fd``. Symlinks inside are unlinked, never followed."""
+def _remove_old(dir_fd: int, name: str, cutoff: float) -> bool:
+    """Delete ``name`` under ``dir_fd`` if it is still old. True when it is gone.
+
+    Each file's age is checked again just before it is unlinked, so a file
+    a concurrent review writes after the :func:`_is_old` check is kept, and
+    so is the directory holding it. Symlinks are unlinked, never followed.
+    """
     info = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+    if info.st_mtime >= cutoff:
+        return False
     if not stat.S_ISDIR(info.st_mode):
         os.unlink(name, dir_fd=dir_fd)
-        return
+        return True
     fd = _open_dir(name, dir_fd)
     try:
         for entry in _entries(fd):
-            _remove(fd, entry.name)
+            _remove_old(fd, entry.name, cutoff)
     finally:
         os.close(fd)
-    os.rmdir(name, dir_fd=dir_fd)
+    try:
+        os.rmdir(name, dir_fd=dir_fd)
+    except OSError as exc:
+        if exc.errno in (errno.ENOTEMPTY, errno.EEXIST):
+            return False
+        raise
+    return True
 
 
 def _prune_dir(
@@ -124,9 +137,8 @@ def _prune_dir(
             mode = entry.stat(follow_symlinks=False).st_mode
             if stat.S_ISLNK(mode) or (pattern is not None and not stat.S_ISREG(mode)):
                 continue
-            if not _is_old(fd, entry.name, cutoff):
+            if not _is_old(fd, entry.name, cutoff) or not _remove_old(fd, entry.name, cutoff):
                 continue
-            _remove(fd, entry.name)
         except FileNotFoundError:
             continue
         except (OSError, RecursionError) as exc:
