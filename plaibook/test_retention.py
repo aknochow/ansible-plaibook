@@ -229,6 +229,16 @@ def test_start_run_skips_pruning_while_another_review_runs(tmp_path, cache):
     assert result.busy and result.removed == [] and old.exists()
 
 
+def test_start_run_does_not_use_a_symlinked_cache(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    (tmp_path / ".cache").mkdir()
+    (tmp_path / ".cache" / "ansible-plaibook").symlink_to(real, target_is_directory=True)
+    result, fd = retention.start_run(14, tmp_path)
+    assert fd is None and result.errors == []
+    assert not (real / retention.RUN_LOCK_NAME).exists()
+
+
 def test_start_run_without_a_cache_holds_no_lock(tmp_path):
     (tmp_path / ".cache").write_text("not a directory")
     result, fd = retention.start_run(14, tmp_path)

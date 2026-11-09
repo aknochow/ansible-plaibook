@@ -205,17 +205,31 @@ def start_run(days: int, home: Path | None = None) -> tuple[PruneResult, int | N
     Returns the result and the lock's file descriptor. The caller keeps the
     descriptor open for the whole run; the process exiting releases it.
     Without a usable cache directory, nothing is pruned and no lock is held.
+    A cache directory that is a symlink is not used, the same as for pruning.
     """
     cache = last_run_dir(home)
     try:
         cache.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return PruneResult(errors=[f"{cache}: {exc}"]), None
+    try:
+        root = _open_dir(cache)
+    except OSError as exc:
+        # ELOOP (Linux) or ENOTDIR (macOS): the cache is a symlink.
+        if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+            return PruneResult(), None
+        return PruneResult(errors=[f"{cache}: {exc}"]), None
+    try:
         fd = os.open(
-            cache / RUN_LOCK_NAME,
+            RUN_LOCK_NAME,
             os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
             0o600,
+            dir_fd=root,
         )
     except OSError as exc:
         return PruneResult(errors=[f"{cache / RUN_LOCK_NAME}: {exc}"]), None
+    finally:
+        os.close(root)
     try:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
