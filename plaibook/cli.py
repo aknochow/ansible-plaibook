@@ -615,6 +615,11 @@ def cmd_review(args: argparse.Namespace) -> int:
     if conflict:
         print(conflict, file=sys.stderr)
         return 2
+    try:
+        _prune_old_run_files(extras)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     if getattr(args, "ee", False):
         return _cmd_review_ee(args, root, run_id, extras)
     if getattr(args, "ee_image", None):
@@ -696,6 +701,25 @@ def cmd_review(args: argparse.Namespace) -> int:
         scratch_dir=runtime_tmp_dir,
         summary_file=last_run_path(run_id),
     )
+
+
+def _prune_old_run_files(extras: dict) -> None:
+    """Remove cache run files older than review_log_retention_days. Raises ValueError on a bad setting."""
+    from plaibook import retention
+
+    try:
+        operator_vars = load_vars()
+    except ConfigError:
+        operator_vars = {}
+    days = retention.retention_days(extras, operator_vars)
+    result = retention.prune_run_files(days)
+    if result.removed:
+        print(
+            f"Removed {len(result.removed)} run files older than {days} days ({retention.SETTING}).",
+            file=sys.stderr,
+        )
+    for error in result.errors:
+        print(f"Could not remove an old run file: {error}", file=sys.stderr)
 
 
 def _cleanup_clone_enabled(extras: dict) -> bool:

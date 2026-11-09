@@ -7,6 +7,7 @@ for the whole session and is restored afterwards.
 """
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -30,3 +31,21 @@ def _hermetic_git_config():
         yield
     finally:
         mp.undo()
+
+
+@pytest.fixture(autouse=True)
+def _no_pruning_of_the_real_cache(monkeypatch):
+    """plai review prunes ~/.cache/ansible-plaibook; never the developer's own during tests.
+
+    A test that wants pruning passes ``home`` to prune_run_files explicitly.
+    """
+    try:
+        from plaibook import retention
+    except ImportError:
+        return
+    real = retention.last_run_dir
+
+    def guarded(home=None):
+        return real(home) if home is not None else Path(os.devnull) / "no-cache"
+
+    monkeypatch.setattr(retention, "last_run_dir", guarded)
