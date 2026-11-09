@@ -13,6 +13,7 @@ import stat
 import string
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 PLAYBOOK_NAME = "review.yml"
@@ -274,8 +275,12 @@ def run_ansible_playbook(
     verbose: bool,
     env: dict[str, str] | None = None,
     home: Path | None = None,
+    tmp_dir: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run ansible-playbook. Quiet mode captures output; -v inherits the TTY.
+
+    ``tmp_dir`` is the child's TMPDIR, where its clones go. It defaults to
+    the shared runtime scratch directory.
 
     A timeout or Ctrl-C kills the playbook process group. The child is
     started in its own session, so the terminal SIGINT does not reach it.
@@ -289,12 +294,26 @@ def run_ansible_playbook(
     if env:
         merged.update(env)
     merged["ANSIBLE_CONFIG"] = str(playbook_root / ANSIBLE_CFG_NAME)
-    merged["TMPDIR"] = str(runtime_tmp_dir(home))
+    merged["TMPDIR"] = str(tmp_dir if tmp_dir is not None else runtime_tmp_dir(home))
     merge_collections_path(merged, home=home)
     async_dir = async_dir_override(merged)
     if async_dir:
         merged["ANSIBLE_ASYNC_DIR"] = async_dir
     return run_process_group(command, env=merged, verbose=verbose, timeout=timeout)
+
+
+def run_scratch_dir(run_id: str, parent: Path) -> Path:
+    """A private scratch directory for one playbook run, inside the runtime scratch.
+
+    The caller removes it when the run ends, however it ends, so a failed,
+    timed-out, or interrupted run does not leave its clones behind.
+    """
+    root = parent
+    safe_id = "".join(ch for ch in run_id if ch.isalnum())[:32] or "run"
+    try:
+        return Path(tempfile.mkdtemp(prefix=f"run-{safe_id}-", dir=root))
+    except OSError as exc:
+        raise ScratchDirError(f"Cannot create this run's scratch directory in {root}: {exc}") from exc
 
 
 def run_process_group(

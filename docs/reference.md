@@ -62,6 +62,7 @@ status: stable
 | Variable | Default | Purpose |
 |---|---|---|
 | `cleanup_sandbox_onfail` | `true` | Tears the sandbox down even after a failed run. Set `false` to leave a failed run's sandbox up for debugging. |
+| `review_cleanup_clone` | `true` | Deletes the PR or branch review clone when the review ends, including after a failure. `plai review` also deletes the run's scratch directory after Ctrl-C or a timeout. Set `false` to keep the clone and print its path. |
 | `sandbox_policy` | Filesystem paths, no network rules | Passed to `aknochow.openshell.sandbox`. Sandbox commands have no egress. Any explicit policy **replaces** this one, including `network_policies`. `{}` keeps the image's own policy, which may never activate. |
 | `sandbox_workspace` | `OPENSHELL_WORKSPACE`, then `default` | OpenShell workspace for the review sandbox. |
 | `sandbox_tls_source` | n/a | Overrides the sandbox's TLS source when the default doesn't apply. |

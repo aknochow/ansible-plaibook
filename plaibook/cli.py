@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -36,6 +37,7 @@ from plaibook.playbook import (
     playbook_timeout_seconds,
     run_ansible_playbook,
     run_process_group,
+    run_scratch_dir,
     runtime_tmp_dir,
 )
 from plaibook.progress import create_progress_file
@@ -668,8 +670,25 @@ def cmd_review(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr)
         return 2
 
+    keep_scratch = not _cleanup_clone_enabled(extras)
+
     def run_playbook(*, verbose: bool, env: dict[str, str] | None) -> subprocess.CompletedProcess[str]:
-        return run_ansible_playbook(command, playbook_root=root, verbose=verbose, env=env)
+        # The run's clones live in its own scratch directory, removed here
+        # after a failure, a timeout, or Ctrl-C too. The playbook's own
+        # cleanup does not run when the process group is killed.
+        scratch = run_scratch_dir(run_id, runtime_tmp_dir())
+        try:
+            return run_ansible_playbook(
+                command, playbook_root=root, verbose=verbose, env=env, tmp_dir=scratch
+            )
+        finally:
+            if keep_scratch:
+                print(
+                    f"Kept this run's scratch directory at {scratch} (review_cleanup_clone=false)",
+                    file=sys.stderr,
+                )
+            else:
+                shutil.rmtree(scratch, ignore_errors=True)
 
     return _run_and_report(
         args,
@@ -677,6 +696,20 @@ def cmd_review(args: argparse.Namespace) -> int:
         scratch_dir=runtime_tmp_dir,
         summary_file=last_run_path(run_id),
     )
+
+
+def _cleanup_clone_enabled(extras: dict) -> bool:
+    """review_cleanup_clone from extra-vars, then vars.yml; true unless set false."""
+    if "review_cleanup_clone" in extras:
+        value = extras["review_cleanup_clone"]
+    else:
+        try:
+            value = load_vars().get("review_cleanup_clone", True)
+        except ConfigError:
+            value = True
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in ("false", "no", "off", "0")
 
 
 def _run_and_report(
