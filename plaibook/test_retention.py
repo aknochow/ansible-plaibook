@@ -248,7 +248,7 @@ def test_retention_days_order(extras, operator_vars, expected):
     assert retention_days(extras, operator_vars) == expected
 
 
-@pytest.mark.parametrize("value", ["-1", "two weeks", True, "1.5"])
+@pytest.mark.parametrize("value", ["-1", "two weeks", True, "1.5", "36501", "9" * 400])
 def test_retention_days_rejects_bad_values(value):
     with pytest.raises(ValueError, match="review_log_retention_days"):
         retention_days({"review_log_retention_days": value}, {})
@@ -308,4 +308,4 @@ def test_plai_review_refuses_a_bad_retention_value(tmp_path, monkeypatch, capsys
 
     args = _review_args(playbook_root=str(checkout), cli_extra_vars=["review_log_retention_days=-3"])
     assert cli.cmd_review(args) == 2
-    assert "review_log_retention_days must be 0 or more" in capsys.readouterr().err
+    assert "review_log_retention_days must be 0 to 36500 days" in capsys.readouterr().err

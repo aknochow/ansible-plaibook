@@ -40,6 +40,7 @@ from plaibook.playbook import RUN_ID_CHARS, RUN_ID_LENGTH, RUNTIME_TMP_DIRNAME, 
 
 SETTING = "review_log_retention_days"
 DEFAULT_DAYS = 14
+MAX_DAYS = 36500  # 100 years; larger values overflow the cutoff
 DEBUG_PROMPTS_DIRNAME = "debug_prompts"
 RUN_LOCK_NAME = "review-runs.lock"
 _LAST_RUN = re.compile(rf"last_run\.[{re.escape(RUN_ID_CHARS)}]{{{RUN_ID_LENGTH}}}\.json")
@@ -61,8 +62,8 @@ def retention_days(extras: Mapping[str, object], operator_vars: Mapping[str, obj
         days = int(str(value).strip())
     except ValueError:
         raise ValueError(f"{SETTING} must be a whole number of days, not {value!r}") from None
-    if days < 0:
-        raise ValueError(f"{SETTING} must be 0 or more, not {days}")
+    if not 0 <= days <= MAX_DAYS:
+        raise ValueError(f"{SETTING} must be 0 to {MAX_DAYS} days, not {days}")
     return days
 
 
