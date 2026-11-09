@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import os
 import time
 from types import SimpleNamespace
@@ -199,6 +200,41 @@ def test_a_tree_too_deep_to_walk_is_reported_and_skipped(tmp_path, cache, monkey
     assert deep.exists() and str(deep) in result.errors[0]
 
 
+def test_start_run_prunes_and_holds_a_shared_lock(tmp_path, cache):
+    old = _touch(cache / "last_run.AAAAAAAAAAAAAAAA.json", OLD)
+    result, fd = retention.start_run(14, tmp_path)
+    try:
+        assert result.removed == [old] and not result.busy
+        other = os.open(cache / retention.RUN_LOCK_NAME, os.O_RDWR)
+        try:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(other, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        finally:
+            os.close(other)
+    finally:
+        os.close(fd)
+
+
+def test_start_run_skips_pruning_while_another_review_runs(tmp_path, cache):
+    old = _touch(cache / "last_run.AAAAAAAAAAAAAAAA.json", OLD)
+    first_result, first = retention.start_run(14, tmp_path)
+    _touch(old, OLD)
+    try:
+        result, fd = retention.start_run(14, tmp_path)
+        os.close(fd)
+    finally:
+        os.close(first)
+    assert first_result.removed == [old]
+    assert result.busy and result.removed == [] and old.exists()
+
+
+def test_start_run_without_a_cache_holds_no_lock(tmp_path):
+    (tmp_path / ".cache").write_text("not a directory")
+    result, fd = retention.start_run(14, tmp_path)
+    assert fd is None and result.errors
+
+
 @pytest.mark.parametrize(
     "extras, operator_vars, expected",
     [
@@ -253,7 +289,7 @@ def test_plai_review_prunes_before_the_run(tmp_path, monkeypatch):
     (checkout / "ansible.cfg").write_text("[defaults]\n")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     calls = []
-    monkeypatch.setattr(retention, "prune_run_files", lambda days: calls.append(days) or retention.PruneResult())
+    monkeypatch.setattr(retention, "start_run", lambda days: (calls.append(days) or retention.PruneResult(), None))
     monkeypatch.setattr(cli, "_cmd_review_ee", lambda *args: calls.append("run") or 0)
 
     assert cli.cmd_review(_review_args(playbook_root=str(checkout))) == 0

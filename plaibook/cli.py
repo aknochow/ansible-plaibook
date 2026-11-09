@@ -703,23 +703,31 @@ def cmd_review(args: argparse.Namespace) -> int:
     )
 
 
+# Shared lock held for the rest of this process, so another plai review
+# does not prune while this one runs. See plaibook.retention.start_run.
+_RUN_LOCK_FD: int | None = None
+
+
 def _prune_old_run_files(extras: dict) -> None:
     """Remove cache run files older than review_log_retention_days. Raises ValueError on a bad setting."""
+    global _RUN_LOCK_FD
     from plaibook import retention
 
+    if _RUN_LOCK_FD is not None:
+        return
     try:
         operator_vars = load_vars()
     except ConfigError:
         operator_vars = {}
     days = retention.retention_days(extras, operator_vars)
-    result = retention.prune_run_files(days)
+    result, _RUN_LOCK_FD = retention.start_run(days)
     if result.removed:
         print(
             f"Removed {len(result.removed)} run files older than {days} days ({retention.SETTING}).",
             file=sys.stderr,
         )
     for error in result.errors:
-        print(f"Could not remove an old run file: {error}", file=sys.stderr)
+        print(f"Could not prune old run files: {error}", file=sys.stderr)
 
 
 def _cleanup_clone_enabled(extras: dict) -> bool:

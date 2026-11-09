@@ -11,6 +11,11 @@ everything):
 - per-target prompt dump directories under ``debug_prompts/``; each run of
   a target rewrites its own, so the directory is pruned as a whole
 
+Each review holds a shared lock on ``review-runs.lock`` for its whole
+run. Pruning needs that lock exclusively, so it never runs while another
+``plai review`` is writing to the cache. A run of ``review.yml`` that
+``plai`` did not start does not take the lock.
+
 An entry is old when it and everything inside it were last modified
 before the cutoff. A review is capped by the
 playbook timeout, far below a day, so nothing a running review holds is old
@@ -22,6 +27,7 @@ is kept, and one inside an old directory is unlinked with it.
 from __future__ import annotations
 
 import errno
+import fcntl
 import os
 import re
 import stat
@@ -35,6 +41,7 @@ from plaibook.playbook import RUN_ID_CHARS, RUN_ID_LENGTH, RUNTIME_TMP_DIRNAME, 
 SETTING = "review_log_retention_days"
 DEFAULT_DAYS = 14
 DEBUG_PROMPTS_DIRNAME = "debug_prompts"
+RUN_LOCK_NAME = "review-runs.lock"
 _LAST_RUN = re.compile(rf"last_run\.[{re.escape(RUN_ID_CHARS)}]{{{RUN_ID_LENGTH}}}\.json")
 
 
@@ -42,6 +49,7 @@ _LAST_RUN = re.compile(rf"last_run\.[{re.escape(RUN_ID_CHARS)}]{{{RUN_ID_LENGTH}
 class PruneResult:
     removed: list[Path] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    busy: bool = False  # another review was running, so nothing was pruned
 
 
 def retention_days(extras: Mapping[str, object], operator_vars: Mapping[str, object]) -> int:
@@ -188,3 +196,34 @@ def prune_run_files(days: int, home: Path | None = None, *, now: float | None = 
     finally:
         os.close(root)
     return result
+
+
+def start_run(days: int, home: Path | None = None) -> tuple[PruneResult, int | None]:
+    """Prune when no other review is running, then hold the shared run lock.
+
+    Returns the result and the lock's file descriptor. The caller keeps the
+    descriptor open for the whole run; the process exiting releases it.
+    Without a usable cache directory, nothing is pruned and no lock is held.
+    """
+    cache = last_run_dir(home)
+    try:
+        cache.mkdir(parents=True, exist_ok=True)
+        fd = os.open(
+            cache / RUN_LOCK_NAME,
+            os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+            0o600,
+        )
+    except OSError as exc:
+        return PruneResult(errors=[f"{cache / RUN_LOCK_NAME}: {exc}"]), None
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            result = PruneResult(busy=True)
+        else:
+            result = prune_run_files(days, home)
+        fcntl.flock(fd, fcntl.LOCK_SH)
+    except OSError as exc:
+        os.close(fd)
+        return PruneResult(errors=[f"{cache / RUN_LOCK_NAME}: {exc}"]), None
+    return result, fd
