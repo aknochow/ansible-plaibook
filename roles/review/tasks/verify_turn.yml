@@ -12,7 +12,7 @@
 
     - name: Determine if this is the last allowed turn
       ansible.builtin.set_fact:
-        verify_last_turn: "{{ (verify_turn_count | int) >= (review_verify_max_turns | int) }}"
+        verify_last_turn: "{{ (verify_turn_count | int) >= (verify_finding_max_turns | default(review_verify_max_turns) | int) }}"
 
     # Force trace_reachability on the first turn for reachability claims.
     # Tool call is mechanically required, not just suggested.
@@ -69,9 +69,13 @@
           consider raising review_structured_output_max_attempts, or
           checking whether this model has a known elevated rate of this
           issue, before assuming this is a one-off.
+      # A light check (a Minor or Nit) with no verdict ends inconclusive
+      # in verify_finding.yml and stays in the review. It does not fail
+      # the whole review.
       when:
         - verify_last_turn | bool
         - not (verify_dispatch_provider_error | default(false) | bool)
+        - not (verify_target_finding._verify_light | default(false) | bool)
 
     - name: Strip response-only fields before round-tripping this turn's content into the next request
       sanitize_response_content_for_request:

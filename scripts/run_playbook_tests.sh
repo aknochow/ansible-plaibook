@@ -61,6 +61,7 @@ PLAYBOOKS=(
   "tests/test_screen_diff_comments.yml"
   "tests/test_verify_boolean_stringification_note.yml"
   "tests/test_verify_provider_failure.yml"
+  "tests/test_verify_light_check.yml"
   "tests/test_verify_score_recompute.yml"
   "tests/test_version_alignment.yml"
   "tests/test_xai_transport_failures.yml"
@@ -85,7 +86,7 @@ run_playbook() {
   work="$(mktemp -d "${results}/work.XXXXXX")"
   mkdir -p "${work}/home" "${work}/tmp"
   set +e
-  if [[ "${pb}" == "tests/test_cursor_named_lens_retry.yml" || "${pb}" == "tests/test_cursor_lens_async_wait.yml" || "${pb}" == "tests/test_cursor_verify_status_error.yml" || "${pb}" == "tests/test_explore_tool_limit.yml" || "${pb}" == "tests/test_verify_boolean_stringification_note.yml" || "${pb}" == "tests/test_verify_provider_failure.yml" ]]; then
+  if [[ "${pb}" == "tests/test_cursor_named_lens_retry.yml" || "${pb}" == "tests/test_cursor_lens_async_wait.yml" || "${pb}" == "tests/test_cursor_verify_status_error.yml" || "${pb}" == "tests/test_explore_tool_limit.yml" || "${pb}" == "tests/test_verify_boolean_stringification_note.yml" || "${pb}" == "tests/test_verify_provider_failure.yml" || "${pb}" == "tests/test_verify_light_check.yml" ]]; then
     HOME="${work}/home" TMPDIR="${work}/tmp" ANSIBLE_ASYNC_DIR="${work}/async" \
       ANSIBLE_LIBRARY="${STUB_LIBRARY}${ANSIBLE_LIBRARY:+:${ANSIBLE_LIBRARY}}" \
       CURSOR_AGENT_STUB_FILE="${work}/cursor_agent_stub.json" \

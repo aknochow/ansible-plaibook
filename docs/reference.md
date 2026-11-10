@@ -28,6 +28,8 @@ status: stable
 | `fail_on_regressions` | `false` for `pr`/`branch`, `true` for `commit` | Whether a `NEEDS_CHANGES` verdict with a real Critical/Major finding makes the Ansible run itself exit non-zero. Lets a `commit_review` invocation gate a hook on the exit code directly. |
 | `review_same_commit_fast_path_enabled` | `true` | Skips lens dispatch, merge, and persistence when the target's current commit matches the last-reviewed one. `plai review -f` / `--force` sets this `false`. Pretty stdout labels a cache hit so a $0.00 cost is not mistaken for a live run. |
 | `review_explore_max_turns` | `3` for `pr`/`branch`, `0` for `commit` | How many additional turns the exploration pass gets to look beyond the diff itself. |
+| `review_verify_light_severities` | `["Minor", "Nit"]` | Findings of these severities that the full verification pass does not cover get a light check: the same verify agent and read tools, fewer turns, and no severity change. A refuted one is left out of the score and the posted review. With no verdict, the finding stays in as inconclusive instead of failing the review. `[]` turns it off. |
+| `review_verify_light_max_turns` | `2` | Turns for a light check: one round of reads, then the forced verdict. |
 
 ## Model selection
 

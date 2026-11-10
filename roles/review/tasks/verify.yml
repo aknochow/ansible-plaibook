@@ -1,12 +1,14 @@
 ---
 # Independent, adversarial re-check of findings' factual claims and assigned severity.
-# Runs after explore.yml to audit final findings set. Scoped to Critical/Major + Minor borderline signals.
+# Runs after explore.yml to audit final findings set. Scoped to Critical/Major + Minor borderline signals,
+# plus a light check (fewer turns, severity unchanged) of the other review_verify_light_severities findings.
 # Unconditionally defaults evidence_status/requires_execution and tags findings with stable verify index.
 - name: Default evidence_status/requires_execution, tag each finding with a stable verify index, and mark scope-eligible findings
   prepare_findings_for_verification:
     findings: "{{ deduped_findings }}"
     verify_severities: "{{ review_verify_severities }}"
     security_sensitive_pattern: "{{ review_verify_security_sensitive_pattern }}"
+    light_severities: "{{ review_verify_light_severities }}"
   register: _verify_prepared_result
 
 - name: Replace deduped_findings with the prepared copy
@@ -34,8 +36,9 @@
         msg: >-
           Verification pass: {{ verify_scoped_findings | length }}
           finding(s) in scope ({{ verify_scoped_findings | selectattr('severity', 'in', ['Critical', 'Major']) | list | length }}
-          Critical/Major, {{ verify_scoped_findings | selectattr('severity', 'equalto', 'Minor') | list | length }}
-          borderline Minor).
+          Critical/Major, {{ verify_scoped_findings | rejectattr('_verify_light') | selectattr('severity', 'equalto', 'Minor') | list | length }}
+          borderline Minor, {{ verify_scoped_findings | selectattr('_verify_light') | list | length }}
+          light Minor/Nit).
 
     # Read immediately-preceding round's summary.json for continuity resolution.
     # selectattr('finding_id', 'defined') guards against pre-finding_id versions.

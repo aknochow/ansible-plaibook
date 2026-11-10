@@ -65,6 +65,11 @@ def test_verify_eligible_is_also_stripped():
     assert result == [{"file": "a.py", "severity": "Minor"}]
 
 
+def test_verify_light_is_also_stripped():
+    findings = [{"file": "a.py", "severity": "Nit", "_verify_index": 0, "_verify_eligible": True, "_verify_light": True}]
+    assert strip_verify_index(findings) == [{"file": "a.py", "severity": "Nit"}]
+
+
 def test_a_finding_never_indexed_is_left_alone():
     # explore.yml's own fold-in step never adds _verify_index (only
     # verify.yml's prepare pass does) -- stripping a finding that never

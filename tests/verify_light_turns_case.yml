@@ -1,0 +1,55 @@
+---
+# One finding through verify.yml with a stub that never reports a verdict.
+# A light finding ends inconclusive after its turns. A Major still fails
+# the review on the forced final turn, as before.
+- name: Reset usage accounting for the {{ light_case.severity }} case
+  ansible.builtin.set_fact:
+    pipeline_agent_calls: []
+    _light_case_failed: false
+    deduped_findings:
+      - lens: Quality
+        file: plaibook/cli.py
+        line: 10
+        severity: "{{ light_case.severity }}"
+        confidence: LOW
+        description: A helper is unused.
+        evidence: "def _helper("
+        fix: Remove it.
+
+- name: Run verify over the {{ light_case.severity }}
+  block:
+    - name: Include verify.yml for the {{ light_case.severity }}
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: verify.yml
+  rescue:
+    - name: Record that verify failed the {{ light_case.severity }} case
+      ansible.builtin.set_fact:
+        _light_case_failed: true
+        _light_case_msg: "{{ ansible_failed_result.msg | default('') }}"
+
+- name: Assert the {{ light_case.severity }} used {{ light_case.turns }} turns
+  ansible.builtin.assert:
+    that:
+      - verify_finding_max_turns | int == light_case.turns
+      - verify_turn_count | int == light_case.turns
+    fail_msg: "max={{ verify_finding_max_turns }} turns={{ verify_turn_count }}"
+
+- name: Assert the {{ light_case.severity }} stayed in the review as inconclusive
+  when: not light_case.fails
+  ansible.builtin.assert:
+    that:
+      - not _light_case_failed
+      - deduped_findings[0].evidence_status == 'inconclusive'
+      - deduped_findings[0].severity == light_case.severity
+    fail_msg: >-
+      failed={{ _light_case_failed }} {{ _light_case_msg | default('') }}
+      finding={{ deduped_findings[0] | to_json }}
+
+- name: Assert the {{ light_case.severity }} still fails without a forced verdict
+  when: light_case.fails
+  ansible.builtin.assert:
+    that:
+      - _light_case_failed
+      - "'never produced a report_verdict' in _light_case_msg"
+    fail_msg: "failed={{ _light_case_failed }} {{ _light_case_msg | default('') }}"
