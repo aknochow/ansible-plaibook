@@ -14,9 +14,15 @@ import json
 import os
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 _GPT56 = re.compile(r"^gpt-5\.6(?:$|-)")
 _GPT6_LUNA = re.compile(r"^gpt-6-luna(?:$|-)")
+# Hosts known to accept the ``developer`` role. Every other OpenAI-compatible
+# server gets ``system``: the Ollama, llama.cpp, and vLLM chat templates
+# drop a ``developer`` message, so the model never sees its instructions.
+_DEVELOPER_ROLE_HOSTS = frozenset({"api.openai.com", "api.x.ai"})
+_INSTRUCTION_ROLES = ("developer", "system")
 
 
 def _copy_encrypted(item: dict, message: dict) -> dict:
@@ -183,6 +189,24 @@ def openai_lens_reasoning_effort(model: str, configured: str = "") -> str:
     if _GPT56.match((model or "").strip().lower()):
         return "none"
     return ""
+
+
+def openai_instruction_role(base_url: str, configured: str = "") -> str:
+    """Role for the instruction message of a Chat Completions call.
+
+    An operator value (``developer`` or ``system``) wins. Otherwise
+    ``developer`` for the hosted OpenAI and xAI APIs, and ``system`` for any
+    other base URL.
+    """
+    chosen = (configured or "").strip().lower()
+    if chosen:
+        if chosen not in _INSTRUCTION_ROLES:
+            raise ValueError(
+                f"review_openai_instruction_role must be developer or system, not {configured!r}"
+            )
+        return chosen
+    host = (urlparse((base_url or "").strip()).hostname or "").lower()
+    return "developer" if host in _DEVELOPER_ROLE_HOSTS else "system"
 
 
 def openai_tool_reasoning_effort(model: str) -> str:
@@ -399,6 +423,7 @@ class FilterModule:
             "openai_tool_calls_with_input": openai_tool_calls_with_input,
             "openai_lens_reasoning_effort": openai_lens_reasoning_effort,
             "openai_tool_reasoning_effort": openai_tool_reasoning_effort,
+            "openai_instruction_role": openai_instruction_role,
             "openai_reasoning_tokens": openai_reasoning_tokens,
             "xai_stop_reason": xai_stop_reason,
             "xai_lens_needs_transport_retry": xai_lens_needs_transport_retry,

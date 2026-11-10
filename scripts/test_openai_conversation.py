@@ -281,6 +281,63 @@ def test_openai_tasks_call_the_gpt56_filters():
     ) in defaults
 
 
+@pytest.mark.parametrize(
+    "base_url, expected",
+    [
+        ("https://api.openai.com/v1", "developer"),
+        ("https://API.OpenAI.com/v1/", "developer"),
+        ("https://api.x.ai/v1", "developer"),
+        ("http://localhost:11434/v1", "system"),
+        ("http://127.0.0.1:8080/v1", "system"),
+        ("https://openrouter.example.com/api/v1", "system"),
+        ("https://api.openai.com.example.com/v1", "system"),
+        ("", "system"),
+    ],
+)
+def test_instruction_role_follows_the_base_url(base_url, expected):
+    from openai_conversation import openai_instruction_role
+
+    assert openai_instruction_role(base_url) == expected
+
+
+def test_instruction_role_override_wins_and_is_validated():
+    from openai_conversation import openai_instruction_role
+
+    assert openai_instruction_role("https://api.openai.com/v1", "system") == "system"
+    assert openai_instruction_role("http://localhost:11434/v1", " Developer ") == "developer"
+    with pytest.raises(ValueError, match="developer or system"):
+        openai_instruction_role("http://localhost:11434/v1", "assistant")
+
+
+_OPENAI_CALL_FILES = {
+    "dispatch_lens_openai.yml": 2,
+    "dispatch_explore_turn_attempt_openai.yml": 1,
+    "dispatch_verify_turn_attempt_openai.yml": 1,
+    "verify_continuity_audit.yml": 1,
+}
+
+
+@pytest.mark.parametrize("name, calls", sorted(_OPENAI_CALL_FILES.items()))
+def test_every_openai_call_resolves_the_role_and_llama_mode(name, calls):
+    text = (Path(__file__).parents[1] / "roles/review/tasks" / name).read_text(encoding="utf-8")
+    assert "'role': 'developer'" not in text and "role: developer" not in text
+    assert "llama_server_mode: false" not in text
+    assert text.count("openai_instruction_role(review_openai_instruction_role)") >= calls
+    assert text.count('llama_server_mode: "{{ review_openai_llama_server_mode | bool }}"') == calls
+
+
+def test_role_and_llama_defaults_are_overridable_and_off_by_default():
+    defaults = (Path(__file__).parents[1] / "roles/review/defaults/main.yml").read_text(encoding="utf-8")
+    assert (
+        "review_openai_instruction_role: "
+        "\"{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_OPENAI_INSTRUCTION_ROLE') | default('', true) }}\""
+    ) in defaults
+    assert (
+        "review_openai_llama_server_mode: \"{{ lookup('ansible.builtin.env', "
+        "'ANSIBLE_REVIEW_OPENAI_LLAMA_SERVER_MODE') | default(false, true) | bool }}\""
+    ) in defaults
+
+
 _USAGE = {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12, "cached_tokens": 4,
           "reasoning_tokens": 1, "cost_in_usd_ticks": 50}
 

@@ -246,6 +246,14 @@ review_openai_lens_reasoning_effort: "{{ lookup('ansible.builtin.env', 'ANSIBLE_
 # operators.
 review_openai_continuity_max_completion_tokens: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_OPENAI_CONTINUITY_MAX_COMPLETION_TOKENS') | default(review_openai_max_completion_tokens, true) | int }}"
 review_openai_continuity_reasoning_effort: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_OPENAI_CONTINUITY_REASONING_EFFORT') | default(review_openai_lens_reasoning_effort, true) }}"
+# Role of the instruction message on every OpenAI-compatible call: developer
+# or system. Empty picks developer for api.openai.com and api.x.ai and system
+# for any other base URL (Ollama, llama.cpp, and vLLM drop a developer
+# message, so the model would get no instructions).
+review_openai_instruction_role: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_OPENAI_INSTRUCTION_ROLE') | default('', true) }}"
+# true sends llama.cpp's chat_template_kwargs extension. Only for a
+# llama.cpp server; hosted APIs reject it.
+review_openai_llama_server_mode: "{{ lookup('ansible.builtin.env', 'ANSIBLE_REVIEW_OPENAI_LLAMA_SERVER_MODE') | default(false, true) | bool }}"
 
 # aknochow.claude.agent auth for agent_family=claude_cli: no
 # ANTHROPIC_API_KEY/provider config here on purpose, mirroring
