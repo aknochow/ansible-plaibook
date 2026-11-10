@@ -41,6 +41,10 @@
 
 - name: Seed this finding's verification conversation
   ansible.builtin.set_fact:
+    # A light check (a Minor or Nit outside the full scope) gets fewer turns.
+    verify_finding_max_turns: >-
+      {{ (review_verify_light_max_turns if (verify_target_finding._verify_light | default(false) | bool)
+          else review_verify_max_turns) | int }}
     verify_messages:
       - role: user
         content: >-
@@ -61,7 +65,7 @@
 
 - name: Run the verification turn loop for this finding
   ansible.builtin.include_tasks: verify_turn.yml
-  loop: "{{ range(0, review_verify_max_turns | int) | list }}"
+  loop: "{{ range(0, verify_finding_max_turns | int) | list }}"
   loop_control:
     loop_var: turn_index
   when: not review_verify_done
@@ -110,9 +114,14 @@
       ansible.builtin.set_fact:
         verify_result_severity_assessed: false
 
+# A light check decides only whether the claim is true. Its severity
+# answers come from fewer turns, so they never move the finding.
 - name: Use the computed suggested severity, or pass the finding's own severity through unchanged
   ansible.builtin.set_fact:
-    verify_result_suggested_severity: "{{ _severity_result.suggested_severity if verify_result_severity_assessed else verify_target_finding.severity }}"
+    verify_result_suggested_severity: >-
+      {{ _severity_result.suggested_severity
+         if (verify_result_severity_assessed and not (verify_target_finding._verify_light | default(false) | bool))
+         else verify_target_finding.severity }}
 
 # Resolve continuity claim independently of severity (orthogonal judgments).
 # should_audit gates cost-bearing audit call (only when claim matches real prior finding).

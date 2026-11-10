@@ -88,6 +88,14 @@ tool say "this looks like an XSS vector... on closer inspection, refuted"
 in the same report, rather than shipping every plausible-sounding claim
 as fact.
 
+Minor and Nit findings outside that scope get a light check from the
+same verify agent: `review_verify_light_max_turns` turns (one round of
+reads, then the verdict), and no severity change. The lenses run
+without tools, so a Minor or Nit can make a claim about code they never
+read, and a read refutes it. A refuted one is left out of the score and
+the posted review. When the light check reaches no verdict, the
+finding stays in the review as inconclusive.
+
 A newer pass, finding-identity continuity, extends the same idea across
 review *rounds*: when a finding recurs after a fix, an independent audit
 call confirms or refutes whether it's genuinely the same finding before

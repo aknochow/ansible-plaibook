@@ -44,7 +44,7 @@ BASELINE_RESULT = [
         "used_static_reachability_trace": False,
         "continues_finding_id": None, "continuity_status": None, "continuity_rationale": None,
         "file": "a.py", "line": 10, "severity": "Major", "lens": "Security", "evidence": "e1",
-        "_verify_index": 0, "_verify_eligible": True, "finding_id": "id-0",
+        "_verify_index": 0, "_verify_eligible": True, "_verify_light": False, "finding_id": "id-0",
     },
     {
         "evidence_status": "already_set", "requires_execution": True,
@@ -52,7 +52,7 @@ BASELINE_RESULT = [
         "used_static_reachability_trace": False,
         "continues_finding_id": None, "continuity_status": None, "continuity_rationale": None,
         "file": "b.py", "line": 20, "severity": "Minor", "lens": "Quality", "evidence": "e2",
-        "_verify_index": 1, "_verify_eligible": False, "finding_id": None,
+        "_verify_index": 1, "_verify_eligible": False, "_verify_light": False, "finding_id": None,
     },
 ]
 
@@ -67,8 +67,12 @@ def _fixed_id_factory():
     return factory
 
 
-def _prepare(findings, verify_severities=VERIFY_SEVERITIES, security_sensitive_pattern=SECURITY_PATTERN, id_factory=None):
+def _prepare(
+    findings, verify_severities=VERIFY_SEVERITIES, security_sensitive_pattern=SECURITY_PATTERN, id_factory=None,
+    light_severities=(),
+):
     kwargs = {"id_factory": id_factory} if id_factory is not None else {}
+    kwargs["light_severities"] = light_severities
     return prepare_findings_for_verification(findings, verify_severities, security_sensitive_pattern, **kwargs)
 
 
@@ -313,6 +317,29 @@ def test_action_module_treats_empty_findings_list_as_present_not_missing():
     assert result["findings"] == []
 
 
+def test_action_module_passes_light_severities_through():
+    finding = {"file": "a.py", "line": 1, "severity": "Nit", "lens": "Quality"}
+    args = {
+        "findings": [finding],
+        "verify_severities": VERIFY_SEVERITIES,
+        "security_sensitive_pattern": SECURITY_PATTERN,
+        "light_severities": ["Nit"],
+    }
+    result = _run_action_module(args)
+    assert result["findings"][0]["_verify_light"] is True
+
+
+@pytest.mark.parametrize("light", ["Minor", {"Minor": 1}])
+def test_action_module_rejects_light_severities_that_are_not_a_list(light):
+    args = {
+        "findings": [],
+        "verify_severities": VERIFY_SEVERITIES,
+        "security_sensitive_pattern": SECURITY_PATTERN,
+        "light_severities": light,
+    }
+    assert _run_action_module(args)["failed"] is True
+
+
 def test_action_module_fails_clearly_on_invalid_security_sensitive_pattern():
     result = _run_action_module(
         {"findings": [], "verify_severities": VERIFY_SEVERITIES, "security_sensitive_pattern": "(unbalanced"}
@@ -339,3 +366,52 @@ def test_already_refuted_finding_is_not_verify_eligible(finding):
     assert prepared["finding_id"] is None
     assert prepared["evidence_status"] == "refuted"
     assert prepared["verification_rationale"] == "provenance rationale"
+
+
+LIGHT = ["Minor", "Nit"]
+
+
+def test_light_severities_bring_plain_minor_and_nit_into_scope():
+    findings = [
+        {"file": "a.py", "line": 1, "severity": "Nit", "lens": "Functionality", "description": "x"},
+        {"file": "a.py", "line": 2, "severity": "Minor", "lens": "Quality", "description": "x"},
+    ]
+    prepared = _prepare(findings, light_severities=LIGHT)
+    assert [f["_verify_eligible"] for f in prepared] == [True, True]
+    assert [f["_verify_light"] for f in prepared] == [True, True]
+    assert all(f["finding_id"] for f in prepared)
+
+
+def test_a_finding_already_in_full_scope_is_not_light():
+    findings = [
+        {"file": "a.py", "line": 1, "severity": "Major", "lens": "Quality", "description": "x"},
+        {"file": "a.py", "line": 2, "severity": "Minor", "lens": "Security", "description": "x"},
+        {"file": "a.py", "line": 3, "severity": "Minor", "lens": "Quality", "description": "a subprocess call"},
+    ]
+    prepared = _prepare(findings, light_severities=LIGHT)
+    assert [f["_verify_eligible"] for f in prepared] == [True, True, True]
+    assert [f["_verify_light"] for f in prepared] == [False, False, False]
+
+
+def test_a_refuted_finding_is_not_light_either():
+    finding = {"file": "a.py", "line": 1, "severity": "Nit", "lens": "Quality", "evidence_status": "refuted"}
+    prepared = _prepare([finding], light_severities=LIGHT)[0]
+    assert prepared["_verify_eligible"] is False and prepared["_verify_light"] is False
+
+
+def test_no_light_severities_keeps_the_old_scope():
+    finding = {"file": "a.py", "line": 1, "severity": "Nit", "lens": "Quality", "description": "x"}
+    prepared = _prepare([finding])[0]
+    assert prepared["_verify_eligible"] is False and prepared["_verify_light"] is False
+
+
+def test_the_role_default_light_scope_is_minor_and_nit():
+    from pathlib import Path
+
+    import yaml
+
+    defaults = yaml.safe_load(
+        (Path(__file__).resolve().parents[1] / "roles" / "review" / "defaults" / "main.yml").read_text(encoding="utf-8")
+    )
+    assert defaults["review_verify_light_severities"] == ["Minor", "Nit"]
+    assert int(defaults["review_verify_light_max_turns"]) == 2

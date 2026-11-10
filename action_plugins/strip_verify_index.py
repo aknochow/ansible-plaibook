@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from ansible.plugins.action import ActionBase
 
-_INTERNAL_KEYS = frozenset(("_verify_index", "_verify_eligible"))
+_INTERNAL_KEYS = frozenset(("_verify_index", "_verify_eligible", "_verify_light"))
 
 
 def strip_verify_index(findings: list[dict]) -> list[dict]:

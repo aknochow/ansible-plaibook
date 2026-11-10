@@ -539,6 +539,14 @@ review_verify_severities: ["Critical", "Major"]
 # file/description/evidence ultimately trace back to diff content) has
 # no runtime backstop here.
 review_verify_security_sensitive_pattern: "(?i)(password|secret|token|credential|api[_-]?key|auth|inject|traversal|sanitiz|escape|deserial|pickle|eval\\(|exec\\(|subprocess|shell=True|os\\.system|sudo|ssh|tls|ssl|cert|encrypt|decrypt|permission|privilege|sandbox|rce|ssrf|xss|csrf|symlink|race condition|prompt injection)"  # noqa: yaml[line-length]
+# The rest of the Minor and Nit findings get a light check: the same
+# verify agent and read tools, review_verify_light_max_turns turns (one
+# round of reads, then the verdict), and no severity change. A refuted
+# one is left out of the posted review and the score. Over 31 Nit and
+# Minor findings the GitHub check posted, 9 were false, and 6 of those
+# made a claim about code a read refutes. [] turns the light check off.
+review_verify_light_severities: ["Minor", "Nit"]
+review_verify_light_max_turns: 2
 # 3, not lower: a single finding can still need more than one
 # read/search round-trip (e.g. finding every call site of a shared
 # helper before concluding a suggested fix is safe).

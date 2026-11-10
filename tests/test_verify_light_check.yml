@@ -1,0 +1,192 @@
+---
+# The light verify check of Minor and Nit findings, offline.
+# Uses tests/library/verify_provider_stub.py. No live model and no API key.
+#
+# 1. A refuted Nit leaves the score. A verified Minor keeps its
+#    severity even when the verifier's answers would raise it.
+# 2. A light check stops after review_verify_light_max_turns turns and
+#    ends inconclusive when no verdict comes. A Major still gets
+#    review_verify_max_turns and still fails without a forced verdict.
+#
+# Usage:
+#   ANSIBLE_LIBRARY=$PWD/tests/library \
+#   VERIFY_PROVIDER_STUB_FILE=$PWD/tests/.verify_provider_stub.json \
+#     ansible-playbook tests/test_verify_light_check.yml
+
+- name: "Light check: verdicts count, severity does not move"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_delegate_host: ""
+    review_repo_path: "{{ playbook_dir }}/.."
+    review_org_repo: "aknochow/ansible-plaibook"
+    review_number: "test-verify-light"
+    claude_message_module: verify_provider_stub
+    verify_provider_stub_file: "{{ lookup('ansible.builtin.env', 'VERIFY_PROVIDER_STUB_FILE') | default(playbook_dir ~ '/.verify_provider_stub.json', true) }}"
+    severity_points: {Critical: 20, Major: 10, Minor: 5, Nit: 1}
+    light_fixture_findings:
+      - lens: Functionality
+        file: plaibook/cli.py
+        line: 10
+        severity: Nit
+        confidence: LOW
+        description: The return value of a call is discarded.
+        evidence: "resolve_family("
+        fix: Keep the return value.
+      - lens: Quality
+        file: plaibook/cli.py
+        line: 20
+        severity: Minor
+        confidence: LOW
+        description: A helper lacks a docstring.
+        evidence: "def _helper("
+        fix: Add a docstring.
+
+  environment:
+    VERIFY_PROVIDER_STUB_FILE: "{{ verify_provider_stub_file }}"
+
+  tasks:
+    # One stub answer for every call. The answers would raise a finding
+    # to Critical if its severity were assessed.
+    - name: Write a refuted verdict with high-severity answers
+      ansible.builtin.copy:
+        dest: "{{ verify_provider_stub_file }}"
+        mode: "0600"
+        content: "{{ _stub | to_json }}"
+      vars:
+        _stub:
+          calls: 0
+          message: {model: claude-haiku-4-5, content: [{type: text, text: Checked.}]}
+          usage: {input_tokens: 100, output_tokens: 20}
+          tool_calls:
+            - name: report_verdict
+              input:
+                evidence_status: refuted
+                evidence: config.py persists the family and load_vars reads it back.
+                rationale: The claim does not hold.
+                requires_execution: false
+                reachability: realistic
+                trust_boundary: crosses-trust-boundary
+                worst_outcome_category: unauthorized-write-or-rce
+                silent_failure: true
+
+    - name: Initialize pipeline-wide agent usage accounting
+      ansible.builtin.set_fact:
+        pipeline_agent_calls: []
+
+    - name: Seed the Nit finding
+      ansible.builtin.set_fact:
+        deduped_findings: "{{ light_fixture_findings[:1] }}"
+
+    - name: Run verify over the Nit
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: verify.yml
+
+    - name: Assert the Nit got one light turn, was refuted, and left the score
+      ansible.builtin.assert:
+        that:
+          - verify_scoped_findings | length == 1
+          - verify_finding_max_turns | int == 2
+          - pipeline_agent_calls | length == 1
+          - deduped_findings[0].evidence_status == 'refuted'
+          - deduped_findings[0].severity == 'Nit'
+          - deduped_findings[0].severity_status == 'confirmed'
+          - "'_verify_light' not in deduped_findings[0]"
+          - score_functionality | float == 100.0
+          - review_verdict == 'READY_FOR_HUMAN_REVIEW'
+        fail_msg: >-
+          calls={{ pipeline_agent_calls | length }}
+          finding={{ deduped_findings[0] | to_json }}
+          functionality={{ score_functionality }} verdict={{ review_verdict }}
+
+    - name: Write a verified verdict with the same high-severity answers
+      ansible.builtin.copy:
+        dest: "{{ verify_provider_stub_file }}"
+        mode: "0600"
+        content: "{{ _stub | to_json }}"
+      vars:
+        _stub:
+          calls: 0
+          message: {model: claude-haiku-4-5, content: [{type: text, text: Checked.}]}
+          usage: {input_tokens: 100, output_tokens: 20}
+          tool_calls:
+            - name: report_verdict
+              input:
+                evidence_status: verified
+                evidence: _helper has no docstring.
+                rationale: The claim holds.
+                requires_execution: false
+                reachability: realistic
+                trust_boundary: crosses-trust-boundary
+                worst_outcome_category: unauthorized-write-or-rce
+                silent_failure: true
+
+    - name: Seed the Minor finding
+      ansible.builtin.set_fact:
+        deduped_findings: "{{ light_fixture_findings[1:] }}"
+
+    - name: Run verify over the Minor
+      ansible.builtin.include_role:
+        name: review
+        tasks_from: verify.yml
+
+    - name: Assert the verified Minor stayed Minor and still scores
+      ansible.builtin.assert:
+        that:
+          - deduped_findings[0].evidence_status == 'verified'
+          - deduped_findings[0].severity == 'Minor'
+          - deduped_findings[0].severity_status == 'confirmed'
+          - score_quality | float == 95.0
+          - review_verdict == 'READY_FOR_HUMAN_REVIEW'
+        fail_msg: >-
+          finding={{ deduped_findings[0] | to_json }}
+          quality={{ score_quality }} verdict={{ review_verdict }}
+
+- name: "Light check: turn budget"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    review_delegate_host: ""
+    review_repo_path: "{{ playbook_dir }}/.."
+    review_org_repo: "aknochow/ansible-plaibook"
+    review_number: "test-verify-light-turns"
+    claude_message_module: verify_provider_stub
+    verify_provider_stub_file: "{{ lookup('ansible.builtin.env', 'VERIFY_PROVIDER_STUB_FILE') | default(playbook_dir ~ '/.verify_provider_stub.json', true) }}"
+    severity_points: {Critical: 20, Major: 10, Minor: 5, Nit: 1}
+    review_verify_max_turns: 3
+    review_verify_light_max_turns: 2
+
+  environment:
+    VERIFY_PROVIDER_STUB_FILE: "{{ verify_provider_stub_file }}"
+
+  tasks:
+    # The stub only ever searches, so each finding uses its whole budget.
+    - name: Write a stub that never reports a verdict
+      ansible.builtin.copy:
+        dest: "{{ verify_provider_stub_file }}"
+        mode: "0600"
+        content: "{{ _stub | to_json }}"
+      vars:
+        _stub:
+          calls: 0
+          message:
+            model: claude-haiku-4-5
+            content:
+              - {type: tool_use, id: toolu_1, name: search, input: {pattern: resolve_family}}
+          usage: {input_tokens: 100, output_tokens: 20}
+          stop_reason: tool_use
+          tool_calls:
+            - {id: toolu_1, name: search, input: {pattern: resolve_family}}
+
+    - name: Run verify over a Nit and a Major, one at a time
+      ansible.builtin.include_tasks: verify_light_turns_case.yml
+      loop:
+        - {severity: Nit, turns: 2, fails: false}
+        - {severity: Major, turns: 3, fails: true}
+      loop_control:
+        loop_var: light_case

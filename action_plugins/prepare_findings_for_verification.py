@@ -12,7 +12,15 @@ would never reach verification) nor "every finding" (not worth the
 N-findings x M-turns cost multiplier on every Nit): Critical/Major
 (`review_verify_severities`) plus Minor findings carrying a heuristic
 borderline signal (raised by the Security lens, or touching a
-security-sensitive code pattern by keyword). A finding that is already
+security-sensitive code pattern by keyword).
+
+`light_severities` (`review_verify_light_severities`, Minor and Nit by
+default) adds the rest of those severities to the scope as a light
+check: `_verify_light` is set, verify_finding.yml gives it
+`review_verify_light_max_turns`, and its severity is never changed.
+Only its `evidence_status` counts, so a refuted Minor or Nit is left
+out of the posted review. Most false Nit and Minor findings made a
+claim about code the lens never read, which a read refutes. A finding that is already
 refuted is never eligible: check_evidence_provenance.py refutes on a
 deterministic text match, and a model verdict must not overturn that.
 
@@ -27,7 +35,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import Callable
+from typing import Callable, Iterable
 
 from ansible.plugins.action import ActionBase
 
@@ -71,8 +79,12 @@ class InvalidSecurityPatternError(ValueError):
 _MAX_HAYSTACK_CHARS = 10_000
 
 
+def _already_refuted(finding: dict) -> bool:
+    return finding.get("evidence_status") == "refuted"
+
+
 def _is_verify_eligible(finding: dict, verify_severities: list[str], compiled_security_pattern: re.Pattern) -> bool:
-    if finding.get("evidence_status") == "refuted":
+    if _already_refuted(finding):
         return False
     if finding.get("severity") in verify_severities:
         return True
@@ -89,6 +101,7 @@ def prepare_findings_for_verification(
     verify_severities: list[str],
     security_sensitive_pattern: str,
     id_factory: Callable[[], str] = lambda: uuid.uuid4().hex[:12],
+    light_severities: Iterable[str] = (),
 ) -> list[dict]:
     """Default-fill, index, and scope-tag every finding ahead of verify.yml's pass.
 
@@ -112,10 +125,16 @@ def prepare_findings_for_verification(
             f"security_sensitive_pattern {security_sensitive_pattern!r} is not a valid regular expression: {exc}"
         ) from exc
 
+    light = frozenset(light_severities or ())
     prepared = []
     for idx, finding in enumerate(findings):
         merged = {**_DEFAULTS, **finding, "_verify_index": idx}
         merged["_verify_eligible"] = _is_verify_eligible(merged, verify_severities, compiled_security_pattern)
+        merged["_verify_light"] = (
+            not merged["_verify_eligible"] and merged.get("severity") in light and not _already_refuted(merged)
+        )
+        if merged["_verify_light"]:
+            merged["_verify_eligible"] = True
         if merged["_verify_eligible"]:
             merged["finding_id"] = id_factory()
         prepared.append(merged)
@@ -126,7 +145,8 @@ class ActionModule(ActionBase):
     """Default-fill, index, and scope-tag a findings list."""
 
     _requires_connection = False
-    _VALID_ARGS = frozenset(("findings", "verify_severities", "security_sensitive_pattern"))
+    _REQUIRED_ARGS = frozenset(("findings", "verify_severities", "security_sensitive_pattern"))
+    _VALID_ARGS = _REQUIRED_ARGS | {"light_severities"}
 
     def run(self, tmp=None, task_vars=None):
         if task_vars is None:
@@ -135,10 +155,15 @@ class ActionModule(ActionBase):
         result = super().run(tmp, task_vars)
         del tmp
 
-        missing = sorted(arg for arg in self._VALID_ARGS if self._task.args.get(arg) is None)
+        missing = sorted(arg for arg in self._REQUIRED_ARGS if self._task.args.get(arg) is None)
         if missing:
             result["failed"] = True
-            result["msg"] = f"prepare_findings_for_verification requires all of {sorted(self._VALID_ARGS)}; missing: {missing}"
+            result["msg"] = f"prepare_findings_for_verification requires all of {sorted(self._REQUIRED_ARGS)}; missing: {missing}"
+            return result
+        light = self._task.args.get("light_severities") or []
+        if isinstance(light, str) or not isinstance(light, (list, tuple)):
+            result["failed"] = True
+            result["msg"] = "prepare_findings_for_verification light_severities must be a list of severities"
             return result
 
         try:
@@ -146,6 +171,7 @@ class ActionModule(ActionBase):
                 findings=self._task.args["findings"],
                 verify_severities=self._task.args["verify_severities"],
                 security_sensitive_pattern=self._task.args["security_sensitive_pattern"],
+                light_severities=light,
             )
         except InvalidSecurityPatternError as exc:
             result["failed"] = True

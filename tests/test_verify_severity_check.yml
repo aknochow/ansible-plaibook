@@ -16,6 +16,9 @@
     review_repo_path: "{{ playbook_dir }}/.."
     review_org_repo: "aknochow/ansible-plaibook"
     review_number: "test-verify-severity"
+    # This test checks the full scope's Minor signals, so the light
+    # check of every other Minor stays off here.
+    review_verify_light_severities: []
 
     # Enum values from verify_verdict_schema (roles/review/vars/main.yml).
     valid_worst_outcome_categories:

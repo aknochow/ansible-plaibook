@@ -1,6 +1,6 @@
 ---
 # Fast, no-LLM smoke test of verify.yml's score/verdict recompute step through the real context.
-# Zero API cost: only a Minor finding, so verification loop runs zero iterations, but
+# Zero API cost: only a Minor finding and no light check, so verification loop runs zero iterations, but
 # unconditional defaulting + recompute steps still run for real.
 #
 # Usage:
@@ -19,6 +19,7 @@
       Nit: 0
     review_verify_enabled: true
     review_verify_severities: ["Critical", "Major"]
+    review_verify_light_severities: []
     deduped_findings:
       - file: "a.py"
         line: 1
