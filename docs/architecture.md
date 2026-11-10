@@ -118,6 +118,10 @@ lens's own reasoning.
   retraction in the `fix` or `description` field. Evidence is never
   matched, because it quotes the reviewed code. Drops are listed in the
   job output and counted in `self_refuted_dropped_count` in `summary.json`.
+  A finding whose `replacement` is identical to the lines it cites (a fix
+  that changes nothing) is also self-refuted: a Nit or Minor is dropped
+  and counted the same way. A Critical or Major keeps its place with the
+  replacement cleared, and verify decides on it.
   Treat a surviving low-confidence finding with real skepticism, not
   blind trust.
 
