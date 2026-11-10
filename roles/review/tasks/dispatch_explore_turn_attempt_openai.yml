@@ -8,7 +8,7 @@
 - name: "OpenAI: translate the explore conversation and tool definitions"
   ansible.builtin.set_fact:
     _openai_explore_messages: >-
-      {{ [{'role': 'developer', 'content': explore_system_prompt}]
+      {{ [{'role': (openai_base_url | openai_instruction_role(review_openai_instruction_role)), 'content': explore_system_prompt}]
          + (explore_messages | to_openai_messages) }}
     _openai_explore_tools: >-
       {{ (explore_tools + [{
@@ -33,7 +33,7 @@
     reasoning_effort: "{{ review_explore_openai_model | openai_tool_reasoning_effort | default(omit, true) }}"
     max_completion_tokens: "{{ review_openai_max_completion_tokens }}"
     timeout: "{{ openai_timeout }}"
-    llama_server_mode: false
+    llama_server_mode: "{{ review_openai_llama_server_mode | bool }}"
     messages: "{{ _openai_explore_messages }}"
     tools: "{{ _openai_explore_tools }}"
     tool_choice: "{{ {'type': 'function', 'function': {'name': 'report_findings'}} if explore_last_turn else omit }}"

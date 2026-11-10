@@ -14,7 +14,7 @@
       'max_completion_tokens: ' + (review_openai_max_completion_tokens | string),
       'response_format: json_schema (security_findings_schema)',
       '',
-      '--- developer prompt ---',
+      '--- ' + (openai_base_url | openai_instruction_role(review_openai_instruction_role)) + ' prompt ---',
       ] + security_system_prompt.split('\n') }}"
 
 - name: "OpenAI: dispatch the Security agent"
@@ -25,9 +25,9 @@
     reasoning_effort: "{{ review_openai_model | openai_lens_reasoning_effort(review_openai_lens_reasoning_effort) | default(omit, true) }}"
     max_completion_tokens: "{{ review_openai_max_completion_tokens }}"
     timeout: "{{ openai_timeout }}"
-    llama_server_mode: false
+    llama_server_mode: "{{ review_openai_llama_server_mode | bool }}"
     messages:
-      - role: developer
+      - role: "{{ openai_base_url | openai_instruction_role(review_openai_instruction_role) }}"
         content: "{{ security_system_prompt }}"
       - role: user
         content: "Review this diff per your instructions."
@@ -50,7 +50,7 @@
       'max_completion_tokens: ' + (review_openai_max_completion_tokens | string),
       'response_format: json_schema (review_findings_schema)',
       '',
-      '--- developer prompt ---',
+      '--- ' + (openai_base_url | openai_instruction_role(review_openai_instruction_role)) + ' prompt ---',
       ] + review_system_prompt.split('\n') }}"
 
 - name: "OpenAI: dispatch the Review agent"
@@ -61,9 +61,9 @@
     reasoning_effort: "{{ review_openai_model | openai_lens_reasoning_effort(review_openai_lens_reasoning_effort) | default(omit, true) }}"
     max_completion_tokens: "{{ review_openai_max_completion_tokens }}"
     timeout: "{{ openai_timeout }}"
-    llama_server_mode: false
+    llama_server_mode: "{{ review_openai_llama_server_mode | bool }}"
     messages:
-      - role: developer
+      - role: "{{ openai_base_url | openai_instruction_role(review_openai_instruction_role) }}"
         content: "{{ review_system_prompt }}"
       - role: user
         content: "Review this diff per your instructions."
