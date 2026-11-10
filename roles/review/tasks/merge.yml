@@ -70,10 +70,30 @@
     findings: "{{ combined_findings }}"
   register: self_refuted_filter_result
 
+# A replacement identical to the lines it cites is a fix that changes
+# nothing, so the finding refutes itself. Nit/Minor are dropped (nothing
+# re-checks them); on Critical/Major only the replacement is cleared and
+# verify still decides. Counted with the self-refuted drops.
+- name: Drop findings whose replacement is the code they cite
+  drop_noop_replacements:
+    findings: "{{ self_refuted_filter_result.findings }}"
+    full_diff: "{{ review_full_diff }}"
+  register: noop_replacement_result
+
 - name: Store the filtered findings
   ansible.builtin.set_fact:
-    combined_findings: "{{ self_refuted_filter_result.findings }}"
-    review_self_refuted_dropped_count: "{{ self_refuted_filter_result.dropped_count }}"
+    combined_findings: "{{ noop_replacement_result.findings }}"
+    review_self_refuted_dropped_count: >-
+      {{ (self_refuted_filter_result.dropped_count | int) + (noop_replacement_result.dropped_count | int) }}
+
+- name: Report findings dropped for a replacement that changes nothing
+  when: noop_replacement_result.dropped_count | int > 0 or noop_replacement_result.cleared_count | int > 0
+  ansible.builtin.debug:
+    msg: >-
+      Dropped {{ noop_replacement_result.dropped_count }} finding(s) whose
+      replacement is the cited code: {{ noop_replacement_result.dropped }}.
+      Cleared {{ noop_replacement_result.cleared_count }} such replacement(s)
+      on Critical/Major findings.
 
 # A drop removes the finding from the report, so it has to be visible
 # somewhere: here in the job output, and as a count in summary.json.
