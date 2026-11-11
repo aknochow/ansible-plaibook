@@ -63,6 +63,8 @@ def test_execution_environment_builds_from_the_pin_file():
     assert "--branch v2.103.3 https://github.com/cli/cli /tmp/gh-src" in text
     assert "= 63837fb778d6a39f02be0ce76ff89f2bc8d74bdc;" in text
     assert "go get golang.org/x/net@v0.62.0;" in text
+    assert "tar -C /tmp -xzf" not in text
+    assert 'extractall("/tmp", filter="data")' in text
     assert "golang.org/x/net[[:space:]]+v0\\.62\\.0" in text
     assert "sha256sum -c - && rpm -i --nosignature /tmp/glab.rpm" in text
     assert document["images"]["base_image"]["name"] == BASE
