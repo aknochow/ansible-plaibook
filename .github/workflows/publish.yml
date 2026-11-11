@@ -6,10 +6,13 @@ name: Publish to PyPI
 # The workflow filename (`publish.yml`) is load-bearing — it must match the
 # pending publisher exactly.
 #
-# Human gate: GitHub Environment `pypi` (reviewers + tag rules). YAML cannot
-# require those. Workflow-side controls: no workflow_dispatch, skip
-# prereleases, tag must equal v${project.version}, and the tagged commit
-# must already be on the repository default branch.
+# No human approval step: release-cut.yml creates the Release from main
+# after the release pull request merges, and that is the decision to ship.
+# The `pypi` environment keeps its v* tag rule. Workflow-side controls: no
+# workflow_dispatch, skip prereleases, tag must equal v${project.version},
+# the tagged commit must already be on the repository default branch, and
+# the dist check passes. release-cut.yml runs the same build and check
+# before it tags, so a package that cannot build never gets a tag.
 
 on:
   release:
@@ -75,31 +78,8 @@ jobs:
       - name: Build
         run: uv build
 
-      - name: Wheel must vendor review.yml
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import tarfile
-          import zipfile
-
-          wheels = list(Path("dist").glob("plaibook-*.whl"))
-          sdists = list(Path("dist").glob("plaibook-*.tar.gz"))
-          if len(wheels) != 1 or len(sdists) != 1:
-              raise SystemExit(f"expected one wheel and one sdist in dist/: {list(Path('dist').iterdir())}")
-          with zipfile.ZipFile(wheels[0]) as zf:
-              names = zf.namelist()
-          if "plaibook/share/review.yml" not in names:
-              raise SystemExit("wheel is missing plaibook/share/review.yml")
-          if "plaibook/share/ansible.cfg" not in names:
-              raise SystemExit("wheel is missing plaibook/share/ansible.cfg")
-          if "plaibook/share/collections-requirements.yml" not in names:
-              raise SystemExit("wheel is missing plaibook/share/collections-requirements.yml")
-          with tarfile.open(sdists[0], "r:gz") as tf:
-              members = tf.getnames()
-          if not any(name.endswith("/review.yml") for name in members):
-              raise SystemExit("sdist is missing review.yml")
-          print("vendored playbook ok:", wheels[0].name)
-          PY
+      - name: Wheel must vendor the playbook and review skill
+        run: python3 scripts/check_dist.py dist
 
       - name: Upload dist
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
