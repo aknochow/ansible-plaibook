@@ -56,11 +56,14 @@ def test_execution_environment_builds_from_the_pin_file():
     assert "ansible-plaibook-ee" not in text
     assert "ghcr.io/aknochow/plaibook-ee" in header
     assert "ssh_proxy.py" not in text.split("additional_build_steps:", 1)[-1]
-    assert document["additional_build_files"] == [
-        {"src": "execution-environment-gh-key.asc", "dest": "keys"}
-    ]
-    assert "BEGIN PGP PUBLIC KEY BLOCK" in (ROOT / "execution-environment-gh-key.asc").read_text(encoding="utf-8")
-    assert "rpm --import /tmp/gh-key.asc && rpm -i /tmp/gh.rpm" in text
+    assert "additional_build_files" not in document
+    assert not (ROOT / "execution-environment-gh-key.asc").exists()
+    assert "go1.27.3.linux-${go_arch}.tar.gz" in text
+    assert 'echo "${go_sum}  /tmp/go.tar.gz" | sha256sum -c -' in text
+    assert "--branch v2.103.3 https://github.com/cli/cli /tmp/gh-src" in text
+    assert "= 63837fb778d6a39f02be0ce76ff89f2bc8d74bdc;" in text
+    assert "go get golang.org/x/net@v0.62.0;" in text
+    assert "golang.org/x/net[[:space:]]+v0\\.62\\.0" in text
     assert "sha256sum -c - && rpm -i --nosignature /tmp/glab.rpm" in text
     assert document["images"]["base_image"]["name"] == BASE
     assert document["options"]["package_manager_path"] == "/usr/bin/dnf"
@@ -86,8 +89,9 @@ def test_execution_environment_builds_from_the_pin_file():
     assert "cursor-sdk" not in locked
     assert "--hash=sha256:" in locked
     assert "gh-cli.repo" not in text
-    assert "65d55875faa3281959676d91da15a9380583281586ac31bbd3d32b7924a9f4d2" in text
-    assert "0e831f940b30fffc5eabdab388140fd1e63eb519f3b77546ec026d1abfa4ff3e" in text
+    assert "gh_2.103.3_linux" not in text
+    assert "65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40" in text
+    assert "a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49" in text
     assert "sha256sum -c -" in text
 
 

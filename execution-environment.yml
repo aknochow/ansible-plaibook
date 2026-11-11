@@ -19,18 +19,15 @@
 # Collections are the git pins in collections-requirements.yml. Python
 # dependencies are the exact pins in execution-environment-requirements.txt,
 # installed with pip --require-hashes. ssh_proxy.py and OpenShell certs
-# are not in the image. gh 2.103.3 and glab 1.126.0 are the vendor RPMs,
-# checked by per-arch SHA-256 before install. gh is signed with the
-# GitHub CLI key in execution-environment-gh-key.asc.
+# are not in the image. gh 2.103.3 is built from its release tag with
+# golang.org/x/net raised to v0.62.0 (CVE-2026-78661; the release binary
+# has v0.60.0). glab 1.126.0 is the vendor RPM, checked by per-arch
+# SHA-256 before install.
 #
 # Build from a clean checkout. --squash all is required: the Hummingbird
 # base is 32 filesystem layers, and Podman with metacopy=on cannot mount
 # that stack plus the layers this build adds.
 #   ansible-builder build --squash all -t ghcr.io/aknochow/plaibook-ee:latest -f execution-environment.yml
-
-additional_build_files:
-  - src: execution-environment-gh-key.asc
-    dest: keys
 
 version: 3
 
@@ -85,10 +82,34 @@ additional_build_steps:
     - ENV PIP_OPTS="--require-hashes"
   append_final:
     - LABEL org.opencontainers.image.source="https://github.com/aknochow/ansible-plaibook"
-    - COPY _build/keys/execution-environment-gh-key.asc /tmp/gh-key.asc
-    # GitHub's signed release RPM for 2.103.3 (Go 1.27.3). Digest, then the
-    # vendored key, then install. && so a rejected signature fails the build.
-    - 'RUN arch="$(uname -m)"; case "$arch" in x86_64) rpm_arch=amd64; sum=65d55875faa3281959676d91da15a9380583281586ac31bbd3d32b7924a9f4d2 ;; aarch64) rpm_arch=arm64; sum=0e831f940b30fffc5eabdab388140fd1e63eb519f3b77546ec026d1abfa4ff3e ;; *) echo "unsupported architecture ${arch}" >&2; exit 1 ;; esac; curl -fsSL -o /tmp/gh.rpm "https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_linux_${rpm_arch}.rpm" && echo "${sum}  /tmp/gh.rpm" | sha256sum -c - && rpm --import /tmp/gh-key.asc && rpm -i /tmp/gh.rpm && rm -f /tmp/gh.rpm /tmp/gh-key.asc'
+    # gh 2.103.3 from source. The release RPM embeds golang.org/x/net
+    # v0.60.0 (CVE-2026-78661, fixed in v0.62.0), and gh trunk is still
+    # below the fix. The Go archive is checked by SHA-256, the clone by the
+    # tag's commit, and modules by go.sum and sum.golang.org. The build
+    # fails unless the binary reports x/net v0.62.0. Go, the source, and
+    # the module cache are removed in the same step. Drop this for the
+    # vendor RPM once a gh release ships x/net v0.62.0 or later.
+    - |
+      RUN set -eu; \
+          arch="$(uname -m)"; \
+          case "$arch" in \
+            x86_64) go_arch=amd64; go_sum=65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40 ;; \
+            aarch64) go_arch=arm64; go_sum=a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49 ;; \
+            *) echo "unsupported architecture ${arch}" >&2; exit 1 ;; \
+          esac; \
+          curl -fsSL -o /tmp/go.tar.gz "https://go.dev/dl/go1.27.3.linux-${go_arch}.tar.gz"; \
+          echo "${go_sum}  /tmp/go.tar.gz" | sha256sum -c -; \
+          tar -C /tmp -xzf /tmp/go.tar.gz; \
+          git -c advice.detachedHead=false clone --quiet --depth 1 --branch v2.103.3 https://github.com/cli/cli /tmp/gh-src; \
+          test "$(git -C /tmp/gh-src rev-parse HEAD)" = 63837fb778d6a39f02be0ce76ff89f2bc8d74bdc; \
+          export PATH="/tmp/go/bin:${PATH}" GOTOOLCHAIN=local CGO_ENABLED=0 GOPATH=/tmp/gopath GOCACHE=/tmp/gocache; \
+          cd /tmp/gh-src; \
+          go get golang.org/x/net@v0.62.0; \
+          go mod verify; \
+          go build -trimpath -ldflags "-s -w -X github.com/cli/cli/v2/internal/build.Version=2.103.3" -o /usr/bin/gh ./cmd/gh; \
+          go version -m /usr/bin/gh | grep -Eq '^[[:space:]]+dep[[:space:]]+golang.org/x/net[[:space:]]+v0\.62\.0[[:space:]]'; \
+          cd /; \
+          rm -rf /tmp/go /tmp/go.tar.gz /tmp/gh-src /tmp/gopath /tmp/gocache
     # GitLab's generic RPM is unsigned. Hummingbird rpm rejects it, so the
     # install checks the pinned digest and then uses --nosignature.
     # 1.126.0 is Go 1.27.3.

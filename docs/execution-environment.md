@@ -150,7 +150,7 @@ Collections come from [`collections-requirements.yml`](../collections-requiremen
 
 Every build verifies Red Hat's signature on the pinned base digest before `ansible-builder` runs. [`scripts/ee_verify_base.sh`](../scripts/ee_verify_base.sh) runs `cosign verify` with Red Hat release key 3 ([`execution-environment-redhat-key.pem`](../execution-environment-redhat-key.pem), from `https://security.access.redhat.com/data/63405576.txt`). It passes `--insecure-ignore-tlog`: Red Hat's Rekor bundles use a log key that is not in the public Sigstore trusted root, so cosign checks the signature against the key but not log inclusion.
 
-`gh` 2.103.3 is the signed GitHub release RPM. The public key is [`execution-environment-gh-key.asc`](../execution-environment-gh-key.asc). `glab` 1.126.0 is GitLab's unsigned RPM. Both installs check a per-architecture SHA-256 before `rpm` runs. Both binaries are Go 1.27.3.
+`gh` 2.103.3 is built from source in the image. The release binary embeds `golang.org/x/net` v0.60.0, which has CVE-2026-78661 (fixed in v0.62.0), and no `gh` release has the fix yet. The build downloads Go 1.27.3 and checks its per-architecture SHA-256, clones the `v2.103.3` tag and checks its commit, raises `golang.org/x/net` to v0.62.0, and fails unless the binary reports that version. Go and the source are removed in the same step. Switch back to GitHub's signed RPM once a release ships x/net v0.62.0 or later. `glab` 1.126.0 is GitLab's unsigned RPM. Its install checks a per-architecture SHA-256 before `rpm` runs. Both binaries are Go 1.27.3.
 
 ## CI
 

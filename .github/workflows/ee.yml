@@ -9,7 +9,6 @@ on:
       - execution-environment.yml
       - execution-environment-requirements.in
       - execution-environment-requirements.txt
-      - execution-environment-gh-key.asc
       - execution-environment-redhat-key.pem
       - scripts/ee_verify_base.sh
       - collections-requirements.yml
