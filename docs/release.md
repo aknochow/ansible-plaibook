@@ -35,7 +35,9 @@ changes `pyproject.toml`, which starts **Cut a GitHub release**
 stops without doing anything. Otherwise it builds the sdist and the wheel
 from it, runs `scripts/check_dist.py`, and creates the tag plus a
 non-prerelease Release on that commit. A package that cannot build never
-gets a tag.
+gets a tag. The build runs in its own job with no environment and no
+secrets, because building runs build-backend code. A second job with a
+fresh checkout holds the release credentials and only creates the tag.
 
 The workflow can also be run by hand from `main`. Run that way, an
 existing tag fails the job.
