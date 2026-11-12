@@ -7,3 +7,4 @@ graft action_plugins
 graft library
 graft filter_plugins
 graft callback_plugins
+include .agents/skills/ansible-plaibook-review/SKILL.md
