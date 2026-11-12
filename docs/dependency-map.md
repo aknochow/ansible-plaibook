@@ -161,17 +161,17 @@ are not plaibook dependencies.
 
 | Id | What | SHA | Where |
 |---|---|---|---|
-| `review.caller` | `plai-review.yml` calls the reusable workflow | `7726f48b756c2800f7cff1269c4bcf9bda015540` | `.github/workflows/plai-review.yml` `uses:` |
+| `review.caller` | `plai-review.yml` calls the reusable workflow | `55a7293a7ae965a56324751ef25ca774dc5af5bf` | `.github/workflows/plai-review.yml` `uses:` |
 | `review.checkout` | Both checkouts inside the reusable workflow | `ecddb46bd50cdb5d33baddf21fabb6a5e89d756e` | `.github/workflows/plai-review-run.yml` `ref:` |
 
 Move `review.checkout` first. Then set `review.caller` to the commit
 that contains those checkout refs. The caller file on the default
 branch is the one `pull_request_target` runs. Do not point the caller
 at a commit whose workflow still checks out the previous tree.
-`ecddb46bd50cdb5d33baddf21fabb6a5e89d756e` is release v0.1.33. Until `review.caller` moves to the merge of this change, the caller at `7726f48b756c2800f7cff1269c4bcf9bda015540` still runs its own copy of the workflow, which checks out `807cf08e93f4e621bd99dad1b7126f739827c1ad`.
-`review.caller` is `7726f48b756c2800f7cff1269c4bcf9bda015540`.
+`ecddb46bd50cdb5d33baddf21fabb6a5e89d756e` is release v0.1.33.
+`review.caller` is `55a7293a7ae965a56324751ef25ca774dc5af5bf`.
 That commit contains these checkout refs, so the called workflow
-checks out `807cf08`. It is not `807cf08` itself: that tree's
+checks out `ecddb46`. It is not `ecddb46` itself: that tree's
 workflow file still checks out the previous `review.checkout` tree.
 
 ## CI edges
