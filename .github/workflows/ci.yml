@@ -152,3 +152,10 @@ jobs:
           .venv-legacy/bin/python -m pip install . --no-build-isolation --no-deps
           test -x .venv-legacy/bin/plai
           .venv-legacy/bin/python -c "from importlib.metadata import version; print(version('plaibook'))"
+
+      # publish.yml builds the wheel from the sdist. A file the wheel
+      # vendors but MANIFEST.in leaves out only fails that way.
+      - name: Build the sdist and a wheel from it, as publish.yml does
+        run: |
+          uv build --out-dir dist-check
+          unzip -l dist-check/*.whl | grep -q "plaibook/share/skills/ansible-plaibook-review/SKILL.md"
