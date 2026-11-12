@@ -12,7 +12,7 @@ name: Open a release pull request
 # RELEASE_GITHUB_APP_PRIVATE_KEY on the release environment. CI runs on
 # the pull request. The alignment playbook in this job has already
 # checked the four version files. publish.yml stays on release: published.
-# Cutting the tag is release-cut.yml, after this pull request is merged.
+# Merging the pull request starts release-cut.yml, which tags and releases.
 
 on:
   workflow_dispatch:
@@ -96,7 +96,7 @@ jobs:
           git push origin "HEAD:${branch}"
           {
             printf 'Sets %s in pyproject.toml, plaibook/__init__.py, the review skill, the README image example, and uv.lock.\n\n' "$RELEASE_VERSION"
-            printf 'This pull request does not tag. After it merges, run the Cut a GitHub release workflow. That creates tag v%s and a non-prerelease Release, which starts publish.yml and ee-publish.yml.\n\n' "$RELEASE_VERSION"
+            printf 'Merging this pull request releases v%s. release-cut.yml builds and checks the package, creates the tag and a non-prerelease Release, and that Release starts publish.yml (PyPI) and ee-publish.yml (the EE image). Nothing else needs to be run or approved.\n\n' "$RELEASE_VERSION"
             printf '%s\n' "tests/test_version_alignment.yml passed in the bump job. The release GitHub App opened this pull request, so CI runs here."
           } > /tmp/release-pr.md
           GH_TOKEN="$token" gh pr create \

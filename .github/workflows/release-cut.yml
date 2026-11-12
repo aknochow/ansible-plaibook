@@ -1,17 +1,29 @@
 name: Cut a GitHub release
 
-# workflow_dispatch only. Reads the version on main, refuses if v<version>
-# already exists, and creates that tag plus a non-prerelease Release on
-# the current main commit.
+# Runs when a push to main changes pyproject.toml, which is what merging a
+# chore/release-<version> pull request does. Also runs on workflow_dispatch.
+# Reads the version at the pushed commit. On push, a version that already
+# has a tag is a no-op (a pyproject.toml edit that is not a release). On
+# dispatch, an existing tag fails.
+#
+# Before tagging, the check job builds the sdist and the wheel from it and
+# runs scripts/check_dist.py, the same check publish.yml runs. A package
+# that cannot build never gets a tag or a Release. The build runs
+# build-backend code, so that job has no environment and no secrets. The
+# cut job uses a fresh checkout and runs only release_cut.py.
 #
 # Authentication is a GitHub App installation token from the release
 # environment (RELEASE_GITHUB_APP_ID and RELEASE_GITHUB_APP_PRIVATE_KEY).
 # GITHUB_TOKEN is not used. A release created with GITHUB_TOKEN does not
-# trigger publish.yml or ee-publish.yml. publish.yml stays on
-# release: published, and the pypi environment remains the upload gate.
-# This workflow does not upload to PyPI and does not pin the review Action.
+# trigger publish.yml or ee-publish.yml. The Release this job creates
+# starts both, and publish.yml uploads to PyPI without an approval step.
+# This workflow does not pin the review Action.
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - pyproject.toml
   workflow_dispatch:
 
 permissions: {}
@@ -21,17 +33,70 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  check:
+    name: Build and check the package
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      release: ${{ steps.need.outputs.release }}
+    steps:
+      - name: Check out the pushed commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Does this version need a release
+        id: need
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          version="$(python3 scripts/release_version.py --print-current)"
+          tag="v${version}"
+          if [ -n "$(git ls-remote --tags origin "refs/tags/${tag}")" ]; then
+            if [ "$EVENT_NAME" = "push" ]; then
+              echo "${tag} already exists; this push is not a release"
+              echo "release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "tag ${tag} already exists" >&2
+            exit 1
+          fi
+          echo "releasing ${tag}"
+          echo "release=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install uv
+        if: steps.need.outputs.release == 'true'
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
+
+      - name: Set up Python
+        if: steps.need.outputs.release == 'true'
+        run: uv python install 3.12
+
+      - name: Build the sdist and the wheel from it
+        if: steps.need.outputs.release == 'true'
+        run: uv build
+
+      - name: Wheel must vendor the playbook and review skill
+        if: steps.need.outputs.release == 'true'
+        run: python3 scripts/check_dist.py dist
+
   cut:
     name: Tag and publish the release
+    needs: check
+    if: needs.check.outputs.release == 'true'
     runs-on: ubuntu-latest
     environment: release
     permissions:
       contents: read
     steps:
-      - name: Check out main
+      - name: Check out the pushed commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4.2.2
         with:
-          ref: main
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Require the release GitHub App credentials
@@ -51,4 +116,4 @@ jobs:
           RELEASE_GITHUB_APP_PRIVATE_KEY: ${{ secrets.RELEASE_GITHUB_APP_PRIVATE_KEY }}
           GITHUB_TOKEN: ""
           GH_TOKEN: ""
-        run: python3 scripts/release_cut.py --repo "$GITHUB_REPOSITORY"
+        run: python3 scripts/release_cut.py --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"
