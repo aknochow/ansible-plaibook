@@ -31,7 +31,7 @@ def _section() -> str:
             return text[start:pos]
 
 
-def _render(**overrides) -> str:
+def _render(**overrides: object) -> str:
     env = jinja2.Environment(undefined=jinja2.StrictUndefined)
     env.filters["bool"] = bool
     env.globals["evidence_fence"] = lambda _snippet: "```"
