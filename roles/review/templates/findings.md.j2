@@ -167,6 +167,9 @@ checks.
 {% if review_guardian_scan_enabled | bool %}
 
 ### Security Scan (ai-guardian)
+{% if not (guardian_scan_available | bool) %}
+Not scanned this run ({{ guardian_scan_skip_reason }}). This is not a clean result.
+{% elif guardian_findings %}
 A deterministic, model-independent scan of this review's diff/PR
 description, run in parallel with the lens agents above, not a gate in
 front of them. Most categories are informational only — same non-
@@ -175,11 +178,6 @@ signals (the self-refuted-finding filter, citation accuracy) — but a
 finding in a 🔒 **BLOCKING** category below (currently:
 {{ review_guardian_blocking_rule_ids | join(', ') }}) forces
 `NEEDS_CHANGES`{{ ' (blocking is currently disabled via review_guardian_scan_blocking_enabled — shown for visibility only, not enforced this run)' if not (review_guardian_scan_blocking_enabled | bool) else '' }}.
-{% if not (guardian_scan_available | bool) %}
-
-Scan unavailable this run ({{ guardian_scan_skip_reason }}) — not run,
-not a clean result. Treat as "not scanned," not "nothing found."
-{% elif guardian_findings %}
 
 **PROMPT-INJECTION-001/SSRF-001 caveat**: both have a confirmed
 false-positive class on ordinary content this pipeline scans
@@ -210,8 +208,7 @@ Scan input was truncated to {{ review_guardian_max_scan_chars }} characters befo
 {% endif %}
 {% endfor %}
 {% else %}
-
-No findings — clean scan.
+No findings: clean scan.
 {% endif %}
 {% endif %}
 
