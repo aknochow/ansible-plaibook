@@ -76,7 +76,7 @@
       register: branch_review_clone_result
       # Same reasoning as resolve_target_pr.yml's identical clone task -- a real network
       # clone of a potentially large, foreign repo.
-      async: 120
+      async: "{{ review_clone_timeout | int }}"
       poll: 2
       until: >-
         branch_review_clone_result is succeeded or

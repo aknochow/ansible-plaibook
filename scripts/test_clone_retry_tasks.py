@@ -39,3 +39,4 @@ def test_clone_task_uses_the_tested_retry_condition(name):
         assert _condition(clone) == _condition(tested[0])
         assert clone["retries"] == "{{ review_clone_retries | int }}"
         assert clone["delay"] == "{{ review_clone_retry_delay | int }}"
+        assert clone["async"] == "{{ review_clone_timeout | int }}"
