@@ -12,7 +12,7 @@ claude-agent-sdk==0.2.179
 google-genai==3.0.0
 openai==3.46.0
 xai-sdk==1.21.0
-openshell==0.1.6
+openshell==0.1.8
 grpcio==1.85.1
 protobuf==7.36.2
 kubernetes==37.0.2
