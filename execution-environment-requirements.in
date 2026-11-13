@@ -7,17 +7,17 @@
 # ranges in each collection requirements.txt.
 ansible-core==2.19.14
 ansible-runner==2.4.3
-anthropic[vertex]==2.3.0
-claude-agent-sdk==0.2.176
-google-genai==2.34.0
-openai==3.42.0
+anthropic[vertex]==2.6.0
+claude-agent-sdk==0.2.179
+google-genai==3.0.0
+openai==3.46.0
 xai-sdk==1.21.0
 openshell==0.1.6
 grpcio==1.85.1
 protobuf==7.36.2
-kubernetes==37.0.1
+kubernetes==37.0.2
 requests-oauthlib==2.0.0
-jsonpatch==1.38
+jsonpatch==1.44
 msgpack==1.2.4
 setuptools==84.2.1
 urllib3==2.8.0

@@ -80,10 +80,10 @@ def test_execution_environment_builds_from_the_pin_file():
     for pin in (
         "ansible-core==2.19.14",
         "ansible-runner==2.4.3",
-        "anthropic[vertex]==2.3.0",
-        "claude-agent-sdk==0.2.176",
-        "google-genai==2.34.0",
-        "openai==3.42.0",
+        "anthropic[vertex]==2.6.0",
+        "claude-agent-sdk==0.2.179",
+        "google-genai==3.0.0",
+        "openai==3.46.0",
         "xai-sdk==1.21.0",
     ):
         assert pin in locked
