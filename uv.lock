@@ -785,7 +785,7 @@ wheels = [
 
 [[package]]
 name = "openshell"
-version = "0.1.6"
+version = "0.1.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cloudpickle" },
@@ -794,8 +794,9 @@ dependencies = [
     { name = "httpx" },
     { name = "protobuf" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/19/26/dfc96e19e33ffa97f261905dead166c7086aaf7a6692304d0c5dcdf01736/openshell-0.1.8.tar.gz", hash = "sha256:6be219b012f0120eeb95670afca570f96300f7d3e1f8865cd5300a34fd501148", size = 226228, upload-time = "2026-11-10T18:30:41.276Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f5/04/d563f51ae4cb5c2439340b8af7e64674bdcc335f55e945b36f57221bb841/openshell-0.1.6-py3-none-any.whl", hash = "sha256:a0c5b0e9954ffdbdb4d34110d4a9d0d2dc57579a53e4a67372e0f8dd3b75cd81", size = 150773, upload-time = "2026-10-28T00:21:48.415Z" },
+    { url = "https://files.pythonhosted.org/packages/1d/4a/4e06ff5d0e1ffabad396dfbe31355629203b846d35b1d99d940098fa4141/openshell-0.1.8-py3-none-any.whl", hash = "sha256:4f2c802933b34eb20b4bf0cd6cb79bfc085bbb2b3fcb934772f30d6ff5ad7bfd", size = 132607, upload-time = "2026-11-10T18:30:39.688Z" },
 ]
 
 [[package]]
