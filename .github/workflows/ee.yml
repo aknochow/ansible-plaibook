@@ -2,6 +2,9 @@ name: Execution environment
 
 # Pull requests build and smoke-test both arches and push nothing.
 # Publish lives in ee-publish.yml and does not run on pull_request.
+# release-cut.yml also calls this workflow (workflow_call) before it
+# tags, so a release whose image fails the smoke test or the trivy gate
+# never gets a tag. A called run checks out the caller's commit.
 
 on:
   pull_request:
@@ -18,6 +21,7 @@ on:
       - .github/ee-builder-requirements.txt
       - .github/workflows/ee.yml
       - .github/workflows/ee-publish.yml
+  workflow_call:
 
 permissions: {}
 

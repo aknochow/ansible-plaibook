@@ -154,7 +154,7 @@ Every build verifies Red Hat's signature on the pinned base digest before `ansib
 
 ## CI
 
-[`.github/workflows/ee.yml`](../.github/workflows/ee.yml) runs on pull requests. It builds `linux/amd64` on `ubuntu-latest` and `linux/arm64` on `ubuntu-24.04-arm`, smokes the image, and pushes nothing.
+[`.github/workflows/ee.yml`](../.github/workflows/ee.yml) runs on pull requests. It builds `linux/amd64` on `ubuntu-latest` and `linux/arm64` on `ubuntu-24.04-arm`, smokes the image, and pushes nothing. `release-cut.yml` runs the same workflow on the commit it is about to tag, and a failure there stops the release.
 
 [`.github/workflows/ee-publish.yml`](../.github/workflows/ee-publish.yml) runs on a push to `main` that changes an image input, and on a published GitHub release. It uses the same `ansible-builder build --squash all` command, then pushes each architecture, signs it with cosign, attaches a Syft SBOM, and publishes a multi-arch manifest. A release tag `vX.Y.Z` publishes `:X.Y.Z`. A `main` push publishes `:main` and copies it to `:latest`.
 
