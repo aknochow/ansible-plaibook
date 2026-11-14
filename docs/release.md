@@ -39,6 +39,14 @@ gets a tag. The build runs in its own job with no environment and no
 secrets, because building runs build-backend code. A second job with a
 fresh checkout holds the release credentials and only creates the tag.
 
+Between the two, the release also builds the execution environment on
+the same commit by calling `ee.yml`. Both arches must build, pass the
+smoke test, and pass the trivy gate on fixable HIGH and CRITICAL
+vulnerabilities. An image that fails any of these blocks the tag, so a
+new CVE in a pinned tool stops the release before `v<version>` exists,
+not after. This adds about as long as an EE pull request check to the
+release.
+
 The workflow can also be run by hand from `main`. Run that way, an
 existing tag fails the job.
 

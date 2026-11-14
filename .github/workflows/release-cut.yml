@@ -12,6 +12,12 @@ name: Cut a GitHub release
 # build-backend code, so that job has no environment and no secrets. The
 # cut job uses a fresh checkout and runs only release_cut.py.
 #
+# The ee job calls ee.yml on the same commit: both arches build, pass
+# the smoke test, and pass the trivy gate on fixable HIGH and CRITICAL
+# vulnerabilities. ee.yml only runs on pull requests that change the
+# image inputs, so without this a new CVE in a pinned tool would first
+# show up in ee-publish.yml, after the tag exists.
+#
 # Authentication is a GitHub App installation token from the release
 # environment (RELEASE_GITHUB_APP_ID and RELEASE_GITHUB_APP_PRIVATE_KEY).
 # GITHUB_TOKEN is not used. A release created with GITHUB_TOKEN does not
@@ -84,9 +90,17 @@ jobs:
         if: steps.need.outputs.release == 'true'
         run: python3 scripts/check_dist.py dist
 
+  ee:
+    name: Build and scan the execution environment
+    needs: check
+    if: needs.check.outputs.release == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ee.yml
+
   cut:
     name: Tag and publish the release
-    needs: check
+    needs: [check, ee]
     if: needs.check.outputs.release == 'true'
     runs-on: ubuntu-latest
     environment: release

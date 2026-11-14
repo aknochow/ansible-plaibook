@@ -157,7 +157,8 @@ def test_failed_cosign_verify_does_not_start_navigator(tmp_path: Path):
 def test_pr_workflow_builds_both_arches_and_does_not_push():
     text = PR.read_text(encoding="utf-8")
     document = _load(PR)
-    assert set(document["on"]) == {"pull_request"}
+    assert set(document["on"]) == {"pull_request", "workflow_call"}
+    assert document["on"]["workflow_call"] is None
     assert document["permissions"] == {}
     job = document["jobs"]["build"]
     assert job["permissions"] == {"contents": "read"}
