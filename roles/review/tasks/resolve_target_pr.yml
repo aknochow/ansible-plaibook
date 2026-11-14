@@ -114,7 +114,7 @@
           # down in this same file. Verified ansible.builtin.git supports
           # async cleanly (register.after populates correctly) before applying
           # it here.
-          async: 120
+          async: "{{ review_clone_timeout | int }}"
           poll: 2
           until: >-
             review_clone_result is succeeded or

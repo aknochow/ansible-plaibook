@@ -66,6 +66,7 @@ status: stable
 | Variable | Default | Purpose |
 |---|---|---|
 | `cleanup_sandbox_onfail` | `true` | Tears the sandbox down even after a failed run. Set `false` to leave a failed run's sandbox up for debugging. |
+| `review_clone_timeout` | `600` | Seconds one PR or branch clone may run before Ansible stops it. A timeout fails the run and is not retried. Network errors that match `review_clone_transient_pattern` are retried `review_clone_retries` times. |
 | `review_cleanup_clone` | `true` | Deletes the PR or branch review clone when the review ends, including after a failure. `plai review` also deletes the run's scratch directory after Ctrl-C or a timeout. Set `false` to keep the clone and print its path. |
 | `review_log_retention_days` | `14` | `plai review` only. Before each run, removes `last_run.<run_id>.json` files, task-failure logs, leftover scratch and clones, and `debug_prompts/<target>` directories (each run of a target rewrites its own) older than this many days from `~/.cache/ansible-plaibook`. Skipped while another `plai review` is running. Reports, the ledger, and collections are never removed. `0` keeps everything; the maximum is `36500`. |
 | `sandbox_policy` | Filesystem paths, no network rules | Passed to `aknochow.openshell.sandbox`. Sandbox commands have no egress. Any explicit policy **replaces** this one, including `network_policies`. `{}` keeps the image's own policy, which may never activate. |

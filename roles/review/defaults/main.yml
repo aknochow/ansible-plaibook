@@ -896,6 +896,11 @@ review_clone_transient_pattern: >-
   Could not resolve host|Could not resolve proxy|Couldn't connect to server|Temporary failure in name resolution|Failed to connect|Connection timed out|Connection reset|The requested URL returned error: 50[234]|early EOF|TLS connection was non-properly terminated
 review_clone_retries: 3
 review_clone_retry_delay: 10
+# Seconds one PR or branch clone may run before Ansible stops it. A slow
+# forge took 135 s to fully clone an 11 MB repo that normally takes 16 s,
+# so 120 s was too tight. A timeout is not retried: retrying a stalled
+# clone would multiply the wait.
+review_clone_timeout: 600
 
 # Delete the PR or branch review clone when the review ends, including a
 # failed run. false keeps it and prints its path, for debugging.
