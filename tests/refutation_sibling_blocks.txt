@@ -1,0 +1,40 @@
+# Fixture for the refutation location check in test_verify_provider_failure.yml.
+# Two similar mappings: the first has 'collection', the second does not.
+summary:
+  'agent_family': _last_run_agent_family,
+  'collection': _last_run_agent_family | review_collection_ref(pin_file),
+  'effort': review_run_effort | default(''),
+# padding line 01 between the two mappings
+# padding line 02 between the two mappings
+# padding line 03 between the two mappings
+# padding line 04 between the two mappings
+# padding line 05 between the two mappings
+# padding line 06 between the two mappings
+# padding line 07 between the two mappings
+# padding line 08 between the two mappings
+# padding line 09 between the two mappings
+# padding line 10 between the two mappings
+# padding line 11 between the two mappings
+# padding line 12 between the two mappings
+# padding line 13 between the two mappings
+# padding line 14 between the two mappings
+# padding line 15 between the two mappings
+# padding line 16 between the two mappings
+# padding line 17 between the two mappings
+# padding line 18 between the two mappings
+# padding line 19 between the two mappings
+# padding line 20 between the two mappings
+# padding line 21 between the two mappings
+# padding line 22 between the two mappings
+# padding line 23 between the two mappings
+# padding line 24 between the two mappings
+# padding line 25 between the two mappings
+# padding line 26 between the two mappings
+# padding line 27 between the two mappings
+# padding line 28 between the two mappings
+# padding line 29 between the two mappings
+# padding line 30 between the two mappings
+ledger:
+  'agent_family': _last_run_agent_family,
+  'effort': review_run_effort | default(''),
+  'models': pipeline_agent_calls | map(attribute='model') | list,
