@@ -1,7 +1,7 @@
 ---
 name: ansible-plaibook-review
 description: "Invoke plaibook's review CLI (`plai` / `plaibook`) wrapping review.yml, or ansible-playbook for AAP, and read its structured output correctly. Use whenever asked to review a PR/MR, review a local commit, or interpret a prior run's verdict/findings."
-version: "0.1.33"
+version: "0.1.34"
 ---
 
 # ansible-plaibook review pipeline
