@@ -92,6 +92,45 @@
     verify_result_claim_input:
       continues_finding_id: null
 
+# A file can hold two similar blocks. A refutation that quotes the copy
+# away from the cited line may describe the wrong one, so it is kept as
+# inconclusive (see check_refutation_location.py). The cited file is read
+# through the read_file tool path, which carries the repo-root checks.
+- name: Check that a refutation's quote comes from the cited block
+  when:
+    - verify_result_status == 'refuted'
+    - (verify_target_finding.file | default('') | string | length) > 0
+    - (verify_target_finding.line | default(0) | int) > 0
+  block:
+    - name: Reset the tool-result accumulator before reading the cited file
+      ansible.builtin.set_fact:
+        explore_tool_results: []
+
+    - name: Read the cited file
+      ansible.builtin.include_tasks: dispatch_explore_tool.yml
+      vars:
+        tool_call:
+          id: refutation_location_check
+          name: read_file
+          input:
+            path: "{{ verify_target_finding.file }}"
+
+    - name: Compare the refutation's quote with the cited line
+      check_refutation_location:
+        status: "{{ verify_result_status }}"
+        cited_line: "{{ verify_target_finding.line }}"
+        verification_evidence: "{{ verify_result_evidence }}"
+        file_content: >-
+          {{ '' if ((explore_tool_results | first | default({})).is_error | default(true))
+             else (explore_tool_results | first).content }}
+      register: _refutation_location
+
+    - name: Keep the finding as inconclusive when the quote came from another block
+      when: _refutation_location.downgraded | default(false)
+      ansible.builtin.set_fact:
+        verify_result_status: "{{ _refutation_location.status }}"
+        verify_result_rationale: "{{ verify_result_rationale }} {{ _refutation_location.note }}"
+
 # Reset to prevent prior iteration's value leaking (removes accidental guard dependencies).
 - name: Reset the suggested-severity result so a prior iteration's value can never leak
   ansible.builtin.set_fact:

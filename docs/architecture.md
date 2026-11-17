@@ -96,6 +96,13 @@ read, and a read refutes it. A refuted one is left out of the score and
 the posted review. When the light check reaches no verdict, the
 finding stays in the review as inconclusive.
 
+A file can hold two similar blocks, and the verify agent can read the
+wrong one. Before a refutation is accepted, the pipeline reads the cited
+file and finds where the refutation's quoted lines are. If its quote
+comes from a copy of the cited code more than 10 lines away, the
+finding stays in the review as inconclusive
+(`action_plugins/check_refutation_location.py`).
+
 A newer pass, finding-identity continuity, extends the same idea across
 review *rounds*: when a finding recurs after a fix, an independent audit
 call confirms or refutes whether it's genuinely the same finding before

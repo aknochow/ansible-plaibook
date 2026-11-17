@@ -571,3 +571,42 @@
              'worst_outcome_category': 'crash-dos'}) }}
         verdict_case_expected_status: verified
         verdict_case_expected_severity: Major
+
+    - name: A refutation quoting a similar block elsewhere in the file is kept as inconclusive
+      ansible.builtin.include_tasks: verify_verdict_case.yml
+      vars:
+        verdict_case_label: refutation quotes the sibling block
+        verdict_case_finding: &sibling_finding
+          file: refutation_sibling_blocks.txt
+          line: 39
+          severity: Minor
+          lens: Functionality
+          confidence: HIGH
+          finding_id: f00000000118
+          description: The ledger mapping records the family and effort but not the collection.
+          evidence: "'effort': review_run_effort | default(''),"
+          fix: Add the collection to the ledger mapping.
+          _verify_light: true
+        verdict_case_input:
+          evidence_status: refuted
+          evidence: |-
+            'agent_family': _last_run_agent_family,
+            'collection': _last_run_agent_family | review_collection_ref(pin_file),
+            'effort': review_run_effort | default(''),
+          rationale: The mapping includes a collection field.
+        verdict_case_expected_status: inconclusive
+        verdict_case_expected_severity: Minor
+
+    - name: A refutation quoting the cited block keeps its verdict
+      ansible.builtin.include_tasks: verify_verdict_case.yml
+      vars:
+        verdict_case_label: refutation quotes the cited block
+        verdict_case_finding: *sibling_finding
+        verdict_case_input:
+          evidence_status: refuted
+          evidence: |-
+            'agent_family': _last_run_agent_family,
+            'models': pipeline_agent_calls | map(attribute='model') | list,
+          rationale: The cited mapping is a different shape than described.
+        verdict_case_expected_status: refuted
+        verdict_case_expected_severity: Minor
