@@ -585,7 +585,7 @@ def test_parser_provider_and_no_sandbox():
     assert "--no-sandbox" in help_text
 
 
-def test_cursor_is_not_a_provider(tmp_path, monkeypatch):
+def test_cursor_is_not_a_provider(tmp_path, monkeypatch, capsys):
     import os
     from io import StringIO
 
@@ -600,6 +600,10 @@ def test_cursor_is_not_a_provider(tmp_path, monkeypatch):
         resolve_family(cli_family="cursor", stdin=StringIO(""), stderr=StringIO(), env=os.environ)
     with pytest.raises(SystemExit):
         build_parser(prog="plai").parse_args(["review", "org/repo/1", "--provider", "cursor"])
+    assert "cursor provider was removed" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        build_parser(prog="plai").parse_args(["review", "org/repo/1", "--provider", "nope"])
+    assert "unknown provider 'nope'" in capsys.readouterr().err
 
 
 def test_no_tty_cursor_key_alone_picks_nothing(tmp_path, monkeypatch):

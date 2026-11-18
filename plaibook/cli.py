@@ -22,6 +22,7 @@ from plaibook.config import (
     resolve_family,
     running_inside_openshell,
     save_vars,
+    unknown_provider_message,
 )
 from plaibook.openshell_sdk import OpenshellSdkError, reexec_sandbox_runtime
 from plaibook.playbook import (
@@ -158,6 +159,12 @@ def _prog_name() -> str:
     return name
 
 
+
+def _provider_arg(value: str) -> str:
+    if value not in FAMILIES:
+        raise argparse.ArgumentTypeError(unknown_provider_message(value))
+    return value
+
 def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
     program = prog or _prog_name()
     parser = argparse.ArgumentParser(
@@ -280,8 +287,11 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
         "--provider",
         dest="provider",
         metavar="FAMILY",
-        choices=list(FAMILIES),
+        # A type check, not choices=, so a removed provider such as cursor
+        # gets the same "was removed" message as a saved vars.yml.
+        type=_provider_arg,
         help=(
+            f"One of: {', '.join(FAMILIES)}. "
             "Set agent_family and save it to ~/.config/ansible-plaibook/vars.yml. "
             "openai uses grok-4.7 at https://api.x.ai/v1 when XAI_API_KEY or "
             "GROK_API_KEY is set and OPENAI_API_KEY is not."
