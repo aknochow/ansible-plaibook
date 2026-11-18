@@ -26,7 +26,6 @@ Pick one with `--provider`. `plai` saves it to `~/.config/ansible-plaibook/vars.
 |---|---|---|
 | `openai` | `gpt-6-luna` | `OPENAI_API_KEY` |
 | `xai` | `grok-4.7` | `XAI_API_KEY` or `GROK_API_KEY` |
-| `cursor` | `grok-4.7` through Cursor | `CURSOR_API_KEY` |
 | `gemini` | `gemini-3.6-flash` | `GEMINI_API_KEY`, `GOOGLE_API_KEY`, or Vertex |
 | `claude` | `claude-opus-4-6` | `ANTHROPIC_API_KEY` or Vertex |
 
@@ -41,7 +40,6 @@ Provider collections, one per model SDK:
 | Collection | Repository | Role |
 |---|---|---|
 | `aknochow.claude` | [ansible-claude](https://github.com/aknochow/ansible-claude) | Claude, including the Agent SDK |
-| `aknochow.cursor` | [ansible-cursor](https://github.com/aknochow/ansible-cursor) | Cursor agent |
 | `aknochow.gemini` | [ansible-gemini](https://github.com/aknochow/ansible-gemini) | Gemini |
 | `aknochow.openai` | [ansible-openai](https://github.com/aknochow/ansible-openai) | OpenAI-compatible chat |
 | `aknochow.xai` | [ansible-xai](https://github.com/aknochow/ansible-xai) | xAI (Grok) chat through `xai-sdk` |
@@ -106,9 +104,7 @@ podman push <your-registry>/plaibook-ee:latest
 Credentials (GitHub/GitLab tokens, OpenShell mTLS) are injected via
 AAP credentials at job-run time, never baked into the image.
 
-The image includes the `aknochow.cursor` collection but not
-`cursor-sdk`, which bundles its own Node.js runtime. `agent_family=cursor`
-runs from a host install, not the image. Rebuild
+Rebuild
 when `collections-requirements.yml` or `execution-environment.yml`
 changes. A Vertex-only parse failure is a playbook bug, not a missing
 collection.

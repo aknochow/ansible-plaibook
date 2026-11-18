@@ -12,18 +12,27 @@ import yaml
 
 CONFIG_DIRNAME = "ansible-plaibook"
 VARS_NAME = "vars.yml"
-FAMILIES = ("cursor", "claude", "gemini", "openai", "claude_cli", "xai")
+FAMILIES = ("claude", "gemini", "openai", "claude_cli", "xai")
+# Providers that used to exist. Named in the error so a saved vars.yml
+# that still selects one says why it stopped working.
+REMOVED_FAMILIES = ("cursor",)
+
+
+def unknown_provider_message(name: object, where: str = "") -> str:
+    """Error text for an agent_family that is not in FAMILIES."""
+    location = f" in {where}" if where else ""
+    message = f"unknown provider {name!r}{location}; choose one of: {', '.join(FAMILIES)}"
+    if str(name).strip().lower() in REMOVED_FAMILIES:
+        message += f". The {str(name).strip().lower()} provider was removed from plaibook."
+    return message
 
 
 class ConfigError(Exception):
     """Operator vars.yml could not be read or parsed."""
-CURSOR_DEFAULT_MODEL = "grok-4.7"
-CURSOR_DEFAULT_EFFORT = "high"
 # xAI's OpenAI-compatible API. grok-4.7 is a live model id; Luna is not.
 XAI_BASE_URL = "https://api.x.ai/v1"
 XAI_DEFAULT_MODEL = "grok-4.7"
 _CREDENTIAL_ENV = {
-    "cursor": "CURSOR_API_KEY",
     "claude": "ANTHROPIC_API_KEY",
     "gemini": "GEMINI_API_KEY",
     "openai": "OPENAI_API_KEY",
@@ -128,8 +137,6 @@ def credential_present(family: str, env: Mapping[str, str] | None = None) -> boo
 
 def default_family(env: Mapping[str, str] | None = None) -> str:
     environ = os.environ if env is None else env
-    if credential_present("cursor", environ):
-        return "cursor"
     for family in FAMILIES:
         if credential_present(family, environ):
             return family
@@ -177,11 +184,6 @@ def persist_family(family: str, *, env: Mapping[str, str] | None = None) -> Path
     environ = os.environ if env is None else env
     current = load_vars(env=env)
     payload = {"agent_family": family}
-    if family == "cursor":
-        if not current.get("review_cursor_model"):
-            payload["review_cursor_model"] = CURSOR_DEFAULT_MODEL
-        if not current.get("review_cursor_effort"):
-            payload["review_cursor_effort"] = CURSOR_DEFAULT_EFFORT
     if family == "openai" and xai_is_openai_credential(environ):
         if not current.get("review_openai_model"):
             payload["review_openai_model"] = XAI_DEFAULT_MODEL
@@ -230,7 +232,7 @@ def resolve_family(
     if cli_family:
         family = parse_family(cli_family)
         if family is None:
-            raise ValueError(f"unknown provider {cli_family!r}; choose one of: {', '.join(FAMILIES)}")
+            raise ValueError(unknown_provider_message(cli_family))
         persist_family(family, env=environ)
         stderr.write(f"Saved provider {family} to {vars_path(env=environ)}\n")
         return family
@@ -238,18 +240,12 @@ def resolve_family(
     configured = load_vars(env=environ).get("agent_family")
     if configured not in (None, ""):
         if parse_family(str(configured)) is None:
-            raise ConfigError(
-                f"unknown provider {configured!r} in {vars_path(env=environ)}; "
-                f"choose one of: {', '.join(FAMILIES)}"
-            )
+            raise ConfigError(unknown_provider_message(configured, str(vars_path(env=environ))))
         return None
     env_family = (environ.get("ANSIBLE_REVIEW_AGENT_FAMILY") or "").strip()
     if env_family:
         if parse_family(env_family) is None:
-            raise ConfigError(
-                f"unknown provider {env_family!r} in ANSIBLE_REVIEW_AGENT_FAMILY; "
-                f"choose one of: {', '.join(FAMILIES)}"
-            )
+            raise ConfigError(unknown_provider_message(env_family, "ANSIBLE_REVIEW_AGENT_FAMILY"))
         return None
 
     tty = stdin.isatty() if interactive is None else interactive
@@ -259,13 +255,6 @@ def resolve_family(
         stderr.write(f"Saved provider {family} to {vars_path(env=environ)}\n")
         return family
 
-    if credential_present("cursor", environ):
-        family = "cursor"
-        persist_family(family, env=environ)
-        stderr.write(
-            f"No TTY; using cursor (CURSOR_API_KEY is set). Saved to {vars_path(env=environ)}\n"
-        )
-        return family
     if xai_is_openai_credential(environ):
         family = "openai"
         persist_family(family, env=environ)

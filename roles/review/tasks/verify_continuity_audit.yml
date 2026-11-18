@@ -226,10 +226,6 @@
   when: agent_family == 'claude_cli'
   ansible.builtin.include_tasks: verify_continuity_audit_claude_cli.yml
 
-- name: "Cursor: run the optional continuity-audit branch"
-  when: agent_family == 'cursor'
-  ansible.builtin.include_tasks: verify_continuity_audit_cursor.yml
-
 # Fail clearly rather than with an undefined-variable error. Every supported
 # provider branch must set the normalized facts before the shared usage record
 # below; an unhandled family should fail here, not with an opaque missing fact.

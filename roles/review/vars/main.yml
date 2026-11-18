@@ -68,11 +68,9 @@ security_findings_schema:
       properties:
         security: { type: number }
       required: [security]
-    # The nonce detects "the Cursor subagent never ran" when the
-    # returned value mismatches the nonce embedded in the trusted lens
-    # prompt. Payload bind for Cursor is the named *_lens nested
-    # execute, not a model-computed digest. additionalProperties is
-    # false, so prompt_nonce is a schema edit, not an extra key.
+    # Dispatch canary: the lens echoes the nonce embedded in its
+    # trusted prompt. additionalProperties is false, so prompt_nonce
+    # is a schema edit, not an extra key.
     prompt_nonce: { type: string }
     findings:
       type: array

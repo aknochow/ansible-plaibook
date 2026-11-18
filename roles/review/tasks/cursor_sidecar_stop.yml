@@ -1,7 +1,0 @@
----
-# Loaded only when this playbook started the sidecar. Same parse-time
-# FQCN rule as cursor_sidecar_start.yml.
-- name: Stop the playbook-owned cursor-sdk-bridge sidecar
-  aknochow.cursor.bridge:
-    state: absent
-    rundir: "{{ review_cursor_bridge_rundir }}"

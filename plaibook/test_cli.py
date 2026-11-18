@@ -536,9 +536,9 @@ def test_cmd_review_skips_resolve_family_when_agent_family_extra(tmp_path, monke
     assert code == 0
     assert called == []
 
-    code = cmd_review(_args(commit=True, playbook_root=str(checkout), provider="cursor"))
+    code = cmd_review(_args(commit=True, playbook_root=str(checkout), provider="xai"))
     assert code == 0
-    assert called and called[0]["cli_family"] == "cursor"
+    assert called and called[0]["cli_family"] == "xai"
 
 
 def test_cmd_review_reports_collection_install_error(tmp_path, monkeypatch, capsys):
@@ -577,34 +577,52 @@ def test_parser_force_short_flag():
 
 def test_parser_provider_and_no_sandbox():
     parser = build_parser(prog="plai")
-    args = parser.parse_args(["review", "org/repo/1", "--no-sandbox", "--provider", "cursor"])
+    args = parser.parse_args(["review", "org/repo/1", "--no-sandbox", "--provider", "xai"])
     assert args.use_sandbox is False
-    assert args.provider == "cursor"
+    assert args.provider == "xai"
     help_text = parser.format_help()
     assert "--provider" in help_text
     assert "--no-sandbox" in help_text
 
 
-def test_persist_cursor_defaults(tmp_path, monkeypatch):
+def test_cursor_is_not_a_provider(tmp_path, monkeypatch):
+    import os
+    from io import StringIO
+
+    import pytest
+
+    from plaibook.config import FAMILIES, resolve_family
+
+    assert "cursor" not in FAMILIES
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.delenv("ANSIBLE_REVIEW_AGENT_FAMILY", raising=False)
+    with pytest.raises(ValueError, match="unknown provider 'cursor'"):
+        resolve_family(cli_family="cursor", stdin=StringIO(""), stderr=StringIO(), env=os.environ)
+    with pytest.raises(SystemExit):
+        build_parser(prog="plai").parse_args(["review", "org/repo/1", "--provider", "cursor"])
+
+
+def test_no_tty_cursor_key_alone_picks_nothing(tmp_path, monkeypatch):
     import os
     from io import StringIO
 
     from plaibook.config import load_vars, resolve_family
 
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    monkeypatch.delenv("ANSIBLE_REVIEW_AGENT_FAMILY", raising=False)
-    err = StringIO()
-    resolve_family(
-        cli_family="cursor",
-        stdin=StringIO(""),
-        stderr=err,
-        env=os.environ,
+    for name in (
+        "ANSIBLE_REVIEW_AGENT_FAMILY",
+        "OPENAI_API_KEY",
+        "ANSIBLE_OPENAI_API_KEY",
+        "XAI_API_KEY",
+        "GROK_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("CURSOR_API_KEY", "cursor-test-key")
+    family = resolve_family(
+        cli_family=None, stdin=StringIO(""), stderr=StringIO(), env=os.environ, interactive=False
     )
-    saved = load_vars(env=os.environ)
-    assert saved["agent_family"] == "cursor"
-    assert saved["review_cursor_model"] == "grok-4.7"
-    assert saved["review_cursor_effort"] == "high"
-    assert "Saved provider cursor" in err.getvalue()
+    assert family is None
+    assert load_vars(env=os.environ) == {}
 
 
 def test_persist_openai_xai_defaults(tmp_path, monkeypatch):
@@ -664,7 +682,6 @@ def test_nontty_grok_key_selects_openai(tmp_path, monkeypatch):
 
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     monkeypatch.delenv("ANSIBLE_REVIEW_AGENT_FAMILY", raising=False)
-    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANSIBLE_OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("XAI_API_KEY", raising=False)
@@ -692,19 +709,16 @@ def test_prompt_saves_typed_family(tmp_path, monkeypatch):
 
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     monkeypatch.delenv("ANSIBLE_REVIEW_AGENT_FAMILY", raising=False)
-    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
     err = StringIO()
     resolve_family(
         cli_family=None,
-        stdin=StringIO("cursor\n"),
+        stdin=StringIO("gemini\n"),
         stderr=err,
         env=os.environ,
         interactive=True,
     )
     saved = load_vars(env=os.environ)
-    assert saved["agent_family"] == "cursor"
-    assert saved["review_cursor_model"] == "grok-4.7"
-    assert saved["review_cursor_effort"] == "high"
+    assert saved["agent_family"] == "gemini"
 
 
 def test_resolve_family_rejects_invalid_configured_and_env(tmp_path, monkeypatch):
@@ -2095,8 +2109,8 @@ def test_load_vars_non_mapping_is_config_error(tmp_path):
         assert "mapping" in str(exc)
     else:
         raise AssertionError("expected ConfigError")
-    path.write_text("agent_family: cursor\n", encoding="utf-8")
-    assert load_vars(path=path)["agent_family"] == "cursor"
+    path.write_text("agent_family: gemini\n", encoding="utf-8")
+    assert load_vars(path=path)["agent_family"] == "gemini"
 
 
 def test_cmd_review_non_mapping_vars_yml(tmp_path, monkeypatch, capsys):
@@ -2353,7 +2367,7 @@ def test_review_ctrl_c_exits_130_without_traceback(tmp_path, monkeypatch, extra_
 
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
-    monkeypatch.setenv("ANSIBLE_REVIEW_AGENT_FAMILY", "cursor")
+    monkeypatch.setenv("ANSIBLE_REVIEW_AGENT_FAMILY", "gemini")
     monkeypatch.setenv("PLAIBOOK_PLAYBOOK_TIMEOUT", "5")
     monkeypatch.delenv("PLAIBOOK_SPINNER", raising=False)
     monkeypatch.setattr("plaibook.playbook.os.killpg", spy_killpg)
@@ -2448,7 +2462,7 @@ def test_save_vars_oserror_is_config_error(tmp_path):
     blocker = tmp_path / "notdir"
     blocker.write_text("x", encoding="utf-8")
     try:
-        save_vars({"agent_family": "cursor"}, path=blocker / "vars.yml")
+        save_vars({"agent_family": "gemini"}, path=blocker / "vars.yml")
     except ConfigError as exc:
         assert "cannot write" in str(exc)
     else:

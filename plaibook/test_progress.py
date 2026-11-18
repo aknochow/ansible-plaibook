@@ -10,7 +10,7 @@ def test_stage_for_task_main_pipeline():
     assert stage_for_task("Set up an OpenShell sandbox for isolated script execution") == "sandbox"
     assert stage_for_task("Scan the shared diff/PR-description content with ai-guardian") == "scan"
     assert stage_for_task("Dispatch the Security and Review lens agents") == "lenses"
-    assert stage_for_task("review : Dispatch lenses via provider-native module (agent_family=cursor)") == "lenses"
+    assert stage_for_task("review : Dispatch lenses via provider-native module (agent_family=xai)") == "lenses"
     assert stage_for_task("Merge findings and compute scores") == "merge"
     assert stage_for_task("Look beyond the diff for additional findings") == "explore"
     assert stage_for_task("Independently verify checkable claims in Critical/Major findings") == "verify"

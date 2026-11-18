@@ -113,7 +113,7 @@ anyway. `--triage-ci` (`-e review_triage_ci_failures=true`) explains the
 failures and does not dispatch lenses. Passing both is an error.
 
 First review with no operator config prompts for a provider and writes
-~/.config/ansible-plaibook/vars.yml. Cursor defaults to grok-4.7 / high.
+~/.config/ansible-plaibook/vars.yml.
 OpenAI-compatible reviews use grok-4.7 at https://api.x.ai/v1 when
 XAI_API_KEY or GROK_API_KEY is set and OPENAI_API_KEY is not, or when
 -e review_openai_model=grok-4.7 and OPENAI_BASE_URL is unset.
@@ -140,7 +140,7 @@ Examples:
   plai review org/repo/123 --debug
   plai review org/repo/123 --full
   plai review org/repo/123 -f
-  plai review org/repo/123 --provider cursor
+  plai review org/repo/123 --provider xai
   plai review org/repo/123 --no-sandbox
   plai review org/repo/123 --ee
   plai update
@@ -283,7 +283,6 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
         choices=list(FAMILIES),
         help=(
             "Set agent_family and save it to ~/.config/ansible-plaibook/vars.yml. "
-            "cursor saves grok-4.7 / high when those keys are unset. "
             "openai uses grok-4.7 at https://api.x.ai/v1 when XAI_API_KEY or "
             "GROK_API_KEY is set and OPENAI_API_KEY is not."
         ),
@@ -928,13 +927,6 @@ def _cmd_review_ee(args: argparse.Namespace, root: Path, run_id: str, extras: di
     )
     if family == "claude_cli":
         print("--ee cannot use claude_cli. The claude binary is not in the image.", file=sys.stderr)
-        return 2
-    if family == "cursor" and not getattr(args, "ee_image", None):
-        print(
-            "--ee cannot use cursor with the default image. cursor-sdk is not in it. "
-            "Run without --ee, or pass --ee-image for an image that has it.",
-            file=sys.stderr,
-        )
         return 2
 
     reviews_root = _host_path_var(

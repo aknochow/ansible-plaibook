@@ -86,7 +86,6 @@ _RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "cleanup",
         (
             "teardown",
-            "stop the playbook-owned cursor-sdk-bridge",
             "reap",
         ),
     ),
@@ -96,7 +95,6 @@ _RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "validate the selected provider",
             "provider runtime",
             "provider_preflight",
-            "cursor-sdk-bridge sidecar",
             "load operator xdg",
             "align local module execution",
         ),

@@ -1,8 +1,7 @@
 ---
 # One 16-character nonce per review run, same alphabet as last_run_id.
-# Embedded only in the trusted lens/explore/verify *prompts* (the
-# Cursor subagent channel). Asserted on the named *_lens nested
-# execute so a parent that never invoked the subagent cannot pass.
+# Embedded only in the trusted lens/explore/verify *prompts* and
+# echoed back in the lens structured output as a dispatch canary.
 # Idempotent: later includes reuse the value generated at the start of
 # full_review.yml. HMAC payload attestation is gone; do not regenerate
 # a dispatcher HMAC key.

@@ -43,8 +43,7 @@
 #
 # aknochow.gemini.generate fail_json's on APIError with a message. It
 # does not set status: error. Rescue only that module call. A msg-only
-# return is one failed verify attempt. Do not copy the Cursor empty
-# status=error match onto this task. A parent fabrication, a nested
+# return is one failed verify attempt. A parent fabrication, a nested
 # report_verdict, and an auth failure that is not this msg-only shape
 # still fail the play. gemini_generate_module is an allowlist so
 # playbook tests can load verify_provider_stub.

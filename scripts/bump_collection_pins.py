@@ -46,7 +46,7 @@ SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 GITHUB_URL_RE = re.compile(
     r"^https://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+?)(?:\.git)?/?$"
 )
-# Interface pins (aknochow.openai / aknochow.cursor) track default-branch
+# Interface pins (aknochow.openai / aknochow.xai) track default-branch
 # HEAD. Third-party release SHAs (ansible-collections/*) stay on the
 # tagged commit; floating those to main would silently upgrade runtime.
 BUMP_OWNERS = frozenset({"aknochow"})

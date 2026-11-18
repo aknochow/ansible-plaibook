@@ -135,7 +135,7 @@ and a controller venv path does not exist in the guest.
 
 ## OpenShell network policy vs provider APIs
 
-Default `review.yml` does **not** send OpenAI / Anthropic / Gemini / Cursor
+Default `review.yml` does **not** send OpenAI / Anthropic / Gemini / xAI
 traffic from inside the sandbox. Lens, explore, and verify SDK calls stay
 on the controller (step 5 above). Guest work is `grep`, `realpath`,
 checklist commands, and similar. A failed explore `search` is a guest
@@ -159,7 +159,6 @@ OpenShell sandbox policy.
 | Anthropic | `api.anthropic.com` |
 | Gemini | `generativelanguage.googleapis.com` |
 | Vertex | `aiplatform.googleapis.com`, `oauth2.googleapis.com` |
-| Cursor | `api.cursor.com` |
 | PR clone (already on the controller) | `github.com`, `api.github.com`, `gitlab.com` |
 
 **Sandbox guest.** Only if you attach an OpenShell provider, run an

@@ -81,12 +81,11 @@ including that exit code.
 Do not pass `--extra-var agent_family=...` / `-e agent_family=...` unless
 you are overriding the operator default for this one run. First `plai
 review` with no operator config prompts for a provider (TTY) or uses
-`cursor` when `CURSOR_API_KEY` is set (non-TTY) and writes
-`$XDG_CONFIG_HOME/ansible-plaibook/vars.yml` (or
-`~/.config/ansible-plaibook/vars.yml`). `--provider cursor` is the
-non-interactive form and also writes Cursor's default model
-`grok-4.7` at effort `high` when those keys are unset. Grok reviews
-on xAI use that same model through the OpenAI-compatible client:
+`openai` on xAI when only `XAI_API_KEY` or `GROK_API_KEY` is set
+(non-TTY) and writes `$XDG_CONFIG_HOME/ansible-plaibook/vars.yml` (or
+`~/.config/ansible-plaibook/vars.yml`). `--provider <family>` is the
+non-interactive form. Grok reviews on xAI can also go through the
+OpenAI-compatible client:
 `plai review org/repo/123 --provider openai -e review_openai_model=grok-4.7`
 with `XAI_API_KEY` or `GROK_API_KEY`. The base URL is
 `https://api.x.ai/v1` when `OPENAI_BASE_URL` is unset. Luna is not an
@@ -97,9 +96,9 @@ bake a provider into the repo. Extra-vars still win.
 
 If a given `agent_family` needs an optional extra from `pyproject.toml`
 (a provider SDK that is not in the default dependency set), install that
-extra in the checkout env (`uv sync --extra <name>`). Cursor's SDK is a
-default dependency so `pip install plaibook` then `plai review` works
-without `--extra cursor`. Extra-vars still win. XDG/host_vars do not
+extra in the checkout env (`uv sync --extra <name>`). `plai review`
+also installs the selected provider's hashed SDK pin on first use.
+Extra-vars still win. XDG/host_vars do not
 install extras — they only set Ansible variables. `uv run --extra <name>
 plai review ...` is the CONTRIBUTING path when `.venv` is not on PATH.
 

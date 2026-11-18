@@ -37,21 +37,18 @@ FAMILY_REQUIREMENTS: dict[str, tuple[tuple[str, str], ...]] = {
         ("claude_agent_sdk", "claude-agent-sdk"),
     ),
     "gemini": (("google.genai", "google-genai"),),
-    "cursor": (("cursor_sdk", "cursor-sdk"),),
     "xai": (("xai_sdk", "xai-sdk"),),
 }
 FAMILY_HASHED_FILE: dict[str, str] = {
     "openai": "openai-requirements.txt",
     "claude": "claude-requirements.txt",
     "gemini": "gemini-requirements.txt",
-    "cursor": "cursor-requirements.txt",
     "xai": "xai-requirements.txt",
 }
 _FAMILY_IN: dict[str, str] = {
     "openai": "openai.in",
     "claude": "claude.in",
     "gemini": "gemini.in",
-    "cursor": "cursor.in",
     "xai": "xai.in",
 }
 
@@ -68,7 +65,7 @@ def provider_sdk_lock_path(python: str) -> Path:
 
 @contextmanager
 def _exclusive_provider_sdk_lock(python: str) -> Iterator[None]:
-    """Serialize check, pip, and the cursor HTTP/2 patch for one interpreter.
+    """Serialize the check and pip install for one interpreter.
 
     POSIX ``fcntl.flock`` only. Windows is not a supported plaibook host.
     """
@@ -135,7 +132,6 @@ def _ensure_provider_sdk_locked(
         if not _requirement_satisfied(exe, mod, dist, expected):
             missing.append((mod, dist, expected))
     if not missing:
-        _patch_cursor_http2_proxy(key, exe)
         return
     label = ", ".join(f"{dist}=={ver}" for _mod, dist, ver in missing)
     if interpreter_is_externally_managed(exe):
@@ -167,18 +163,6 @@ def _ensure_provider_sdk_locked(
         raise ProviderSdkError(
             f"pip install finished but {exe} still cannot import {', '.join(still)} at the hashed pin."
         )
-    _patch_cursor_http2_proxy(key, exe)
-
-
-def _patch_cursor_http2_proxy(family: str, python: str) -> None:
-    if family != "cursor":
-        return
-    from plaibook.cursor_http2_proxy import CursorHttp2ProxyError, patch_installed_cursor_sdk
-
-    try:
-        patch_installed_cursor_sdk(python)
-    except CursorHttp2ProxyError as exc:
-        raise ProviderSdkError(str(exc)) from exc
 
 
 def _normalize_dist(name: str) -> str:

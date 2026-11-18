@@ -15,7 +15,6 @@ def test_every_family_resolves_from_the_repo_pin_file():
     for family, name in (
         ("claude", "claude"),
         ("claude_cli", "claude"),
-        ("cursor", "cursor"),
         ("gemini", "gemini"),
         ("openai", "openai"),
         ("xai", "xai"),

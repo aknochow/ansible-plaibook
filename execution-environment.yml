@@ -63,7 +63,6 @@ dependencies:
       - claude-agent-sdk
       - google-genai
       - openai
-      - cursor-sdk
       - xai-sdk
       - openshell
       - grpcio

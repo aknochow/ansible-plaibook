@@ -36,11 +36,6 @@ PLAYBOOKS=(
   "tests/test_clone_transient_retry.yml"
   "tests/test_commit_range.yml"
   "tests/test_continuity_audit_other_family.yml"
-  "tests/test_cursor_named_lens_retry.yml"
-  "tests/test_cursor_lens_async_wait.yml"
-  "tests/test_cursor_verify_status_error.yml"
-  "tests/test_cursor_lens_attempt_usage.yml"
-  "tests/test_cursor_prompt_nonce.yml"
   "tests/test_explore_tool_limit.yml"
   "tests/test_guardian_cache.yml"
   "tests/test_guardian_not_installed.yml"
@@ -69,9 +64,8 @@ PLAYBOOKS=(
 
 echo "Running ${#PLAYBOOKS[@]} offline Ansible playbook test(s)..."
 
-# dispatch_cursor_lens_attempt.yml calls aknochow.cursor.agent. The
-# named-lens retry playbook swaps in tests/library/cursor_agent_stub.py
-# (no live Cursor) via ANSIBLE_LIBRARY + cursor_agent_module.
+# Verify and explore playbooks swap in tests/library/verify_provider_stub.py
+# (no live provider) via ANSIBLE_LIBRARY.
 STUB_LIBRARY="${REPO_ROOT}/tests/library"
 
 # One playbook, called through xargs below. Its own HOME, TMPDIR, and stub
@@ -86,10 +80,9 @@ run_playbook() {
   work="$(mktemp -d "${results}/work.XXXXXX")"
   mkdir -p "${work}/home" "${work}/tmp"
   set +e
-  if [[ "${pb}" == "tests/test_cursor_named_lens_retry.yml" || "${pb}" == "tests/test_cursor_lens_async_wait.yml" || "${pb}" == "tests/test_cursor_verify_status_error.yml" || "${pb}" == "tests/test_explore_tool_limit.yml" || "${pb}" == "tests/test_verify_boolean_stringification_note.yml" || "${pb}" == "tests/test_verify_provider_failure.yml" || "${pb}" == "tests/test_verify_light_check.yml" ]]; then
+  if [[ "${pb}" == "tests/test_explore_tool_limit.yml" || "${pb}" == "tests/test_verify_boolean_stringification_note.yml" || "${pb}" == "tests/test_verify_provider_failure.yml" || "${pb}" == "tests/test_verify_light_check.yml" ]]; then
     HOME="${work}/home" TMPDIR="${work}/tmp" ANSIBLE_ASYNC_DIR="${work}/async" \
       ANSIBLE_LIBRARY="${STUB_LIBRARY}${ANSIBLE_LIBRARY:+:${ANSIBLE_LIBRARY}}" \
-      CURSOR_AGENT_STUB_FILE="${work}/cursor_agent_stub.json" \
       VERIFY_PROVIDER_STUB_FILE="${work}/verify_provider_stub.json" \
       ansible-playbook "${pb}" >"${results}/${name}.log" 2>&1
   else
@@ -231,16 +224,14 @@ run_failure_log_playbook "tests/test_task_failures_loop.yml" loop-failed
 echo "--- Running tests/test_task_failures_unreachable_loop.yml ---"
 run_failure_log_playbook "tests/test_task_failures_unreachable_loop.yml" loop-unreachable
 
-echo "--- Running tests/run_cursor_sidecar_skip.sh ---"
-bash "${REPO_ROOT}/tests/run_cursor_sidecar_skip.sh"
-
 echo "--- Syntax-check review.yml without optional collections ---"
-# AAP Vertex EEs do not ship aknochow.cursor. Play-level FQCNs would
-# fail at parse; this empty COLLECTIONS_PATH is that environment.
+# AAP Vertex EEs ship only the collections their provider needs.
+# Play-level FQCNs would fail at parse; this empty COLLECTIONS_PATH is
+# that environment.
 empty_collections="$(mktemp -d)"
 ANSIBLE_COLLECTIONS_PATH="${empty_collections}" ANSIBLE_CALLBACKS_ENABLED="" \
   ansible-playbook "${REPO_ROOT}/review.yml" --syntax-check \
   -e agent_family=gemini -e use_sandbox=false
 rmdir "${empty_collections}"
 
-echo "All ${#PLAYBOOKS[@]} playbook tests plus sidecar skip scenarios passed successfully."
+echo "All ${#PLAYBOOKS[@]} playbook tests passed successfully."

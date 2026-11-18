@@ -1,5 +1,0 @@
-# Exact pin. ansible-cursor CI on cursor-sdk 1.0.35 passed in
-# aknochow/ansible-cursor#26. The collection SHA in
-# collections-requirements.yml stays on main until that commit is an
-# ancestor of origin/main. Compile: scripts/compile-hashed-sdks.sh
-cursor-sdk==1.0.35

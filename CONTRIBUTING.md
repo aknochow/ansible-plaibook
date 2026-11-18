@@ -66,7 +66,7 @@ list a dependency check should read. Do not copy it into another
 repository.
 
 `collections-requirements.yml` is git sources at commit SHAs: aknochow
-interface pins (`aknochow.cursor`, `aknochow.openai`, and the other
+interface pins (`aknochow.openai`, `aknochow.xai`, and the other
 family collections) plus ansible-collections release commits.
 Dependabot cannot update that file. After a sibling collection merge,
 either bump the SHA by hand or run:
