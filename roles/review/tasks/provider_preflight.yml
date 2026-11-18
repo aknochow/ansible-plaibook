@@ -4,6 +4,19 @@
 # aknochow.openai collection otherwise accepts the playbook until the first
 # lens task, where Ansible reports an opaque "unsupported parameter" error.
 
+# Lens dispatch includes dispatch_lens_<agent_family>.yml. An unknown family
+# would otherwise fail there, after checkout and sandbox setup, with a
+# missing-file error.
+- name: Fail early on an agent_family this playbook has no dispatch for
+  ansible.builtin.assert:
+    that:
+      - agent_family in ['claude', 'claude_cli', 'gemini', 'openai', 'xai']
+    fail_msg: >-
+      agent_family={{ agent_family }} is not supported. Choose one of claude,
+      claude_cli, gemini, openai, or xai.{{ ' The cursor provider was removed.'
+      if agent_family == 'cursor' else '' }}
+    quiet: true
+
 - name: Validate the xAI provider runtime before starting the review
   when: agent_family == 'xai'
   block:

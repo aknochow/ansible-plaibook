@@ -28,16 +28,6 @@ collections:
     # tree but is not on current main (history rewrite).
     # SHA is ansible-openai #32 on main (lock off advisories). The collection locks openai 3.29.0 since #27.
     version: 136ca89afc96ee2a1c23bc66f649373439106b20
-  - name: https://github.com/aknochow/ansible-cursor.git
-    type: git
-    # Pin the interface this role calls (effort mapping, structured_tool
-    # / mcp coupling, playbook-owned sidecar, structured_tool_calls with
-    # parent vs nested caller, WaitLiveRun-after-drain flake fix). Moving
-    # main can silently change module arguments. SHA is ansible-cursor
-    # #39 on main (reasoning_effort for grok-4.7). The #38 start retry
-    # remains. cursor-sdk 1.0.35 and the serialized starts from #30 are
-    # unchanged.
-    version: b4d2672761296e7338e801cccfd7ac20b08e564d
   - name: https://github.com/aknochow/ansible-xai.git
     type: git
     # SHA is ansible-xai #3 on main: conversation_id as x-grok-conv-id,

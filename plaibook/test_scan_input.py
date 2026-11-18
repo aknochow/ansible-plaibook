@@ -569,10 +569,8 @@ _GENERIC_PASSWORD_ASSIGNMENT = re.compile(
 _ENV_VARIABLE_ASSIGNMENT = re.compile(r"""([A-Z][A-Z0-9_]+)\s*=\s*(["']?)([A-Za-z0-9\-_+/=]{16,})\2""")
 _ALL_CAPS_VALUE = re.compile(r"^[A-Z0-9]+(?:_[A-Z0-9]+)+$")
 _SECRET_SCAN_FILES = (
-    "plaibook/cursor_http2_proxy.py",
     "plaibook/openshell_sdk.py",
     "plaibook/test_collections.py",
-    "plaibook/test_cursor_http2_proxy.py",
     "plaibook/test_openshell_sdk.py",
     "plaibook/test_scan_input.py",
     "scripts/ci-install-collections.py",

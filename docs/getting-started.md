@@ -26,7 +26,7 @@ Have these ready before the first review:
   no separate Ansible install is needed for the CLI.
 - **A provider API key** and network access from this machine to that
   provider's API. OpenAI is the primary provider in the examples below;
-  Anthropic, Gemini, xAI and Cursor are supported alternatives.
+  Anthropic, Gemini and xAI are supported alternatives.
 - **The selected provider's Python SDK.** The CLI checks and installs
   the pinned SDK packages for the selected provider into its own Python
   environment when needed. The pin files are:
@@ -37,7 +37,6 @@ Have these ready before the first review:
   | Anthropic | `claude` | `ANTHROPIC_API_KEY` | [`plaibook/hashed/claude.in`](../plaibook/hashed/claude.in) |
   | Gemini | `gemini` | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | [`plaibook/hashed/gemini.in`](../plaibook/hashed/gemini.in) |
   | xAI | `xai` | `XAI_API_KEY` | [`plaibook/hashed/xai.in`](../plaibook/hashed/xai.in) |
-  | Cursor | `cursor` | `CURSOR_API_KEY` | [`plaibook/hashed/cursor.in`](../plaibook/hashed/cursor.in) |
 
 - **OpenShell CLI and a reachable gateway named `openshell`** for the
   default sandboxed PR/branch review. Install OpenShell using the
@@ -128,10 +127,9 @@ that install. `--root` points at a local checkout instead. cwd is left
 alone, so you can review another repo without `cd`.
 
 The first `plai review` with no operator config asks which provider to
-use and writes `~/.config/ansible-plaibook/vars.yml`. Cursor defaults
-to `grok-4.7` at effort `high`. `--provider cursor` saves that
-without a prompt. A Grok review uses the OpenAI-compatible client, not
-Luna:
+use and writes `~/.config/ansible-plaibook/vars.yml`. `--provider
+<family>` saves a choice without a prompt. A Grok review can also use
+the OpenAI-compatible client, not Luna:
 
 ```bash
 plai review org/repo/123 --provider openai -e review_openai_model=grok-4.7

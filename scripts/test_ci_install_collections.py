@@ -28,14 +28,14 @@ def _load_ci_install():
 def test_repo_requirements_keys_are_named_not_a_raw_count():
     keys = requirement_collection_keys(REPO_ROOT / "collections-requirements.yml")
     assert ("aknochow", "openshell") in keys
-    assert ("aknochow", "cursor") in keys
+    assert ("aknochow", "cursor") not in keys
     assert ("community", "general") in keys
     assert ("kubernetes", "core") in keys
     assert ("ansible", "posix") in keys
     # YAML rows only — the community.general GitHub-mirror dep is added by
     # _required_keys() / _runtime_required_keys(), not the requirements file.
     assert ("community", "library_inventory_filtering_v1") not in keys
-    assert len(keys) == 9
+    assert len(keys) == 8
 
 
 def test_install_from_dir_builds_then_installs_archive(monkeypatch, tmp_path):
@@ -113,7 +113,7 @@ def test_required_keys_include_mirror_dependency():
     assert ("community", "library_inventory_filtering_v1") in keys
     assert ("ansible", "posix") in keys
     assert ("community", "general") in keys
-    assert len(keys) == 10
+    assert len(keys) == 9
 
 
 def test_ci_installer_has_no_galaxy_requirements_path():

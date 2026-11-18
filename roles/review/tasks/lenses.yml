@@ -12,8 +12,6 @@
       {{ review_xai_lens_reasoning_effort }}
       {%- elif agent_family == 'gemini' -%}
       {{ review_gemini_thinking_level }}
-      {%- elif agent_family == 'cursor' -%}
-      {{ review_cursor_effort }}
       {%- elif agent_family == 'claude_cli' -%}
       {{ review_claude_cli_effort }}
       {%- endif -%}
@@ -133,7 +131,7 @@
     dump_prompt_content: "{{ review_system_prompt }}"
 
 # Dispatch both lenses via the provider-native module for agent_family
-# (claude | gemini | openai | xai | cursor | qwen; qwen not implemented yet).
+# (claude | claude_cli | gemini | openai | xai | qwen; qwen not implemented yet).
 # There is no allowlist here. include_tasks loads dispatch_lens_<family>.yml.
 # Mirrors
 # tasks/main.yml's own "include_tasks: resolve_target_{{ review_type }}.yml"
@@ -146,11 +144,7 @@
   ansible.builtin.include_tasks: "dispatch_lens_{{ agent_family }}.yml"
 
 # Claude retries malformed forced-tool JSON here (validate_lens_dispatch
-# + retry_lens_dispatch). Cursor retries a missing nested report_findings
-# execute inside dispatch_lens_cursor.yml with the same
-# review_structured_output_max_attempts budget; per-attempt usage is
-# recorded there so a miss cannot zero last_run cost. Gemini/OpenAI
-# schema-validate in their own dispatch files.
+# + retry_lens_dispatch). Gemini/OpenAI/xAI schema-validate in their own dispatch files.
 - name: Mark non-Claude lens dispatch valid directly (already schema-validated)
   when: agent_family != 'claude'
   ansible.builtin.set_fact:
@@ -269,13 +263,11 @@
 # cache_write_tokens/cache_read_tokens/total_tokens) regardless of
 # agent_family -- compute_pipeline_cost.py reads exactly these key names
 # from every entry, never a provider-specific raw usage dict.
-# Cursor already appended each Security/Review attempt (including empty
-# misses and nested failed returns; never parent-only) in
-# dispatch_cursor_lens_attempt.yml; adding the successful last call
-# again here would double-count. xAI records every attempt in
-# dispatch_lens_xai.yml for the same reason, before a failed lens ends the play.
+# xAI already recorded every attempt in dispatch_lens_xai.yml, before a
+# failed lens ends the play; adding the successful last call again here
+# would double-count.
 - name: Record this iteration's agent calls for the pipeline-wide stats summary
-  when: agent_family not in ['cursor', 'xai']
+  when: agent_family != 'xai'
   ansible.builtin.set_fact:
     pipeline_agent_calls: >-
       {{ pipeline_agent_calls + [

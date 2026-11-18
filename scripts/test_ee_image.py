@@ -325,7 +325,7 @@ def test_manifest_check_requires_both_arches():
 def test_git_pins_reads_collection_requirements():
     pins = _load_script("ee_smoke").git_pins((ROOT / "collections-requirements.yml").read_text(encoding="utf-8"))
     urls = [url for url, _sha in pins]
-    assert "https://github.com/aknochow/ansible-cursor.git" in urls
+    assert "https://github.com/aknochow/ansible-cursor.git" not in urls
     assert "https://github.com/aknochow/ansible-gemini.git" in urls
     assert "https://github.com/aknochow/ansible-xai.git" in urls
     assert all(len(sha) >= 7 for _url, sha in pins)

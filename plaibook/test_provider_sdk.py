@@ -39,17 +39,6 @@ def test_skips_pip_when_pin_is_present(monkeypatch):
     assert calls == []
 
 
-def test_cursor_pin_present_still_applies_http2_proxy_patch(monkeypatch):
-    patched = []
-    monkeypatch.setattr("plaibook.provider_sdk._requirement_satisfied", lambda *_a: True)
-    monkeypatch.setattr(
-        "plaibook.cursor_http2_proxy.patch_installed_cursor_sdk",
-        lambda python: patched.append(python),
-    )
-    ensure_provider_sdk("cursor")
-    assert patched
-
-
 def test_installs_missing_openai_from_hashed_file(monkeypatch):
     recorded = []
     present = {"n": 0}
@@ -115,20 +104,16 @@ def test_installs_when_importable_but_wrong_version(monkeypatch):
 def test_in_range_sdk_does_not_pip_install(monkeypatch):
     from plaibook.pip_hashed import pinned_versions
 
-    pin = pinned_versions("cursor-requirements.txt")["cursor-sdk"]
+    pin = pinned_versions("openai-requirements.txt")["openai"]
     recorded = []
     monkeypatch.setattr("plaibook.provider_sdk._module_present", lambda *_a: True)
 
     def version(_py, dist):
-        return pin if dist == "cursor-sdk" else None
+        return pin if dist == "openai" else None
 
     monkeypatch.setattr("plaibook.provider_sdk._dist_version", version)
     monkeypatch.setattr("plaibook.provider_sdk.subprocess.run", lambda *a, **k: recorded.append(a))
-    monkeypatch.setattr(
-        "plaibook.cursor_http2_proxy.patch_installed_cursor_sdk",
-        lambda python: None,
-    )
-    ensure_provider_sdk("cursor", stderr=None)
+    ensure_provider_sdk("openai", stderr=None)
     assert recorded == []
 
 
@@ -140,7 +125,7 @@ def test_externally_managed_interpreter_does_not_pip_install(monkeypatch):
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("pip must not run")),
     )
     with pytest.raises(ProviderSdkError, match="pipx"):
-        ensure_provider_sdk("cursor", stderr=None)
+        ensure_provider_sdk("openai", stderr=None)
 
 
 def test_missing_pip_installs_with_uv(monkeypatch):
@@ -200,7 +185,6 @@ def test_pip_install_holds_the_interpreter_lock(monkeypatch, tmp_path):
     real_run = subprocess.run
     monkeypatch.setattr(sdk, "last_run_dir", lambda home=None: tmp_path)
     monkeypatch.setattr(sdk, "interpreter_is_externally_managed", lambda *_a: False)
-    monkeypatch.setattr(sdk, "_patch_cursor_http2_proxy", lambda *_a, **_k: None)
     state = {"checks": 0}
 
     def fake_satisfied(*_a):
@@ -236,7 +220,7 @@ def test_pip_install_holds_the_interpreter_lock(monkeypatch, tmp_path):
 
     monkeypatch.setattr(sdk, "_requirement_satisfied", fake_satisfied)
     monkeypatch.setattr("plaibook.provider_sdk.subprocess.run", fake_run)
-    ensure_provider_sdk("cursor", stderr=None)
+    ensure_provider_sdk("openai", stderr=None)
     assert held == [2]
     assert sdk.provider_sdk_lock_path(sys.executable).is_file()
     assert sdk.provider_sdk_lock_path("/usr/bin/python3") != sdk.provider_sdk_lock_path("/other/bin/python3")

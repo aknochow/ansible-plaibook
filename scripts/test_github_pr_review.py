@@ -740,8 +740,8 @@ def test_summary_names_the_collection_after_the_family():
 
 def test_summary_includes_models_cost_and_tokens():
     result = {
-        "agent_family": "cursor",
-        "models": ["composer-2.5"],
+        "agent_family": "xai",
+        "models": ["grok-4.7"],
         "agents_dispatched": 8,
         "cost_usd": 0.0345,
         "total_input_tokens": 10,
@@ -749,7 +749,7 @@ def test_summary_includes_models_cost_and_tokens():
         "targets": [{"verdict": "READY_FOR_HUMAN_REVIEW", "score": 93.3}],
     }
     body = summary_body(result, [])
-    assert "cursor · composer-2.5 · 8 agents · $0.0345 · 10 in / 2 out" in body
+    assert "xai · grok-4.7 · 8 agents · $0.0345 · 10 in / 2 out" in body
     assert "Score: 93.3" in body
     assert body.splitlines()[2].startswith("plaibook ")
 
@@ -1057,7 +1057,7 @@ def test_publish_review_reuses_a_review_when_only_the_cost_changes(monkeypatch):
     sha = "d" * 40
     first = {
         "status": "ok",
-        "agent_family": "cursor",
+        "agent_family": "openai",
         "models": ["gpt-5.6-luna"],
         "agents_dispatched": 7,
         "cost_usd": 0.0295,

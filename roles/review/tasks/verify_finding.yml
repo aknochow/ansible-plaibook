@@ -2,14 +2,13 @@
 # One scoped finding per iteration with fresh conversation (independently adversarial).
 # Reset verify_done/messages/turn_count at TOP of loop since facts persist across iterations.
 
-# claude_cli and cursor have no custom-tool route (see
-# dispatch_verify_turn_attempt_claude_cli.yml /
-# dispatch_verify_turn_attempt_cursor.yml): they run the whole
+# claude_cli has no custom-tool route (see
+# dispatch_verify_turn_attempt_claude_cli.yml): it runs the whole
 # explore-then-verdict loop through the provider SDK's built-in read
 # tools and structured output, not the read_file/search/trace_reachability
 # trio the other providers get. verify_agent_prompt.j2's tool references
-# don't apply there, so those families share the claude_cli prompt
-# template rather than an in-template agent_family branch.
+# don't apply there, so it gets its own claude_cli prompt template
+# rather than an in-template agent_family branch.
 - name: Generate a per-run prompt nonce for the dispatch canary
   ansible.builtin.include_tasks: generate_prompt_nonce.yml
 
@@ -25,7 +24,7 @@
   ansible.builtin.set_fact:
     verify_system_prompt: >-
       {{ lookup('template', role_path + '/templates/verify_agent_prompt'
-         + ('_claude_cli' if agent_family in ['claude_cli', 'cursor'] else '') + '.j2') }}
+         + ('_claude_cli' if agent_family == 'claude_cli' else '') + '.j2') }}
   vars:
     finding: "{{ verify_target_finding }}"
     boolean_stringification_detected: "{{ _boolean_stringification_check.is_hallucination | default(false) }}"

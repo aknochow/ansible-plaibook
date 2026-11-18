@@ -21,7 +21,7 @@ refuse `pip install` into the system Python (PEP 668). Inside a
 virtualenv you already manage, `pip install plaibook` is the same
 install. `plai review` with no arguments reviews `HEAD` in
 the current directory. Needs Python 3.10 or newer. First run prompts
-for a provider (Cursor defaults to `grok-4.7` / `high`) and installs
+for a provider and installs
 collections from GitHub into `~/.cache/ansible-plaibook/collections`
 (never galaxy.ansible.com). It never writes `~/.ansible/collections`, so
 a leftover symlink from a sibling checkout cannot break install.
@@ -86,9 +86,8 @@ $0.00 cost is not mistaken for a live run.
 `--root` selects a local playbook checkout instead of this install's
 bundled copy. First run with no operator config prompts for a
 provider and writes `~/.config/ansible-plaibook/vars.yml`. `--provider
-cursor` does the same non-interactively and defaults Cursor to
-`grok-4.7` / `high`. Grok on xAI stays on the OpenAI-compatible
-client: `plai review org/repo/123 --provider openai -e review_openai_model=grok-4.7`
+<family>` does the same non-interactively. Grok on xAI also works
+through the OpenAI-compatible client: `plai review org/repo/123 --provider openai -e review_openai_model=grok-4.7`
 with `XAI_API_KEY` or `GROK_API_KEY` (base URL `https://api.x.ai/v1`
 when `OPENAI_BASE_URL` is unset). PR/branch reviews skip nested OpenShell when
 this process is already inside a sandbox (in-guest JWT). The SDK needs

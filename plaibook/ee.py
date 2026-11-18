@@ -84,7 +84,6 @@ _XAI_ENV = ("XAI_API_KEY", "GROK_API_KEY")
 _FAMILY_ENV: dict[str, tuple[str, ...]] = {
     "openai": _OPENAI_ENV,
     "xai": _XAI_ENV,
-    "cursor": ("CURSOR_API_KEY",),
     "claude": (
         "ANTHROPIC_API_KEY",
         "ANSIBLE_CLAUDE_PROVIDER",
@@ -102,7 +101,6 @@ _FAMILY_ENV: dict[str, tuple[str, ...]] = {
 _FAMILY_PREFIX: dict[str, str] = {
     "openai": "ANSIBLE_OPENAI_",
     "xai": "ANSIBLE_XAI_",
-    "cursor": "ANSIBLE_CURSOR_",
     "claude": "ANSIBLE_CLAUDE_",
     "gemini": "ANSIBLE_GEMINI_",
 }

@@ -30,7 +30,7 @@ collections:
     type: git
     # pin comment
     version: 0df6de7215c55aca40938a59fb700a18abe33dae
-  - name: https://github.com/aknochow/ansible-cursor.git
+  - name: https://github.com/aknochow/ansible-xai.git
     type: git
     version: 059daf017c0fcc406f35905b26688836255a925a
   - name: community.general
@@ -46,7 +46,7 @@ def test_parse_skips_branch_pins_and_galaxy_collections():
     names = [pin.name for pin in pins]
     assert names == [
         "https://github.com/aknochow/ansible-openai.git",
-        "https://github.com/aknochow/ansible-cursor.git",
+        "https://github.com/aknochow/ansible-xai.git",
     ]
     assert pins[0].repo == "ansible-openai"
     assert pins[1].current == "059daf017c0fcc406f35905b26688836255a925a"
@@ -62,9 +62,9 @@ def test_apply_preserves_comments_and_floating_main():
     pins = parse_git_sha_pins(FIXTURE)
     changes = [
         PinChange(
-            name="https://github.com/aknochow/ansible-cursor.git",
+            name="https://github.com/aknochow/ansible-xai.git",
             owner="aknochow",
-            repo="ansible-cursor",
+            repo="ansible-xai",
             current="059daf017c0fcc406f35905b26688836255a925a",
             latest="1d221ce62090a0f0da70b87478cfcfd22be5a40e",
         ),
@@ -92,7 +92,7 @@ def test_plan_changes_uses_injected_fetcher():
     def fake_fetch(owner: str, repo: str) -> str:
         return {
             ("aknochow", "ansible-openai"): "0df6de7215c55aca40938a59fb700a18abe33dae",
-            ("aknochow", "ansible-cursor"): "1d221ce62090a0f0da70b87478cfcfd22be5a40e",
+            ("aknochow", "ansible-xai"): "1d221ce62090a0f0da70b87478cfcfd22be5a40e",
         }[(owner, repo)]
 
     changes = plan_changes(
@@ -102,13 +102,13 @@ def test_plan_changes_uses_injected_fetcher():
     )
     by_repo = {change.repo: change for change in changes}
     assert by_repo["ansible-openai"].stale is False
-    assert by_repo["ansible-cursor"].stale is True
-    assert by_repo["ansible-cursor"].latest.startswith("1d221ce")
+    assert by_repo["ansible-xai"].stale is True
+    assert by_repo["ansible-xai"].latest.startswith("1d221ce")
 
 
 def test_abbreviated_pin_matching_full_sha_is_current():
     pins = parse_git_sha_pins(
-        "collections:\n  - name: https://github.com/aknochow/ansible-cursor.git\n    type: git\n    version: 1d221ce\n"
+        "collections:\n  - name: https://github.com/aknochow/ansible-xai.git\n    type: git\n    version: 1d221ce\n"
     )
     changes = plan_changes(
         pins,
@@ -121,18 +121,18 @@ def test_format_pr_body_includes_compare_url():
     body = format_pr_body(
         [
             PinChange(
-                name="https://github.com/aknochow/ansible-cursor.git",
+                name="https://github.com/aknochow/ansible-xai.git",
                 owner="aknochow",
-                repo="ansible-cursor",
+                repo="ansible-xai",
                 current="059daf017c0fcc406f35905b26688836255a925a",
                 latest="1d221ce62090a0f0da70b87478cfcfd22be5a40e",
             )
         ]
     )
-    assert "aknochow/ansible-cursor" in body
+    assert "aknochow/ansible-xai" in body
     assert "059daf017c0f" in body
     assert "1d221ce62090" in body
-    assert "github.com/aknochow/ansible-cursor/compare/" in body
+    assert "github.com/aknochow/ansible-xai/compare/" in body
 
 
 def test_main_write_and_check(tmp_path, monkeypatch):
@@ -142,7 +142,7 @@ def test_main_write_and_check(tmp_path, monkeypatch):
         "bump_collection_pins.fetch_default_branch_sha",
         lambda owner, repo: {
             ("aknochow", "ansible-openai"): "0df6de7215c55aca40938a59fb700a18abe33dae",
-            ("aknochow", "ansible-cursor"): "1d221ce62090a0f0da70b87478cfcfd22be5a40e",
+            ("aknochow", "ansible-xai"): "1d221ce62090a0f0da70b87478cfcfd22be5a40e",
         }[(owner, repo)],
     )
     monkeypatch.setattr(
@@ -270,6 +270,5 @@ def test_repo_requirements_only_bumps_aknochow_interface_pins():
         "ansible-claude",
         "ansible-gemini",
         "ansible-openai",
-        "ansible-cursor",
         "ansible-xai",
     }

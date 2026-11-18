@@ -2,8 +2,7 @@
 # Shared rescue for one verify provider module call.
 #
 # Claude, Claude CLI, Gemini, and OpenAI fail_json with a message.
-# They do not set status: error. Do not match the Cursor empty
-# status=error shape here. A return that is only a message is one
+# They do not set status: error. A return that is only a message is one
 # failed verify attempt: verify_turn.yml retries it, and when every
 # attempt is that shape the finding stays inconclusive so the review
 # can still post.

@@ -2,7 +2,7 @@
 type: Guide
 title: Models and reasoning effort
 description: The default model and effort for each provider, which calls each effort setting reaches, and how to change them.
-tags: [models, reasoning-effort, openai, gemini, xai, cursor, claude]
+tags: [models, reasoning-effort, openai, gemini, xai, claude]
 status: stable
 ---
 
@@ -10,7 +10,7 @@ status: stable
 
 Each provider has its own model and effort variables. A setting for one
 provider does nothing for another: `review_openai_lens_reasoning_effort`
-has no effect on an xAI or Cursor review.
+has no effect on an xAI review.
 
 A review makes three kinds of model call:
 
@@ -32,7 +32,6 @@ to the lenses. The tables below say which.
 |---|---|---|---|
 | `openai` | `gpt-6-luna` | API default for the lenses | You want the cheapest reliable review. The GitHub review check uses it with `high` lens effort. |
 | `xai` | `grok-4.7` | `high` | You want a deeper review and accept a higher cost per run. |
-| `cursor` | `grok-4.7` | `high` | You already pay for Cursor. |
 | `gemini` | `gemini-3.6-flash` | thinking `high` | You use the AI Studio free tier or Vertex. |
 | `claude` | `claude-opus-4-6`, verify `claude-haiku-4-5` | no effort setting | You use the Anthropic API or Vertex. |
 
@@ -100,18 +99,6 @@ including the module's own retries.
 agent_family: xai
 review_xai_model: grok-4.7
 review_xai_lens_reasoning_effort: high
-```
-
-## Cursor (`agent_family: cursor`)
-
-| Call | Model | Effort |
-|---|---|---|
-| Lenses, explore, verify | `review_cursor_model`, `review_explore_cursor_model`, `review_verify_cursor_model` | `review_cursor_effort`, default `high`, for all three and the continuity audit. `aknochow.cursor` sends it as the model's `effort`. |
-
-```yaml
-agent_family: cursor
-review_cursor_model: grok-4.7
-review_cursor_effort: high
 ```
 
 ## Gemini (`agent_family: gemini`)

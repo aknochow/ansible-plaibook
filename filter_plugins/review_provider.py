@@ -10,7 +10,6 @@ import yaml
 _COLLECTION_BY_FAMILY = {
     "claude": "claude",
     "claude_cli": "claude",
-    "cursor": "cursor",
     "gemini": "gemini",
     "openai": "openai",
     "xai": "xai",

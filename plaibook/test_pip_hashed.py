@@ -19,7 +19,6 @@ def test_hashed_requirements_exist():
         "openai-requirements.txt",
         "claude-requirements.txt",
         "gemini-requirements.txt",
-        "cursor-requirements.txt",
         "openshell-requirements.txt",
         "sandbox-runtime-requirements.txt",
         "build-backend-requirements.txt",
@@ -75,7 +74,7 @@ def test_pinned_versions_reads_top_level_dists():
     assert "openai" in openai
     runtime = pinned_versions("sandbox-runtime-requirements.txt")
     assert "ansible-core" in runtime
-    assert "cursor-sdk" in runtime
+    assert "cursor-sdk" not in runtime
     assert "jinja2" in runtime
     assert "pyyaml" in runtime
     backend = pinned_versions("build-backend-requirements.txt")

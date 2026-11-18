@@ -87,13 +87,12 @@
 # verdict lands, and the assert/retry machinery for a stalled forced
 # final turn applies exactly as written for the other two providers.
 #
-# aknochow.claude.agent fail_json's on timeout and ClaudeSDKError with
-# a message. It does not set status: error. Rescue only that module
-# call. A msg-only return is one failed verify attempt. Do not copy
-# the Cursor empty status=error match onto this task. A parent
-# fabrication, a nested report_verdict, and an auth failure that is
-# not this msg-only shape still fail the play. claude_agent_module is
-# an allowlist so playbook tests can load verify_provider_stub.
+# aknochow.claude.agent fail_json's on timeout and ClaudeSDKError with a
+# message. It does not set status: error. Rescue only that module call.
+# A msg-only return is one failed verify attempt. A parent fabrication,
+# a nested report_verdict, and an auth failure that is not this msg-only
+# shape still fail the play. claude_agent_module is an allowlist so
+# playbook tests can load verify_provider_stub.
 
 - name: Resolve the Claude CLI verify module name
   ansible.builtin.set_fact:

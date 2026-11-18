@@ -8,8 +8,8 @@
 # job template that .github/workflows/bump-collection-pins.yml runs.
 #
 # Install the App on ansible-plaibook plus:
-#   aknochow/ansible-cursor, ansible-openai, ansible-claude,
-#   ansible-gemini, ansible-openshell
+#   aknochow/ansible-openai, ansible-claude, ansible-gemini,
+#   ansible-openshell
 # Subscribe to `push`. Webhook URL is the AAP event-stream endpoint.
 # HMAC secret is the GitHub webhook / App webhook secret.
 #
@@ -37,7 +37,6 @@
         event.meta.headers.X_GitHub_Event == "push"
         and event.payload.ref == "refs/heads/main"
         and event.payload.repository.full_name in [
-          "aknochow/ansible-cursor",
           "aknochow/ansible-openai",
           "aknochow/ansible-claude",
           "aknochow/ansible-gemini",

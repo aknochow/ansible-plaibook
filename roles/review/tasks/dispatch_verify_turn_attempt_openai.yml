@@ -5,11 +5,10 @@
 #
 # aknochow.openai.chat fail_json's on OpenAIError or ValueError with a
 # message. It does not set status: error. Rescue only that module call.
-# A msg-only return is one failed verify attempt. Do not copy the
-# Cursor empty status=error match onto this task. A parent fabrication,
-# a nested report_verdict, and an auth failure that is not this
-# msg-only shape still fail the play. openai_chat_module is an
-# allowlist so playbook tests can load verify_provider_stub.
+# A msg-only return is one failed verify attempt. A parent fabrication,
+# a nested report_verdict, and an auth failure that is not this msg-only
+# shape still fail the play. openai_chat_module is an allowlist so
+# playbook tests can load verify_provider_stub.
 
 - name: Resolve the OpenAI verify module name
   ansible.builtin.set_fact:

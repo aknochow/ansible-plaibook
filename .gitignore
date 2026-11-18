@@ -58,10 +58,7 @@ build/certs/*.crt
 # working-directory tree.
 tmp/
 
-# Offline cursor.agent stub payload written by test_cursor_named_lens_retry.yml
-tests/.cursor_agent_stub.json
-tests/.cursor_agent_stub.json.counts
-tests/.cursor_agent_stub.json.lock
+# Offline verify provider stub payload
 tests/.verify_provider_stub.json
 tests/.verify_provider_stub.json.tmp
 

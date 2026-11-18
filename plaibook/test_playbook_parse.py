@@ -1,21 +1,28 @@
 # -*- coding: utf-8 -*-
-"""AAP Vertex EEs must parse review.yml without aknochow.cursor installed."""
+"""The cursor provider is gone from the playbook and the package."""
 
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_review_yml_does_not_bind_cursor_bridge_at_parse_time():
+def test_review_yml_has_no_cursor_sidecar():
     text = (_ROOT / "review.yml").read_text(encoding="utf-8")
-    assert "aknochow.cursor.bridge:" not in text
-    assert "roles/review/tasks/cursor_sidecar_start.yml" in text
-    assert "roles/review/tasks/cursor_sidecar_stop.yml" in text
+    assert "cursor" not in text.lower()
 
 
-def test_continuity_audit_loads_cursor_agent_only_via_include():
-    text = (_ROOT / "roles/review/tasks/verify_continuity_audit.yml").read_text(encoding="utf-8")
-    assert "aknochow.cursor.agent:" not in text
-    assert "verify_continuity_audit_cursor.yml" in text
-    cursor = (_ROOT / "roles/review/tasks/verify_continuity_audit_cursor.yml").read_text(encoding="utf-8")
-    assert "aknochow.cursor.agent:" in cursor
+def test_no_cursor_task_files_remain():
+    tasks = _ROOT / "roles/review/tasks"
+    assert not [p.name for p in tasks.iterdir() if "cursor" in p.name]
+
+
+def test_cursor_sdk_is_not_a_dependency():
+    # Text check: tomllib is 3.11+ and plaibook still supports 3.10.
+    text = (_ROOT / "pyproject.toml").read_text(encoding="utf-8").lower()
+    assert "cursor-sdk" not in text
+    assert "\ncursor = [" not in text
+
+
+def test_preflight_rejects_cursor_family():
+    text = (_ROOT / "roles/review/tasks/provider_preflight.yml").read_text(encoding="utf-8")
+    assert "agent_family in ['claude', 'claude_cli', 'gemini', 'openai', 'xai']" in text

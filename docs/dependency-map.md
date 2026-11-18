@@ -27,7 +27,6 @@ SDK version, or a review-workflow pin is missing from this file.
 |---|---|---|
 | plaibook | [ansible-plaibook](https://github.com/aknochow/ansible-plaibook) | The review playbook and the `plai` / `plaibook` package. It consumes the collections below. They do not depend on it. |
 | aknochow.claude | [ansible-claude](https://github.com/aknochow/ansible-claude) | Claude module. Pins the Anthropic and Claude Agent SDKs. |
-| aknochow.cursor | [ansible-cursor](https://github.com/aknochow/ansible-cursor) | Cursor agent module. Pins `cursor-sdk`. |
 | aknochow.gemini | [ansible-gemini](https://github.com/aknochow/ansible-gemini) | Gemini module. Pins `google-genai`. |
 | aknochow.openai | [ansible-openai](https://github.com/aknochow/ansible-openai) | OpenAI-compatible chat module. Pins the `openai` SDK. |
 | aknochow.xai | [ansible-xai](https://github.com/aknochow/ansible-xai) | xAI chat module. Pins `xai-sdk`. |
@@ -84,7 +83,6 @@ SHA.
 | `collection.claude` | ansible-claude | `e5522de6a00d26f74aa6204a8dc7d21dcb3cbbdb` | ansible-claude #37. Lock off published advisories. SDK pins are still `anthropic` 1.11.0 and `claude-agent-sdk` 0.2.163 from #30. |
 | `collection.gemini` | ansible-gemini | `3242c63b1ab50f62336aeb66ae7bbd57901c76cf` | ansible-gemini #29. Lock off published advisories. `google-genai` 2.27.0 is still the pin from #22. |
 | `collection.openai` | ansible-openai | `136ca89afc96ee2a1c23bc66f649373439106b20` | ansible-openai #32. Lock off published advisories. The collection locks `openai` 3.29.0 since #27. |
-| `collection.cursor` | ansible-cursor | `b4d2672761296e7338e801cccfd7ac20b08e564d` | ansible-cursor #39. Sends reasoning_effort for grok-4.7. The #38 start retry remains. `cursor-sdk` 1.0.35 and the serialized starts from #30 are unchanged. |
 | `collection.xai` | ansible-xai | `dfbb12ef6b1b93b9f706d198d2e56d206de11e2a` | ansible-xai #3. `agent_family=xai` calls `aknochow.xai.chat`. `xai-sdk` 1.21.0 is the hashed pin. That revision sends `conversation_id` as `x-grok-conv-id`, keeps tool calls on assistant turns, reports `attempts` usage, spends one `timeout` budget across retries, and accepts a response that repeats the same JSON object. |
 | `collection.community.general` | community.general | `049524674b13ad9782849c427266935c8ec61954` | Release 13.4.0. Do not float to the default branch. |
 | `collection.kubernetes.core` | kubernetes.core | `0f472b53e2ee73e11b5f9067ab0826d76183c157` | Release 6.5.0. Do not float to the default branch. |
@@ -104,12 +102,11 @@ head start.
 | `sdk.claude-agent` | claude-agent-sdk | `claude-agent-sdk>=0.2.144` | same floor, via the collection | `claude-agent-sdk==0.2.163` | `plaibook/hashed/claude-requirements.txt` |
 | `sdk.gemini` | google-genai | `google-genai>=1.0.0` | same floor, via the collection | `google-genai==2.27.0` | `plaibook/hashed/gemini-requirements.txt` |
 | `sdk.openai` | openai | `openai>=1.58.0` | same floor, via the collection | `openai==3.29.0` | `plaibook/hashed/openai-requirements.txt` |
-| `sdk.cursor` | cursor-sdk | `cursor-sdk>=1.0.31,<2.0.0` | `cursor-sdk>=1.0.31,<2.0.0` in `pyproject.toml` | `cursor-sdk==1.0.35` | `plaibook/hashed/cursor-requirements.txt` and `sandbox-runtime-requirements.txt` |
 | `sdk.openshell` | openshell | `openshell>=0.1.3,<0.2` | `openshell>=0.1.3,<0.2` in `pyproject.toml` and `plaibook/openshell_sdk.py` | `openshell==0.1.8` | `plaibook/hashed/openshell-requirements.txt` |
 
 Direct inputs for the hashed files are `plaibook/hashed/*.in`.
 `scripts/compile-hashed-sdks.sh` writes the `*-requirements.txt`
-files. `uv.lock` pins the same OpenShell and cursor-sdk versions for
+files. `uv.lock` pins the same OpenShell version for
 the plaibook package itself.
 
 ## OpenShell is three pins
@@ -143,7 +140,6 @@ difference as a bump to decide, not as the same pin.
 | claude-agent-sdk | `claude-agent-sdk==0.2.179` | `claude-agent-sdk==0.2.163` |
 | google-genai | `google-genai==3.0.0` | `google-genai==2.27.0` |
 | openai | `openai==3.46.0` | `openai==3.29.0` |
-| cursor-sdk | not in the image | `cursor-sdk==1.0.35` |
 | xai-sdk | `xai-sdk==1.21.0` | `xai-sdk==1.21.0` |
 | openshell | `openshell==0.1.8` | `openshell==0.1.8` |
 
@@ -178,7 +174,7 @@ workflow file still checks out the previous `review.checkout` tree.
 
 | Id | From | To | Ref |
 |---|---|---|---|
-| `ci.collection` | ansible-claude, ansible-gemini, ansible-openai, ansible-cursor, ansible-openshell | `ansible-plaibook/.github/workflows/collection-ci.yml` | `@main` (floats) |
+| `ci.collection` | ansible-claude, ansible-gemini, ansible-openai, ansible-openshell | `ansible-plaibook/.github/workflows/collection-ci.yml` | `@main` (floats) |
 | `ci.review` | those same repositories, when they call the review check | `review.caller` | full SHA, not `@main` |
 
 ## What to flag
