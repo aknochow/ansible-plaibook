@@ -1,0 +1,146 @@
+---
+# Runs clone_target_pr.yml and prefetch_review_objects.yml against a local
+# repository that serves partial clones, then cuts the clone off from its
+# remote, as a sandbox is, and checks that the review's git reads still work.
+#
+# Usage:
+#   ansible-playbook tests/test_partial_clone_offline.yml
+
+- name: Partial clone works offline after the prefetch
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../roles/review/defaults/main.yml
+  vars:
+    tasks_dir: "{{ playbook_dir }}/../roles/review/tasks"
+    review_platform: github
+    review_number: 7
+    git_env:
+      GIT_AUTHOR_NAME: Test
+      GIT_AUTHOR_EMAIL: test@example.com
+      GIT_COMMITTER_NAME: Test
+      GIT_COMMITTER_EMAIL: test@example.com
+      GIT_CONFIG_GLOBAL: /dev/null
+      GIT_CONFIG_NOSYSTEM: "1"
+  environment: "{{ git_env }}"
+  tasks:
+    - name: Make a work directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: partial-clone-test-
+      register: _work
+
+    - name: Build the source, clone it, and check the clone offline
+      block:
+        # main: old.txt v1, then old.txt v2 and CHECKLIST.md. The PR changes
+        # changed.txt. old.txt v1 is never read, so it must stay missing.
+        - name: Build the source repository
+          ansible.builtin.shell: |
+            set -eu
+            git init -q -b main src
+            cd src
+            echo v1 > old.txt
+            echo base > changed.txt
+            git add . && git commit -qm one
+            echo v2 > old.txt
+            printf 'Run:\n- `true`\n' > CHECKLIST.md
+            git add . && git commit -qm two
+            git checkout -qb pr
+            echo head > changed.txt
+            git commit -qam pr
+            git update-ref refs/pull/7/head HEAD
+            git checkout -q main
+            git branch -D pr -q
+            git config uploadpack.allowFilter true
+            git config uploadpack.allowAnySHA1InWant true
+            git rev-parse refs/pull/7/head
+          args:
+            chdir: "{{ _work.path }}"
+          changed_when: true
+          register: _src
+
+        - name: Point the role at the source and an empty clone directory
+          ansible.builtin.set_fact:
+            review_clone_url: "file://{{ _work.path }}/src"
+            review_clone_dir_controller: { path: "{{ _work.path }}/clone" }
+
+        - name: Make the clone directory
+          ansible.builtin.file:
+            path: "{{ review_clone_dir_controller.path }}"
+            state: directory
+            mode: "0700"
+
+        - name: Run the clone tasks
+          ansible.builtin.include_tasks: "{{ tasks_dir }}/clone_target_pr.yml"
+
+        - name: Compute the merge base
+          ansible.builtin.command:
+            argv: [git, merge-base, origin/HEAD, review-source]
+            chdir: "{{ review_clone_dir_controller.path }}"
+          changed_when: false
+          register: _review_merge_base_result
+
+        - name: Run the prefetch tasks
+          ansible.builtin.include_tasks: "{{ tasks_dir }}/prefetch_review_objects.yml"
+
+        # A sandbox cannot reach the forge. A missing object now fails
+        # instead of being fetched.
+        - name: Cut the clone off from its remote
+          ansible.builtin.command:
+            argv: [git, remote, set-url, origin, "file://{{ _work.path }}/gone"]
+            chdir: "{{ review_clone_dir_controller.path }}"
+          changed_when: true
+
+        - name: Run the briefing snapshot offline
+          ansible.builtin.command:
+            argv:
+              - python3
+              - "{{ playbook_dir }}/../roles/review/files/briefing_snapshot.py"
+              - "{{ review_clone_dir_controller.path }}"
+              - "{{ _review_merge_base_result.stdout | trim }}"
+              - review-source
+            stdin: '{"markers": []}'
+          changed_when: false
+          register: _snapshot
+
+        - name: Read the checklist offline
+          ansible.builtin.command:
+            argv:
+              - python3
+              - -c
+              - |
+                import sys
+                sys.path.insert(0, sys.argv[1])
+                from run_checklist import read_checklist_content
+                print(read_checklist_content(sys.argv[2], sys.argv[3]) or "")
+              - "{{ playbook_dir }}/../library"
+              - "{{ review_clone_dir_controller.path }}"
+              - "{{ _review_merge_base_result.stdout | trim }}"
+          changed_when: false
+          register: _checklist
+
+        - name: List objects the clone never downloaded
+          ansible.builtin.command:
+            argv: [git, rev-list, --objects, --all, --missing=print]
+            chdir: "{{ review_clone_dir_controller.path }}"
+          changed_when: false
+          register: _objects
+
+        - name: Check the clone
+          ansible.builtin.assert:
+            that:
+              - review_clone_result.after == (_src.stdout_lines | last)
+              - (_snapshot.stdout | from_json).name_only == ['changed.txt']
+              - "'+head' in (_snapshot.stdout | from_json).diff"
+              - "'-base' in (_snapshot.stdout | from_json).diff"
+              - "'`true`' in _checklist.stdout"
+              - _objects.stdout_lines | select('match', '^\\?') | list | length > 0
+            fail_msg: >-
+              sha={{ review_clone_result.after }} snapshot={{ _snapshot.stdout | truncate(300) }}
+              checklist={{ _checklist.stdout }} objects={{ _objects.stdout_lines }}
+      always:
+        - name: Remove the work directory
+          ansible.builtin.file:
+            path: "{{ _work.path }}"
+            state: absent

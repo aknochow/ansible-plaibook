@@ -1,0 +1,95 @@
+---
+# Clone a PR/MR target as a blobless partial clone and check out its head
+# ref as 'review-source'.
+#
+# --filter=blob:none downloads every commit and tree but no file contents.
+# File contents arrive when a command needs them: the checkout below fetches
+# the head tree's files, and prefetch_review_objects.yml fetches the base-side
+# files the review reads. History stays complete, so the target-branch fetch
+# and `git merge-base` in resolve_target_pr.yml work as they did with a full
+# clone. ansible.builtin.git has no filter option, so these are plain git
+# commands.
+#
+# Each network step is async (a timeout fails the run) and retried only on a
+# network error that matches review_clone_transient_pattern, the same
+# condition tests/test_clone_transient_retry.yml runs.
+#
+# Inputs: review_clone_url, review_clone_dir_controller.path, review_platform,
+# review_number. Output: review_clone_result.after, the full checked-out SHA.
+
+- name: Clone the target repo without file contents
+  ansible.builtin.command:
+    argv:
+      - git
+      - clone
+      - --filter=blob:none
+      - --no-checkout
+      - --quiet
+      - --
+      - "{{ review_clone_url }}"
+      - "{{ review_clone_dir_controller.path }}"
+  environment:
+    GIT_TERMINAL_PROMPT: "0"
+  changed_when: true
+  register: _review_clone
+  async: "{{ review_clone_timeout | int }}"
+  poll: 2
+  until: >-
+    _review_clone is succeeded or
+    (((_review_clone.msg | default('')) ~ ' ' ~ (_review_clone.stderr | default(''))) is not search(review_clone_transient_pattern))
+  retries: "{{ review_clone_retries | int }}"
+  delay: "{{ review_clone_retry_delay | int }}"
+
+# GitHub and Gitea expose refs/pull/N/head, GitLab refs/merge-requests/N/head.
+# The fetch keeps the clone's blob filter.
+- name: Fetch the PR/MR head ref
+  ansible.builtin.command:
+    argv:
+      - git
+      - fetch
+      - --quiet
+      - origin
+      - >-
+        +refs/{{ 'pull' if review_platform in ['github', 'gitea'] else 'merge-requests' }}/{{ review_number | int }}/head:refs/heads/review-source
+    chdir: "{{ review_clone_dir_controller.path }}"
+  environment:
+    GIT_TERMINAL_PROMPT: "0"
+  changed_when: true
+  register: _review_head_fetch
+  async: "{{ review_clone_timeout | int }}"
+  poll: 2
+  until: >-
+    _review_head_fetch is succeeded or
+    (((_review_head_fetch.msg | default('')) ~ ' ' ~ (_review_head_fetch.stderr | default(''))) is not search(review_clone_transient_pattern))
+  retries: "{{ review_clone_retries | int }}"
+  delay: "{{ review_clone_retry_delay | int }}"
+
+# The checkout downloads the head tree's file contents in one batch.
+- name: Check out the PR/MR head ref
+  ansible.builtin.command:
+    argv: [git, checkout, --quiet, review-source]
+    chdir: "{{ review_clone_dir_controller.path }}"
+  environment:
+    GIT_TERMINAL_PROMPT: "0"
+  changed_when: true
+  register: _review_head_checkout
+  async: "{{ review_clone_timeout | int }}"
+  poll: 2
+  until: >-
+    _review_head_checkout is succeeded or
+    (((_review_head_checkout.msg | default('')) ~ ' ' ~ (_review_head_checkout.stderr | default(''))) is not search(review_clone_transient_pattern))
+  retries: "{{ review_clone_retries | int }}"
+  delay: "{{ review_clone_retry_delay | int }}"
+
+- name: Read the checked-out SHA
+  ansible.builtin.command:
+    argv: [git, rev-parse, --verify, "review-source^{commit}"]
+    chdir: "{{ review_clone_dir_controller.path }}"
+  changed_when: false
+  register: _review_head_sha
+
+# Same shape the ansible.builtin.git module returned, which
+# verify_target_freshness.yml and resolve_target_pr.yml read.
+- name: Record the checked-out SHA
+  ansible.builtin.set_fact:
+    review_clone_result: { after: "{{ _review_head_sha.stdout | trim }}" }

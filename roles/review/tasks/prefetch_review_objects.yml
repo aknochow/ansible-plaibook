@@ -1,0 +1,77 @@
+---
+# Download, on the controller, the file contents a review reads from git
+# history, so a partial clone needs no network afterwards.
+#
+# clone_target_pr.yml makes a blobless partial clone. A sandboxed review
+# copies that clone into the sandbox, where git cannot reach the forge, so a
+# file content git has not downloaded yet cannot be read there. The review
+# reads history in two places:
+#   - briefing_snapshot.py runs `git diff <merge base> review-source`, which
+#     needs both sides of every changed file;
+#   - run_checklist.py reads CHECKLIST.md or review-checklist.md at the merge
+#     base.
+# The head tree's files are already present from the checkout. Anything
+# else, such as a checklist command that reads older history, still needs
+# network and fails inside the sandbox.
+#
+# Inputs: review_clone_dir_controller.path, _review_merge_base_result.
+
+- name: Download both sides of every changed file
+  ansible.builtin.command:
+    argv:
+      - git
+      - diff
+      - --numstat
+      - --no-ext-diff
+      - --no-textconv
+      - "{{ _review_merge_base_result.stdout | trim }}"
+      - review-source
+      - --
+    chdir: "{{ review_clone_dir_controller.path }}"
+  environment:
+    GIT_TERMINAL_PROMPT: "0"
+  changed_when: false
+  register: _review_diff_prefetch
+  async: "{{ review_clone_timeout | int }}"
+  poll: 2
+  until: >-
+    _review_diff_prefetch is succeeded or
+    (((_review_diff_prefetch.msg | default('')) ~ ' ' ~ (_review_diff_prefetch.stderr | default(''))) is not search(review_clone_transient_pattern))
+  retries: "{{ review_clone_retries | int }}"
+  delay: "{{ review_clone_retry_delay | int }}"
+
+# Trees are already local, so listing them needs no network.
+- name: Find the checklist files at the merge base
+  ansible.builtin.command:
+    argv:
+      - git
+      - ls-tree
+      - --name-only
+      - "{{ _review_merge_base_result.stdout | trim }}"
+      - --
+      - CHECKLIST.md
+      - review-checklist.md
+    chdir: "{{ review_clone_dir_controller.path }}"
+  changed_when: false
+  register: _review_base_checklists
+
+- name: Download the checklist files at the merge base
+  ansible.builtin.command:
+    argv:
+      - git
+      - cat-file
+      - -p
+      - "{{ _review_merge_base_result.stdout | trim }}:{{ item }}"
+    chdir: "{{ review_clone_dir_controller.path }}"
+  environment:
+    GIT_TERMINAL_PROMPT: "0"
+  loop: "{{ _review_base_checklists.stdout_lines }}"
+  changed_when: false
+  register: _review_checklist_prefetch
+  async: "{{ review_clone_timeout | int }}"
+  poll: 2
+  until: >-
+    _review_checklist_prefetch is succeeded or
+    (((_review_checklist_prefetch.msg | default('')) ~ ' ' ~ (_review_checklist_prefetch.stderr | default(''))) is not search(review_clone_transient_pattern))
+  retries: "{{ review_clone_retries | int }}"
+  delay: "{{ review_clone_retry_delay | int }}"

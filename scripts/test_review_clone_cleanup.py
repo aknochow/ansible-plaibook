@@ -26,7 +26,11 @@ def _guarded_block(name: str, clone_var: str) -> dict:
     tasks = list(_walk(yaml.safe_load((TASKS / name).read_text(encoding="utf-8"))))
     for task in tasks:
         body = list(_walk(task.get("block")))
-        if any("ansible.builtin.git" in item for item in body) and task.get("always"):
+        clones = any(
+            "ansible.builtin.git" in item or item.get("ansible.builtin.include_tasks") == "clone_target_pr.yml"
+            for item in body
+        )
+        if clones and task.get("always"):
             assert any(
                 item.get("ansible.builtin.include_tasks") == "run_review_engine.yml" for item in body
             ), "the review engine must run inside the guarded block"

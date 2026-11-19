@@ -173,6 +173,14 @@ table. Do not assume attaching a provider injects network rights — the
 README gotcha still holds: sandbox network policy is separate from
 provider attachment.
 
+The PR/MR checkout copied into the sandbox is a blobless partial clone.
+Before the copy, the controller downloads the head tree, both sides of
+every changed file, and the base-side `CHECKLIST.md`, so the briefing and
+checklist read them with no egress. A `CHECKLIST.md` command that reads
+other history, such as `git log -p` or `git show <older commit>:<file>`,
+needs file contents the clone does not have, and fails without egress to
+the forge.
+
 ## `plai review --ee` is a different boundary
 
 `plai review --ee` is experimental. It runs the whole review in one [execution environment](execution-environment.md#run-a-local-review-in-it) container with no OpenShell sandbox. That keeps the host out of reach, but the "controller" is now the container. Model calls and the commands that read PR content run there together, so those commands can read the provider key. Only a sandbox separates them.
