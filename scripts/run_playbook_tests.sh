@@ -45,6 +45,7 @@ PLAYBOOKS=(
   "tests/test_merge_findings_string_encoding.yml"
   "tests/test_merge_self_refuted_filter.yml"
   "tests/test_neutralization_check.yml"
+  "tests/test_partial_clone_offline.yml"
   "tests/test_persist_sandbox_artifact.yml"
   "tests/test_persisted_path_collision.yml"
   "tests/test_pipeline_stats.yml"

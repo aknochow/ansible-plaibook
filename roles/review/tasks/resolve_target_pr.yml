@@ -96,31 +96,10 @@
         # the controller has ambient git credentials or HTTPS clone access configured.
         # Mirrors review.yml's own harness-checkout pattern exactly: clone/checkout
         # wherever auth actually lives, then COPY into the sandbox for isolated
-        # execution. A single git module call here: clone, fetch the PR/MR head ref via
-        # refspec (GitHub/Gitea expose refs/pull/N/head, GitLab refs/merge-requests/N/head —
-        # all fetchable the same way, no special auth/API access beyond a plain clone), and
-        # check it out as 'review-source'. The module's own `after` return value is the
-        # full checked-out SHA, so no extra rev-parse call is needed either.
+        # execution. clone_target_pr.yml makes a blobless partial clone, checks
+        # out the PR/MR head as 'review-source', and sets review_clone_result.after.
         - name: Clone the target repo and check out the PR/MR head ref
-          ansible.builtin.git:
-            repo: "{{ review_clone_url }}"
-            dest: "{{ review_clone_dir_controller.path }}"
-            refspec: >-
-              +refs/{{ 'pull' if review_platform in ['github', 'gitea'] else 'merge-requests' }}/{{ review_number }}/head:refs/heads/review-source
-            version: review-source
-          register: review_clone_result
-          # Real network clone of a potentially large, foreign repo -- see
-          # "Post results back to the PR/MR"'s identical async/poll further
-          # down in this same file. Verified ansible.builtin.git supports
-          # async cleanly (register.after populates correctly) before applying
-          # it here.
-          async: "{{ review_clone_timeout | int }}"
-          poll: 2
-          until: >-
-            review_clone_result is succeeded or
-            (((review_clone_result.msg | default('')) ~ ' ' ~ (review_clone_result.stderr | default(''))) is not search(review_clone_transient_pattern))
-          retries: "{{ review_clone_retries | int }}"
-          delay: "{{ review_clone_retry_delay | int }}"
+          ansible.builtin.include_tasks: clone_target_pr.yml
 
         # When the forge identifies a specific target branch (e.g., a release branch or stacked PR base),
         # fetch it explicitly into refs/remotes/origin/<target_branch> so git merge-base can compute against it.
@@ -168,6 +147,12 @@
             chdir: "{{ review_clone_dir_controller.path }}"
           changed_when: false
           register: _review_merge_base_result
+
+        # The partial clone has no base-side file contents yet. Download the
+        # ones the review reads before the clone is copied into a sandbox
+        # that cannot reach the forge.
+        - name: Download the file contents the review reads from history
+          ansible.builtin.include_tasks: prefetch_review_objects.yml
 
         # One "skipping" notice for this whole group on an unsandboxed run
         # instead of three -- see copy_to_sandbox.yml's own header comment
