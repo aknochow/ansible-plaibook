@@ -79,7 +79,7 @@ SHA.
 
 | Id | Collection | SHA | Which change |
 |---|---|---|---|
-| `collection.openshell` | ansible-openshell | `9b0ae7ac6285d44c288a2ecacea3b6afa5c8b6fa` | ansible-openshell #42. Its development lock tests SDK 0.1.6. SDK range is still `openshell>=0.1.3,<0.2` from #36. |
+| `collection.openshell` | ansible-openshell | `f158adcaaa635cadfcb105714a1be24fd706442c` | ansible-openshell #46. Its development lock tests SDK 0.1.9. SDK range is still `openshell>=0.1.3,<0.2` from #36. |
 | `collection.claude` | ansible-claude | `e5522de6a00d26f74aa6204a8dc7d21dcb3cbbdb` | ansible-claude #37. Lock off published advisories. SDK pins are still `anthropic` 1.11.0 and `claude-agent-sdk` 0.2.163 from #30. |
 | `collection.gemini` | ansible-gemini | `3242c63b1ab50f62336aeb66ae7bbd57901c76cf` | ansible-gemini #29. Lock off published advisories. `google-genai` 2.27.0 is still the pin from #22. |
 | `collection.openai` | ansible-openai | `136ca89afc96ee2a1c23bc66f649373439106b20` | ansible-openai #32. Lock off published advisories. The collection locks `openai` 3.29.0 since #27. |
