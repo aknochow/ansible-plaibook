@@ -30,7 +30,7 @@ _EXACT_NAMES = frozenset(
 
 
 def is_generated_lockfile(path: str) -> bool:
-    """True when either diff path is a generated lockfile."""
+    """True when this one path is a generated lockfile."""
     name = PurePosixPath(path).name
     if name in _EXACT_NAMES:
         return True
@@ -109,21 +109,31 @@ def _strip_side(path: str, prefix: str) -> str:
     return path[len(prefix) :]
 
 
-def _quoted_paths(rest: str) -> tuple[str, str]:
-    left_token, index = _read_quoted(rest, 0)
-    if index >= len(rest) or rest[index] != " " or index + 1 >= len(rest):
-        raise ValueError("quoted diff header is missing its second path")
-    right_token, end = _read_quoted(rest, index + 1)
-    if end != len(rest):
-        raise ValueError("quoted diff header has trailing text")
-    return (
-        _strip_side(_unquote_c_style(left_token), "a/"),
-        _strip_side(_unquote_c_style(right_token), "b/"),
-    )
+def _quoted_side(rest: str, start: int, prefix: str) -> tuple[str, int]:
+    token, end = _read_quoted(rest, start)
+    return _strip_side(_unquote_c_style(token), prefix), end
+
+
+def _unquoted_paths(rest: str) -> tuple[str, str]:
+    prefix = "a/"
+    if not rest.startswith(prefix) or " b/" not in rest[len(prefix) :]:
+        raise ValueError("unquoted diff header has no a/ and b/ paths")
+    # A path with " b/" in it makes the split ambiguous. When both sides
+    # name the same path, the header is "a/P b/P" and splits in the middle.
+    middle = len(rest) // 2
+    if len(rest) % 2 and rest[middle] == " " and rest[:middle][2:] == rest[middle + 1 :][2:]:
+        if rest[middle + 1 :].startswith("b/"):
+            return rest[2:middle], rest[middle + 3 :]
+    left, right = rest[len(prefix) :].rsplit(" b/", 1)
+    return left, right
 
 
 def _paths(header: str) -> tuple[str, str]:
     """Return repo paths from a diff --git header.
+
+    git quotes each path on its own, so a rename can have one quoted path
+    and one bare one: ``a/plain.py "b/caf\\303\\251.py"``. A bare path never
+    holds a double quote, because git always quotes that character.
 
     Raises ValueError when the line is a diff header this parser cannot read.
     Returns empty strings for a line that is not a diff header.
@@ -134,12 +144,29 @@ def _paths(header: str) -> tuple[str, str]:
         return "", ""
     rest = header[len(marker) :]
     if rest.startswith('"'):
-        return _quoted_paths(rest)
-    prefix = "a/"
-    if not rest.startswith(prefix) or " b/" not in rest[len(prefix) :]:
-        raise ValueError("unquoted diff header has no a/ and b/ paths")
-    left, right = rest[len(prefix) :].rsplit(" b/", 1)
-    return left, right
+        left, index = _quoted_side(rest, 0, "a/")
+        if index >= len(rest) or rest[index] != " " or index + 1 >= len(rest):
+            raise ValueError("quoted diff header is missing its second path")
+        index += 1
+        if rest[index] == '"':
+            right, end = _quoted_side(rest, index, "b/")
+            if end != len(rest):
+                raise ValueError("quoted diff header has trailing text")
+            return left, right
+        bare = rest[index:]
+        if '"' in bare:
+            raise ValueError("bare diff path holds a double quote")
+        return left, _strip_side(bare, "b/")
+    if '"' in rest:
+        quote = rest.index('"')
+        bare = rest[:quote]
+        if not bare.endswith(" ") or '"' in bare:
+            raise ValueError("diff header has a stray double quote")
+        right, end = _quoted_side(rest, quote, "b/")
+        if end != len(rest):
+            raise ValueError("quoted diff header has trailing text")
+        return _strip_side(bare[:-1], "a/"), right
+    return _unquoted_paths(rest)
 
 
 def _line_counts(body: str) -> tuple[int, int]:
@@ -209,7 +236,9 @@ def omit_generated_diff_files(diff_content: str) -> dict:
             unparsed_headers.append(header)
             pieces.append(section)
             continue
-        if not (is_generated_lockfile(left) or is_generated_lockfile(right)):
+        # Both sides must be lockfiles. A rename from uv.lock to a source
+        # file carries that file's new content, and it must reach the lens.
+        if not (is_generated_lockfile(left) and is_generated_lockfile(right)):
             pieces.append(section)
             continue
         additions, deletions = _line_counts(body)

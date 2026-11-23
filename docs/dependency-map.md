@@ -79,7 +79,7 @@ SHA.
 
 | Id | Collection | SHA | Which change |
 |---|---|---|---|
-| `collection.openshell` | ansible-openshell | `9b0ae7ac6285d44c288a2ecacea3b6afa5c8b6fa` | ansible-openshell #42. Its development lock tests SDK 0.1.6. SDK range is still `openshell>=0.1.3,<0.2` from #36. |
+| `collection.openshell` | ansible-openshell | `f158adcaaa635cadfcb105714a1be24fd706442c` | ansible-openshell #46. Its development lock tests SDK 0.1.9. SDK range is still `openshell>=0.1.3,<0.2` from #36. |
 | `collection.claude` | ansible-claude | `e5522de6a00d26f74aa6204a8dc7d21dcb3cbbdb` | ansible-claude #37. Lock off published advisories. SDK pins are still `anthropic` 1.11.0 and `claude-agent-sdk` 0.2.163 from #30. |
 | `collection.gemini` | ansible-gemini | `3242c63b1ab50f62336aeb66ae7bbd57901c76cf` | ansible-gemini #29. Lock off published advisories. `google-genai` 2.27.0 is still the pin from #22. |
 | `collection.openai` | ansible-openai | `136ca89afc96ee2a1c23bc66f649373439106b20` | ansible-openai #32. Lock off published advisories. The collection locks `openai` 3.29.0 since #27. |
@@ -102,7 +102,7 @@ head start.
 | `sdk.claude-agent` | claude-agent-sdk | `claude-agent-sdk>=0.2.144` | same floor, via the collection | `claude-agent-sdk==0.2.163` | `plaibook/hashed/claude-requirements.txt` |
 | `sdk.gemini` | google-genai | `google-genai>=1.0.0` | same floor, via the collection | `google-genai==2.27.0` | `plaibook/hashed/gemini-requirements.txt` |
 | `sdk.openai` | openai | `openai>=1.58.0` | same floor, via the collection | `openai==3.29.0` | `plaibook/hashed/openai-requirements.txt` |
-| `sdk.openshell` | openshell | `openshell>=0.1.3,<0.2` | `openshell>=0.1.3,<0.2` in `pyproject.toml` and `plaibook/openshell_sdk.py` | `openshell==0.1.8` | `plaibook/hashed/openshell-requirements.txt` |
+| `sdk.openshell` | openshell | `openshell>=0.1.3,<0.2` | `openshell>=0.1.3,<0.2` in `pyproject.toml` and `plaibook/openshell_sdk.py` | `openshell==0.1.9` | `plaibook/hashed/openshell-requirements.txt` |
 
 Direct inputs for the hashed files are `plaibook/hashed/*.in`.
 `scripts/compile-hashed-sdks.sh` writes the `*-requirements.txt`
@@ -113,8 +113,8 @@ the plaibook package itself.
 
 | Id | What it is | Current pin | Where |
 |---|---|---|---|
-| `sdk.openshell` | Python package imported by the collection and by plaibook | `openshell==0.1.8`, range `openshell>=0.1.3,<0.2` | Hashed file, `plaibook/openshell_sdk.py`, and the collection at `collection.openshell`. |
-| `openshell.gateway` | CLI and local gateway the review workflow starts | `OPENSHELL_VERSION=v0.1.8`. Installer source commit `f3d976590d3eb1379690a2abaf0f0e26c21d487d`. sha256 `6f64d77d289f7859868119bcb7d0617804b8687dd43010b0a3cadf95e2f44cd4` | `.github/openshell-pins.env` |
+| `sdk.openshell` | Python package imported by the collection and by plaibook | `openshell==0.1.9`, range `openshell>=0.1.3,<0.2` | Hashed file, `plaibook/openshell_sdk.py`, and the collection at `collection.openshell`. |
+| `openshell.gateway` | CLI and local gateway the review workflow starts | `OPENSHELL_VERSION=v0.1.9`. Installer source commit `ce58cf8e9b953281352d98a637e41616295b1318`. sha256 `6f64d77d289f7859868119bcb7d0617804b8687dd43010b0a3cadf95e2f44cd4` | `.github/openshell-pins.env` |
 | `openshell.sandbox-image` | Guest image the review runs inside | `ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e` | `.github/openshell-pins.env` |
 
 `bump-openshell-pins.yml` opens a pull request when OpenShell publishes a release, the SDK moves, or the image moves. The OpenShell smoke check starts that gateway and a sandbox, with no secrets. After a merge, `scripts/move_review_pin.py` moves `review.checkout` and then `review.caller`, in two pull requests. That step stays manual, because a bot that edits those pins would need permission to edit workflow files.
@@ -123,7 +123,7 @@ The gateway and the Python SDK share a major version (`0.1`). They do
 not share a patch number. Bumping the SDK does not by itself
 move the installer or the image digest.
 
-The image lock pins `openshell==0.1.8`. That matches the plaibook
+The image lock pins `openshell==0.1.9`. That matches the plaibook
 hashed install and the collection range at `collection.openshell`.
 
 ## Execution environment pins
@@ -136,12 +136,12 @@ difference as a bump to decide, not as the same pin.
 
 | Package | Image pin | Runtime hashed install |
 |---|---|---|
-| anthropic | `anthropic[vertex]==2.6.0` | `anthropic==1.11.0` |
-| claude-agent-sdk | `claude-agent-sdk==0.2.179` | `claude-agent-sdk==0.2.163` |
-| google-genai | `google-genai==3.0.0` | `google-genai==2.27.0` |
-| openai | `openai==3.46.0` | `openai==3.29.0` |
+| anthropic | `anthropic[vertex]==2.11.0` | `anthropic==1.11.0` |
+| claude-agent-sdk | `claude-agent-sdk==0.2.186` | `claude-agent-sdk==0.2.163` |
+| google-genai | `google-genai==3.6.1` | `google-genai==2.27.0` |
+| openai | `openai==3.57.0` | `openai==3.29.0` |
 | xai-sdk | `xai-sdk==1.21.0` | `xai-sdk==1.21.0` |
-| openshell | `openshell==0.1.8` | `openshell==0.1.8` |
+| openshell | `openshell==0.1.9` | `openshell==0.1.9` |
 
 `plai review --ee` adds no pin. Its default image is
 `ghcr.io/aknochow/plaibook-ee:<plaibook version>`, computed from
