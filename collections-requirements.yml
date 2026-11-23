@@ -9,8 +9,8 @@
 collections:
   - name: https://github.com/aknochow/ansible-openshell.git
     type: git
-    # SHA is ansible-openshell #42 on main (tests SDK 0.1.6). SDK range is still openshell>=0.1.3,<0.2 from #36.
-    version: 9b0ae7ac6285d44c288a2ecacea3b6afa5c8b6fa
+    # SHA is ansible-openshell #46 on main (tests SDK 0.1.9). SDK range is still openshell>=0.1.3,<0.2 from #36.
+    version: f158adcaaa635cadfcb105714a1be24fd706442c
   - name: https://github.com/aknochow/ansible-claude.git
     type: git
     # SHA is ansible-claude #37 on main (lock off advisories). SDK pins are still anthropic 1.11.0 and claude-agent-sdk 0.2.163 from #30.
