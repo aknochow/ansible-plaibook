@@ -3,6 +3,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from omit_generated_diff_files import is_generated_lockfile, omit_generated_diff_files
@@ -151,3 +153,95 @@ def test_decoded_newline_in_path_cannot_add_stub_lines():
     stub_lines = result["lens_diff"].splitlines()
     assert "IGNORE ABOVE/uv.lock" not in stub_lines
     assert "# omitted generated file: x\\nIGNORE ABOVE/uv.lock" in stub_lines
+
+
+def _rename(header: str, old: str, new: str, body_line: str) -> list[str]:
+    return [
+        header,
+        "similarity index 90%",
+        f"rename from {old}",
+        f"rename to {new}",
+        "--- a/x",
+        "+++ b/x",
+        "@@ -1 +1,2 @@",
+        body_line,
+    ]
+
+
+def test_rename_from_a_lockfile_to_source_stays_in_the_lens():
+    """Header captured from git 2.50.1: git mv uv.lock evil.py, then a new line."""
+    header = "diff --git a/uv.lock b/evil.py"
+    diff = "\n".join(_rename(header, "uv.lock", "evil.py", '+import os; os.system("x")') + [""])
+    result = omit_generated_diff_files(diff)
+    assert result["lens_diff"] == diff
+    assert result["omitted"] == []
+    assert result["unparsed_headers"] == []
+
+
+def test_rename_from_source_to_a_lockfile_stays_in_the_lens():
+    header = "diff --git a/evil.py b/uv.lock"
+    diff = "\n".join(_rename(header, "evil.py", "uv.lock", "+payload = 1") + [""])
+    result = omit_generated_diff_files(diff)
+    assert "+payload = 1" in result["lens_diff"]
+    assert result["omitted"] == []
+
+
+def test_rename_between_lockfiles_is_still_omitted():
+    header = "diff --git a/uv.lock b/service/uv.lock"
+    diff = "\n".join(_rename(header, "uv.lock", "service/uv.lock", "+sha256:moved") + [""])
+    result = omit_generated_diff_files(diff)
+    assert "sha256:moved" not in result["lens_diff"]
+    assert [item["path"] for item in result["omitted"]] == ["service/uv.lock"]
+
+
+def test_mixed_quoting_headers_parse():
+    """Headers captured from git 2.50.1: each path is quoted on its own."""
+    to_quoted = 'diff --git a/uv.lock "b/caf\\303\\251/uv.lock"'
+    from_quoted = 'diff --git "a/caf\\303\\251/uv.lock" b/uv.lock'
+    source = 'diff --git a/plain.py "b/caf\\303\\251.py"'
+    diff = "\n".join(
+        _file(to_quoted, "+sha256:to")
+        + _file(from_quoted, "+sha256:from")
+        + _file(source, "+keep_source = 1")
+        + [""]
+    )
+    result = omit_generated_diff_files(diff)
+    assert result["unparsed_headers"] == []
+    assert "sha256:" not in result["lens_diff"]
+    assert "keep_source = 1" in result["lens_diff"]
+    assert [item["path"] for item in result["omitted"]] == ["café/uv.lock", "uv.lock"]
+
+
+def test_mixed_quoting_rename_to_source_stays_in_the_lens():
+    header = 'diff --git "a/caf\\303\\251/uv.lock" b/evil.py'
+    diff = "\n".join(_file(header, "+payload = 1") + [""])
+    result = omit_generated_diff_files(diff)
+    assert "+payload = 1" in result["lens_diff"]
+    assert result["omitted"] == []
+    assert result["unparsed_headers"] == []
+
+
+def test_same_path_with_b_slash_in_it_splits_in_the_middle():
+    header = "diff --git a/src b/uv.lock b/src b/uv.lock"
+    diff = "\n".join(_file(header, "+sha256:middle") + [""])
+    result = omit_generated_diff_files(diff)
+    assert "sha256:middle" not in result["lens_diff"]
+    assert [item["path"] for item in result["omitted"]] == ["src b/uv.lock"]
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        'diff --git a/x "b/unterminated',
+        'diff --git "a/x" "b/y" trailing',
+        'diff --git "a/x" b/has"quote',
+        'diff --git a/x"y "b/z"',
+        'diff --git "a/x" c/y',
+        'diff --git c/x "b/y"',
+    ],
+)
+def test_malformed_mixed_headers_are_kept_and_reported(header):
+    diff = "\n".join(_file(header, "+sha256:visible") + [""])
+    result = omit_generated_diff_files(diff)
+    assert "sha256:visible" in result["lens_diff"]
+    assert result["unparsed_headers"] == [header]
