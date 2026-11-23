@@ -9,7 +9,7 @@
 collections:
   - name: https://github.com/aknochow/ansible-openshell.git
     type: git
-    # SHA is ansible-openshell #42 on main (tests SDK 0.1.6). SDK range is still openshell>=0.1.3,<0.2 from #36.
+    # SHA is ansible-openshell #46 on main (tests SDK 0.1.9). SDK range is still openshell>=0.1.3,<0.2 from #36.
     version: f158adcaaa635cadfcb105714a1be24fd706442c
   - name: https://github.com/aknochow/ansible-claude.git
     type: git
