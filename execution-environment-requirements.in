@@ -7,8 +7,8 @@
 # ranges in each collection requirements.txt.
 ansible-core==2.19.14
 ansible-runner==2.4.3
-anthropic[vertex]==2.11.0
-claude-agent-sdk==0.2.186
+anthropic[vertex]==2.12.0
+claude-agent-sdk==0.2.187
 google-genai==3.6.1
 openai==3.57.0
 xai-sdk==1.21.0
@@ -22,7 +22,7 @@ msgpack==1.2.4
 setuptools==84.2.1
 urllib3==2.8.0
 # GHSA-6q48-6c7w-9gw2. 2026.10.18 is the first fixed release.
-certifi==2026.10.23
+certifi==2026.11.20
 # CVE-2026-119194, CVE-2026-119195, CVE-2026-119196, CVE-2026-119197. 0.6.5 is the first fixed release.
 pyasn1==0.6.5
 # ensurepip's pip vendors certifi 2026.6.17. 26.3 vendors certifi
