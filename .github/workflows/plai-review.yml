@@ -82,7 +82,7 @@ jobs:
       contents: read
       pull-requests: read
       checks: read
-    uses: aknochow/ansible-plaibook/.github/workflows/plai-review-run.yml@55a7293a7ae965a56324751ef25ca774dc5af5bf
+    uses: aknochow/ansible-plaibook/.github/workflows/plai-review-run.yml@434fa8816c4ec0e3cc2ed74443424225ca03bd4f
     # Every trigger but workflow_dispatch keeps the sandbox, in the called
     # workflow, whatever this resolves to.
     with:
